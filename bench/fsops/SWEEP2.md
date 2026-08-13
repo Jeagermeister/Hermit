@@ -111,10 +111,22 @@ Two instances, two families:
 - `qwen3.5:4b` wrote `5|2026-08-12 shipped` into `tally.txt` — a line-number-style prefix.
 - `llama3.2:3b` wrote `<br>HERMES-OK` into `hello.txt` — an HTML line break.
 
-Confirmed **not** to be Hermes rendering: the wire transcript shows tool results arriving as
-raw JSON with no prefixes anywhere. This is model-intrinsic content contamination, so it must
-be designed *around*: the write path needs read-back verification, and content that must match
-exactly cannot be trusted to a single unverified write.
+> **Retracted 2026-08-13.** This section previously read: *"Confirmed not to be Hermes
+> rendering: the wire transcript shows tool results arriving as raw JSON with no prefixes
+> anywhere. This is model-intrinsic content contamination."* Both halves were wrong.
+>
+> There was no wire transcript to confirm it against — see Limitations below, which says
+> transcripts were off for **both** sweeps. And Hermes' `read_file` does prefix: of 240 calls
+> recorded in `local-agent-benchmarks/hermes-diagnostic/`, 226 return content decorated with
+> `N|` line numbers plus a phantom trailing marker. The `5|` above is that decoration, echoed
+> back by the model.
+>
+> See [REQUIREMENTS.md](../../REQUIREMENTS.md) R5 for the corrected version.
+
+So the `5|` case is **at least partly a tool-design artifact**, not proof of model-intrinsic
+contamination. The `<br>` case is not explained by rendering and may well be intrinsic. Either
+way the design consequence is unchanged: the write path needs read-back verification, and
+content that must match exactly cannot be trusted to a single unverified write.
 
 ## What this means for Hermes-Cpp
 

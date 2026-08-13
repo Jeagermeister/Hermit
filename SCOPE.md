@@ -18,8 +18,8 @@ code we would actually reimplement.
 
 | | files | LOC | share of upstream |
 |---|---|---|---|
-| upstream, non-test | ~2,900 | ~870,000 | 100% |
-| `agent/` + `tools/` + `providers/` | 324 | 266,000 | 31% |
+| upstream, non-test | 1,135 | ~867,000 | 100% |
+| `agent/` + `tools/` + `providers/` | 326 | 266,000 | 31% |
 | **modules actually in scope** | **12** | **~38,000** | **4%** |
 
 ## Keep — `tools/` (4 of 136 files, ~12.7k lines)
@@ -105,7 +105,7 @@ Discarded for the same reason:
 | `anthropic_adapter` / `bedrock_adapter` / `codex_*` | 7,997 | cloud provider adapters |
 | `credential_pool.py` | 3,178 | key rotation — meaningless against local Ollama |
 | `iron_proxy.py` | 2,494 | egress firewall for cloud credentials |
-| `computer_use/` | 3,295 | screen control |
+| `computer_use/` | 7,146 | screen control |
 | `moa_loop.py` | 2,384 | mixture of agents |
 | `display.py` | 1,580 | TUI rendering — this runs headless |
 
@@ -114,7 +114,7 @@ human answering prompts, and the supervisor runs unattended — but R4 (backup b
 still needs *something* deciding what a turn is allowed to do. That is a small policy engine
 written fresh, not 4.6k lines adapted.
 
-## Build new — no upstream equivalent exists
+## Build new — no upstream equivalent these runs revealed
 
 This is the actual product, and none of it is a port:
 
@@ -126,8 +126,9 @@ This is the actual product, and none of it is a port:
 | **R6** | poll filesystem state; never trust a completion claim |
 | **R7** | re-invoke with one concrete remaining failure |
 
-Hermes Agent does not do any of these. That is precisely why `bench/fsops` could observe the
-failures it did — a model replying `DONE` on an untouched tree, an `05_copy` that destroyed the
+Hermes Agent did not do any of these in any observed run — inferred from behaviour, not from
+auditing upstream's code, every module of which `parity.tsv` still lists as `NOT_STARTED`. That
+is precisely why `bench/fsops` could observe the failures it did — a model replying `DONE` on an untouched tree, an `05_copy` that destroyed the
 original while "the file still exists" passed, a run that finished its work and then hung.
 
 **The rewrite is a thin, correct agent loop plus a supervisor upstream never had.** The porting
@@ -142,5 +143,6 @@ exists to provide.
 
 Rows are now **module-granular for in-scope code**, and whole-subsystem for what is ignored.
 Anything under `agent/` or `tools/` not listed as a row is implicitly out of scope. This is the
-same argument the README already makes for tag-granularity over commit-granularity: pick the
+same argument [UPSTREAM-PARITY.md](./UPSTREAM-PARITY.md) makes for tag-granularity over
+commit-granularity: pick the
 unit that keeps the report answerable.

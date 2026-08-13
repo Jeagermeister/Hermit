@@ -4,7 +4,9 @@ The hard-to-reverse choices [ROADMAP.md](./ROADMAP.md) asked to have argued out 
 exists. Each records what would overturn it, so a later disagreement can be settled on evidence
 rather than re-litigated from scratch.
 
-Settled 2026-08-13, at the point the first code was written.
+Settled 2026-08-13, at the point the first code was written — except **D6**, which was decided
+during implementation and revised once when review caught the resolution order. It is recorded
+here anyway: it is hard to reverse, which is the bar for this document.
 
 ---
 
@@ -51,6 +53,10 @@ afford them. Pinning also means a fresh clone builds with no `pacman` step.
 **Cost, accepted.** A network fetch on first configure per build directory, and the pins need
 occasional manual bumping.
 
+**What would overturn it.** Building somewhere without network access at configure time, or the
+dependency set growing large enough that per-build-directory fetches dominate the build. Either
+would push toward vendored sources or system packages with a version check.
+
 ## D4 — Tool interface: virtual dispatch, declarative arguments
 
 A plain virtual base class for dispatch; an `Args` struct with field descriptors underneath it
@@ -86,6 +92,11 @@ class of them impossible.
 **Stated honestly:** this fixes malformed calls, not wrong ones. A well-formed call to delete the
 wrong file is unaffected. That is what the supervisor is for, and constrained decoding should not
 be sold as doing more than it does.
+
+**What would overturn it.** Evidence that constraining `format` measurably degrades tool-call
+*quality* on the models actually used — a real risk, since constrained decoding narrows the
+distribution the model samples from. Worth measuring on the fsops harness rather than assuming
+either way.
 
 ## D6 — The sandbox is a capability type, and resolution is POSIX-order
 

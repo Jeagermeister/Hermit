@@ -33,7 +33,8 @@ Pinned and unpinned runs answer different questions and belong in different tabl
 
 ## Two things to fix or confirm first
 
-**1. Confirm the working-directory escape.** See `results/evidence/escaped-to-repo-root/`.
+**1. ~~Confirm the working-directory escape.~~ Confirmed 2026-08-13 — it was the file tools,
+not the shell.** Kept below for method. See `results/evidence/escaped-to-repo-root/`.
 Agents wrote correct output into the repo root instead of `--in`, and it was scored as failure.
 Run one shell task with `--transcripts` and read the `workdir` argument the model sends:
 
@@ -57,5 +58,9 @@ so `ollama pull gemma4:e4b-it-qat` should be near-instant.
 
 - Re-run `hermes3-8b` vs `llama31-8b`. 3/36 vs 10/36 at matched size and quant is suggestive but
   inside the noise floor, and it is the one result that most deserves to be right.
-- Phase 0 (`bench/run_hermes_diagnostic.py`) has still never been run. It is the *only* thing
-  that answers "is Hermes better or worse than OpenCode" — this suite does not.
+- Phase 0 ran on 2026-08-13, but through `local-agent-benchmarks/hermes-diagnostic/`, not
+  `bench/run_hermes_diagnostic.py` (which remains unrun and superseded). It produced a
+  Hermes-only leaderboard rather than the harness comparison: there is no model overlap between
+  the two harnesses, and the 64,000-context floor may make the matched run impossible as
+  specified. So "is Hermes better or worse than OpenCode" is **still unanswered**, and this
+  suite still does not answer it. See [../../ROADMAP.md](../../ROADMAP.md).

@@ -4,8 +4,10 @@ This project is **not a port** of [NousResearch Hermes Agent](https://github.com
 It is an independent C/C++ agent supervisor that borrows selectively from upstream's behaviour.
 There is no shared git history and nothing is ever merged in.
 
-Most of upstream is deliberately `OUT_OF_SCOPE` — see [ROADMAP.md](./ROADMAP.md). For the three
-subsystems that *are* in scope, upstream remains a useful reference, and one question needs
+Most of upstream is deliberately `OUT_OF_SCOPE` — see [SCOPE.md](./SCOPE.md). The ledger is
+**module-granular** for in-scope code and whole-subsystem for what is ignored, so the table
+below shows subsystem totals for context, not the unit the ledger tracks. For the twelve
+modules that *are* in scope, upstream remains a useful reference, and one question needs
 answering periodically:
 
 > **Has upstream changed something in an area I borrowed from, in a way I should know about?**
@@ -17,10 +19,10 @@ answering periodically:
 Each in-scope subsystem records the upstream **release tag** its behaviour was implemented
 against — not a commit SHA.
 
-This is deliberate. Upstream lands roughly **1,100 commits a month** but cuts only about **two
-releases**. Tracking commits would mean triaging ~1,100 diffs a month, which nobody sustains;
-the ledger would rot within weeks and then lie to you. Tags are the natural review unit, and
-they reduce the job to ~2 review events a month.
+This is deliberate. Measured 2026-08-13: upstream landed **5,715 non-merge commits in 30 days**
+and cut **4 tags** in the same window. Tracking commits would mean triaging ~5,700 diffs a
+month, which nobody sustains; the ledger would rot within weeks and then lie to you. Tags are
+the natural review unit, and they reduce the job to ~4 review events a month.
 
 Commit-level detail stays one command away (`tools/parity <subsystem>`). The ledger stays
 coarse; the drill-down stays sharp.
@@ -40,9 +42,10 @@ coarse; the drill-down stays sharp.
 | `cron/` | 11,695 | **out** | |
 | `acp_adapter/` | 5,809 | **out** | IDE integration. |
 
-Upstream is **~870,000 lines of non-test Python**. In-scope is roughly a third of that by line
-count — and far less in practice, since the goal is borrowing behaviour, not reproducing
-implementation.
+Upstream is **~867,000 lines of non-test Python** across 1,135 files. The three subsystems in
+the table are ~31% of that; the twelve modules actually in scope are **~38k lines, about 4%** —
+see [SCOPE.md](./SCOPE.md), which does the module-by-module accounting. Less still in practice,
+since the goal is borrowing behaviour, not reproducing implementation.
 
 `OUT_OF_SCOPE` exists so drift in those areas is **ignored on purpose** rather than quietly
 accumulating as unread debt.
@@ -50,14 +53,14 @@ accumulating as unread debt.
 ## Usage
 
 ```bash
-tools/parity              # scope + what has drifted
-tools/parity agent        # commits touching agent/ since it was recorded
+tools/parity                     # scope + what has drifted
+tools/parity conversation_loop   # commits touching one module since it was recorded
 ```
 
 After implementing behaviour up to some tag, record it:
 
 ```
-agent	agent/	v2026.8.3	PORTED
+conversation_loop	agent/conversation_loop.py	v2026.8.13	PORTED
 ```
 
 `STALE` is computed, never written by hand — the script derives it by comparing your recorded

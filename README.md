@@ -9,10 +9,12 @@
 | [ROADMAP.md](./ROADMAP.md) | sequencing, and what must be settled before code |
 | [DECISIONS.md](./DECISIONS.md) | the hard-to-reverse choices, and what would overturn each |
 | [parity.tsv](./parity.tsv) | machine-readable scope ledger; `tools/parity` reports drift |
-| [bench/fsops/](./bench/fsops/) | the evidence: 264 runs of local models doing filesystem work |
+| [bench/fsops/](./bench/fsops/) | the evidence: 259 runs of local models doing filesystem work |
 
 **Scope in one line:** upstream is ~870k lines of non-test Python; ~38k of it is in scope, and
-the part that matters most — verification, backup, retry — has no upstream equivalent at all.
+the part that matters most — verification, backup, retry — has no upstream equivalent that these
+runs revealed. That last claim is inferred from behaviour, not from reading upstream's code; see
+[REQUIREMENTS.md](./REQUIREMENTS.md).
 
 
 A fast, local-first agent runner in **C/C++**, built around **Ollama**.
@@ -50,10 +52,13 @@ structural:
 | **Verification** | Checking what the model actually did — walking trees, hashing, diffing — happens every turn. That is real work, and native code is good at it. |
 | **Distribution** | One binary, versus a Python environment plus Node plus system dependencies. |
 
-The evidence lives in its own repo: **[`local-agent-benchmarks`](https://gitea-ec2.tail328f9a.ts.net/Jeagermeister/local-agent-benchmarks)**
-— five harnesses, across two machines and two agent harnesses: the 264 `fsops` runs on the MSI
-laptop (RTX 5080 16 GB) through Hermes Agent, and the earlier tournaments plus the 144 Phase 0
-diagnostic runs on `kitchen-desktop` (W7900) through OpenCode and Hermes respectively.
+The evidence sits in two places, across two machines and two agent harnesses:
+
+- **[`bench/fsops/`](./bench/fsops/) in this repo** — 259 runs on the MSI laptop
+  (RTX 5080 16 GB) through Hermes Agent. This is what REQUIREMENTS.md is built on.
+- **[`local-agent-benchmarks`](https://gitea-ec2.tail328f9a.ts.net/Jeagermeister/local-agent-benchmarks)**
+  — five harnesses on `kitchen-desktop` (W7900): the earlier tournaments through OpenCode, and
+  the 144 Phase 0 diagnostic runs through Hermes.
 
 ## Layout
 
@@ -70,7 +75,7 @@ diagnostic runs on `kitchen-desktop` (W7900) through OpenCode and Hermes respect
 
 ## Building
 
-Requires a C++23 compiler, CMake 3.24+, and network access on first configure (dependencies are
+Requires a C++23 compiler, CMake 3.25+, and network access on first configure (dependencies are
 fetched at pinned versions rather than taken from the system — see [D3](./DECISIONS.md)). Verified
 on GCC 16.2.1 and clang 22.1.8.
 
@@ -91,7 +96,7 @@ cmake --build build-asan && ./build-asan/tests/hermes_tests
 different working directory — which is the R1 failure made visible:
 
 ```bash
-cd /tmp && ./build/hermes-cpp ~/some/root note.txt ../../etc/passwd
+cd /tmp && "$OLDPWD/build/hermes-cpp" ~/some/root note.txt ../../etc/passwd
 ```
 
 ## Working with upstream
@@ -101,8 +106,8 @@ not part of this repo and is disposable — it re-clones from GitHub in ~11 s.
 
 ```bash
 hermes-upstream-sync      # refresh the reference, print what changed
-tools/parity              # what has drifted in the subsystems we care about
-tools/parity agent        # the specific commits behind agent/
+tools/parity              # what has drifted in the modules we care about
+tools/parity conversation_loop   # the specific commits behind one module
 ```
 
 Set `$HERMES_REF_REPO` if the reference lives elsewhere.

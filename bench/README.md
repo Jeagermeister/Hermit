@@ -1,12 +1,25 @@
 # Phase 0 — Hermes vs OpenCode diagnostic
 
+> ## ⚠ Superseded — this harness has never been run
+>
+> Phase 0 was executed in **2026-08-12/13** by
+> `~/Source/local-agent-benchmarks/hermes-diagnostic/`, which is the harness of record and far
+> more rigorous than this one (preflight/postflight, three-way classification, controller
+> locking, protected-baseline hashing). See [../ROADMAP.md](../ROADMAP.md) for what it found.
+>
+> **The matched comparison this file describes cannot run as written.** Hermes refuses models
+> under 64,000 context (`MINIMUM_CONTEXT_LENGTH`), and the tournament tags below are pinned at
+> `num_ctx 32768`. Rebuilding them at 64K makes them no longer the configuration OpenCode
+> measured. Read the rest of this file as a design record, not as instructions.
+
 Runs the **six local-agent diagnostic stages under Hermes Agent**, so they can be compared
 against the same stages run under OpenCode in `~/Source/local-agent-benchmarks/integration-diagnostic`.
 
 ## The question this answers
 
-Some findings from the OpenCode run are almost certainly **tool-design artifacts, not model
-behaviour**:
+Some findings from the OpenCode run were suspected to be **tool-design artifacts, not model
+behaviour**. Both remain **untested** — E4B was never run under Hermes — though Phase 0 did
+show Hermes' own `read_file` decorating content, which is the same hazard by another route:
 
 - *"E4B treats rendered end-of-file annotations as literal content during exact edits"* — that
   is OpenCode's file rendering, not Gemma.
@@ -45,8 +58,8 @@ controlled comparison into two unrelated experiments.
 
 ## Prerequisites
 
-- **Hermes Agent installed on the machine running this** (`~/.local/bin/hermes`). It is currently
-  only on the MSI laptop.
+- **Hermes Agent installed on the machine running this** (`~/.local/bin/hermes`). Installed on
+  both the MSI laptop and `kitchen-desktop` (v0.20.0) as of 2026-08-13.
 - **The `num_ctx`-pinned Ollama variants** the OpenCode run used, built from
   `tournament/models/*.Modelfile`:
   ```bash
@@ -55,7 +68,8 @@ controlled comparison into two unrelated experiments.
   ollama create tournament-gemma-e4b:32k -f ~/Source/local-agent-benchmarks/tournament/models/gemma-e4b-32k.Modelfile
   ```
   The script preflights these and refuses to start if any are missing — a 54-run job should not
-  fail on run 1.
+  fail on run 1. **Note:** these 32k tags are below Hermes' own 64,000 floor, so Hermes will
+  refuse them even when the preflight passes. See the banner at the top.
 
 ## A trap this harness handles
 

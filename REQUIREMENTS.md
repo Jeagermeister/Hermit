@@ -4,7 +4,7 @@ Every requirement here traces to a failure observed on this hardware, in
 [`bench/fsops`](./bench/fsops/). None of them are preferences, and none are inherited from
 upstream's design. Where a requirement came from a single run, it says so.
 
-Evidence base: **264 runs** across two sweeps plus targeted probes, 2026-08-12/13,
+Evidence base: **259 runs** — 252 across two sweeps, plus 7 targeted probes, 2026-08-12/13,
 `cachyos-x8664`, RTX 5080 Laptop 16 GB, Hermes Agent v0.20.0, Ollama 0.32.9.
 
 ---
@@ -58,8 +58,8 @@ Worse than deletion, because a missing file is obvious and a corrupted config is
 **Requirement.** Every mutation is preceded by a recoverable snapshot of what it overwrites.
 Undo is a first-class operation, not a debugging aid.
 
-> Sweep 1 recorded zero collateral damage and I concluded these models "fail by inaction, not
-> destruction." That was true of sweep 1's model set and **did not generalise** — the wider
+> Sweep 1 recorded zero collateral damage and I concluded these models "fail by *inaction and
+> partial work*, not by destruction." That was true of sweep 1's model set and **did not generalise** — the wider
 > field in sweep 2 produced destruction on the second try. Guardrails are not optional.
 
 ## R5 — Read back after every write.
@@ -144,7 +144,7 @@ run; that is why the failures above were observable at all. The valuable part of
 therefore not ported code, it is new code.
 
 *Stated precisely, because it is a negative claim about code that has not been read:* this is
-inferred from behaviour across 408 runs, not from auditing upstream's 38k in-scope lines — every
+inferred from behaviour across 403 runs, not from auditing upstream's 38k in-scope lines — every
 module in `parity.tsv` is still `NOT_STARTED`. Treat it as well-evidenced, not as verified. If a
 module read later turns up an equivalent, it is a finding, not a contradiction.
 
