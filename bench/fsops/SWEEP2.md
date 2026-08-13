@@ -1,5 +1,16 @@
 # fsops results, sweep 2 — 2026-08-12
 
+> ### ⚠ These scores are lower bounds
+>
+> Agents were later found writing correct output into the **Hermes-Cpp repo root**
+> instead of `--in` — see [`results/evidence/escaped-to-repo-root/`](./results/evidence/escaped-to-repo-root/).
+> `llama32-3b` scored 0/3 on `01_create_file` while having produced the exactly-correct
+> file, in the wrong place. The penalty is uneven: models emitting absolute paths were
+> unaffected, so part of what these tables rank as filesystem ability is really
+> *does this model emit absolute paths*. Working trees now run outside the repo.
+> Re-run before treating any per-task number as settled.
+
+
 `cachyos-x8664` · RTX 5080 Laptop 16 GB · `num_ctx` 65536 · 3 repeats · model-default
 sampling · transcripts off · **144 runs**
 

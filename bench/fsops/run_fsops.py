@@ -44,7 +44,12 @@ import proxy  # noqa: E402
 from tasks import TASKS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
-RUNS, LOGS, RESULTS = ROOT / "runs", ROOT / "logs", ROOT / "results"
+# Working trees live OUTSIDE the repository. On 2026-08-12 agents wrote task output into
+# the Hermes-Cpp repo root instead of --in - correct work, wrong directory - which scored as
+# model failure and polluted tracked source. Keeping run trees out of any git repo means a
+# git-root fallback cannot land on real code.
+RUNS = Path(os.environ.get("FSOPS_RUNS", Path.home() / ".cache" / "hermes-fsops" / "runs"))
+LOGS, RESULTS = ROOT / "logs", ROOT / "results"
 TRANSCRIPTS = ROOT / "transcripts"
 
 # Set once in main(). Hermes is pointed at the recording proxy instead of Ollama
@@ -112,7 +117,9 @@ FAILURE_SIGNATURES = ("API call failed", "HTTP 404", "HTTP 500", "HTTP 502",
 # count.sh into the Hermes-Cpp REPO ROOT - four levels up - and the run scored clean.
 # Hermes' terminal tool appears to fall back to a project/git root when the model leaves
 # `workdir` empty, so relative-path shell commands land outside --in entirely.
-WATCH_DIRS = [RUNS, ROOT, ROOT.parent, ROOT.parent.parent]
+# RUNS' parent, plus the repo tree - the repo root stays watched precisely because that
+# is where escapes have actually landed.
+WATCH_DIRS = [RUNS, RUNS.parent, ROOT, ROOT.parent, ROOT.parent.parent]
 
 
 def dir_listing(dirs) -> dict:
@@ -350,10 +357,10 @@ def run_task(model_key: str, tag: str, task_name: str, rep: int, timeout: int,
         "harness_error": harness_error,
         "valid": harness_error is None and not timed_out,
         "log": str(log.relative_to(ROOT)),
-        "transcript": str(transcript.relative_to(ROOT)),
+        "transcript": str(transcript.relative_to(ROOT)) if PROXY_PORT else None,
         "tool_calls": tool_calls_from(transcript),
         "reasoning_chars": reasoning_chars_from(transcript),
-        "worktree": str(work.relative_to(ROOT)),
+        "worktree": str(work),
         "when": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     if harness_error:
