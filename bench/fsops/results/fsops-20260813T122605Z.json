@@ -1,0 +1,90 @@
+{
+  "harness": "hermes-fsops",
+  "note": "Filesystem primitives for small models under Hermes Agent. Independent of the Phase 0 OpenCode comparison - do not merge the two datasets.",
+  "machine": "cachyos-x8664",
+  "gpu": "UNRECORDED - set BENCH_GPU to name the card",
+  "num_ctx": 65536,
+  "repeats": 1,
+  "reasoning": null,
+  "transcripts": true,
+  "deterministic": false,
+  "seed": null,
+  "model_tags": {
+    "llama32-3b": "fsops-llama3.2-3b-instruct-fp16:64k"
+  },
+  "model_details": {
+    "llama32-3b": {
+      "tag": "fsops-llama3.2-3b-instruct-fp16:64k",
+      "base": "llama3.2:3b-instruct-fp16",
+      "architecture": "llama",
+      "parameters": "3.2B",
+      "context_length": "131072",
+      "quantization": "F16"
+    }
+  },
+  "provenance": {
+    "tasks_sha256": "c569f0758d6c062365d85384cbe2eb0ec4113e261fc716785f223a1427e4d4b1",
+    "tasks_count": 12,
+    "task_names": [
+      "01_create_file",
+      "02_make_dirs",
+      "03_move_file",
+      "04_rename",
+      "05_copy",
+      "06_selective_delete",
+      "07_run_script",
+      "08_write_and_run_script",
+      "09_list_report",
+      "10_bulk_move",
+      "11_append_preserve",
+      "12_multi_step"
+    ],
+    "harness_sha256": "87c32bd223617e23c88145a47d6ac615c2ffcb5b628678b51e3db195c5605952",
+    "harness_commit": "7cce819",
+    "hermes_version": "Hermes Agent v0.20.0 (2026.8.3)",
+    "ollama_version": "ollama version is 0.32.9",
+    "python": "3.14.6"
+  },
+  "records": [
+    {
+      "model": "llama32-3b",
+      "ollama_tag": "fsops-llama3.2-3b-instruct-fp16:64k",
+      "task": "01_create_file",
+      "repeat": 1,
+      "returncode": 0,
+      "timed_out": false,
+      "seconds": 10.78,
+      "reasoning": null,
+      "harness_error": null,
+      "valid": true,
+      "log": "logs/llama32-3b-01_create_file-r1.log",
+      "transcript": "transcripts/llama32-3b-01_create_file-r1.jsonl",
+      "tool_calls": [
+        "terminal"
+      ],
+      "reasoning_chars": 0,
+      "worktree": "~/.cache/hermes-fsops/runs/llama32-3b-01_create_file-r1",
+      "when": "2026-08-13T12:26:05+00:00",
+      "checks": [
+        {
+          "name": "hello.txt exists",
+          "ok": false,
+          "detail": ""
+        },
+        {
+          "name": "content is exactly HERMES-OK",
+          "ok": false,
+          "detail": "missing"
+        }
+      ],
+      "checks_passed": 0,
+      "checks_total": 2,
+      "collateral_modified": [],
+      "collateral_deleted": [],
+      "escaped_workdir": false,
+      "escaped_files": [],
+      "files_created": [],
+      "passed": false
+    }
+  ]
+}

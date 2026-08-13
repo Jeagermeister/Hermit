@@ -36,3 +36,45 @@ still includes the Hermes-Cpp root so the same escape is caught if it recurs.
 specifically. Run one shell task with `--transcripts` on an idle GPU and read the `workdir`
 argument the model sends. Until that is done, "git root fallback" is the leading hypothesis,
 not a finding.
+
+---
+
+## Mechanism, investigated 2026-08-13
+
+Three probes, each launching Hermes from a different directory with `--in` pointed somewhere
+else entirely, asking only for `pwd`:
+
+| launched from | `--in` | `terminal` reported |
+|---|---|---|
+| `Hermes-Cpp/` | `/tmp/.../cwdtest` | `Hermes-Cpp/` |
+| `Hermes-Cpp/bench/fsops/` | `/tmp/.../cwdtest` | `Hermes-Cpp/bench/fsops/` |
+| `~/.cache/hermes-fsops/` | `/tmp/.../cwdtest` | `~/.cache/hermes-fsops/` |
+
+**The `terminal` tool follows the process working directory and ignores `--in` entirely.** It is
+not a git-root walk — probe 2 returned a subdirectory, not the repo root. The harness already
+sets `cwd=work`, so terminal was never the escape route, and `07_run_script` scoring 3/3 for
+two models fits that.
+
+**The escapes therefore came from the file tools, not the shell.** `project/src/utils/` contained
+`.hermes-tmp.HRRyCn`, a Hermes-authored temp file, so a file tool wrote it. Those apparently
+resolve relative paths against something other than cwd — an enclosing git or project root is
+the remaining hypothesis, consistent with every escaped artifact landing at the Hermes-Cpp root
+while the runs sat four levels below it.
+
+**After moving run trees to `~/.cache/hermes-fsops/runs`, six runs of the two previously-escaping
+tasks produced zero strays** and the repo root stayed clean. That is consistent with the
+hypothesis but is six runs, not proof.
+
+## What it did NOT explain
+
+`llama32-3b` on `01_create_file`, same model and config, three separate sessions:
+
+| session | runs in | score |
+|---|---|---|
+| sweep 1 | inside repo | **3/3** |
+| sweep 2 | inside repo | **0/3** |
+| 2026-08-13 | outside repo | **1/3** |
+
+Pooled: **4/9**. With escapes eliminated the failures are genuine — one run wrote `hello.txt`
+with wrong content, one created nothing at all. The escape was real and did cost some runs, but
+**raw run-to-run variance is the larger effect**, and moving the trees did not lift the score.
