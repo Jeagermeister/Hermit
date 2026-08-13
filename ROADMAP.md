@@ -107,7 +107,7 @@ don't reach for it.
 
 ## Phase 1 — Foundations (no blockers)
 
-- [x] **Sandbox root and path resolution (R1)** — `src/hermes/core/sandbox.{h,cpp}`, 36 tests.
+- [x] **Sandbox root and path resolution (R1)** — `src/hermes/core/sandbox.{h,cpp}`, 42 tests.
       `SandboxPath` is constructible only by `Sandbox::resolve`, so any code taking one is
       R1-correct by construction. Resolution is POSIX-order (components walked, symlinks
       expanded as met), which is what makes `..` after a symlink mean what the OS means.

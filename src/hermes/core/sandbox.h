@@ -35,7 +35,8 @@ enum class PathError {
   Empty,            // empty string is not a path
   EmbeddedNul,      // NUL byte -- would truncate at the syscall boundary
   EscapesRoot,      // resolved outside the sandbox root; rejected, never rebased
-  FilesystemError,  // symlink resolution failed
+  TooLong,          // longer than PATH_MAX; rejected before any allocation
+  FilesystemError,  // symlink resolution failed, or a component could not be inspected
 };
 
 std::string_view to_string(SandboxError e) noexcept;

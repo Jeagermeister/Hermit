@@ -121,10 +121,24 @@ from `realpath(3)` this way.
 Resolving in the kernel's order fixes both without rejecting anything legitimate: correct where
 correctness is possible, rejection only where the path genuinely leaves the root.
 
+**One real hole, found by review and closed.** `walk()` treated *every* `symlink_status` error
+as "this name is not there yet", which merges "absent" with "I could not find out". On EACCES it
+returned a path with an unexpanded symlink still in it, and `contains()` — which assumes a fully
+resolved path — accepted it. A link inside an unreadable directory pointing out of the root
+produced a `SandboxPath` reporting `sub/esc/secret.txt` that read a file outside the root. A
+model can create that state itself: `chmod 000` on a directory it owns.
+
+Now only `no_such_file_or_directory` and `not_a_directory` mean absent; anything else is a
+`FilesystemError`. This is what makes `contains()`'s precondition — and therefore this
+decision's central claim — actually true rather than merely intended. Note the fail-open was in
+*error handling*, not in the path algebra: 7.3 million differential inputs against `realpath(3)`
+found no divergence in the resolution logic itself.
+
 **Known and accepted.** A TOCTOU window remains between `resolve` and `open` — closing it needs
-`openat(O_NOFOLLOW)` component-walking. The threat model is a confused 3B model, not a local
-attacker. Revisit if untrusted input ever reaches this API. Hardlinks to outside files placed
-inside the root are also accepted; no path-based check can catch that.
+`openat(O_NOFOLLOW)` component-walking, and [D7](#d7--local-inference-only-two-ways-in-human-and-machine)
+makes that a gate on shipping the programmatic frontend. Hardlinks to outside files placed
+inside the root are also accepted; no path-based check can catch that. Paths are bounded at
+`PATH_MAX`, since resolution allocates roughly 60x the input.
 
 **What would overturn it.** Untrusted input, which promotes the TOCTOU race and the hardlink
 gap from documented to blocking.

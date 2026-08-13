@@ -28,6 +28,16 @@ target_compile_options(hermes_warnings INTERFACE
 
 add_library(hermes_sanitizers INTERFACE)
 if(HERMES_SANITIZE)
+  # Applied globally as well as through the interface target, and deliberately so:
+  # instrumenting our code but not googletest mixes instrumented and uninstrumented
+  # std::string/std::vector across the test boundary, which produces ASan
+  # container-overflow FALSE POSITIVES that read like real bugs in walk(). Must appear
+  # before any add_subdirectory/FetchContent so dependencies inherit it.
+  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address,undefined)
+
+  # The interface target still carries them for anything consuming hermes::core from
+  # another project, where the global flags above do not apply.
   target_compile_options(hermes_sanitizers INTERFACE -fsanitize=address,undefined -fno-omit-frame-pointer)
   target_link_options(hermes_sanitizers    INTERFACE -fsanitize=address,undefined)
 endif()

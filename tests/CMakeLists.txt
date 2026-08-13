@@ -14,4 +14,6 @@ target_link_libraries(hermes_tests
   PRIVATE hermes_core hermes_warnings GTest::gtest_main)
 
 include(GoogleTest)
-gtest_discover_tests(hermes_tests)
+# A symlink-loop bug shows up as non-termination, not as a wrong answer, so the loop
+# test needs a clock behind it or it hangs the suite instead of failing it.
+gtest_discover_tests(hermes_tests PROPERTIES TIMEOUT 30)

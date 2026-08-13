@@ -5,12 +5,19 @@
 #include <system_error>
 #include <utility>
 
+#include <climits>
+
 namespace hermes {
 namespace fs = std::filesystem;
 
 namespace {
 // Matches Linux MAXSYMLINKS. A chain longer than this is a loop in practice.
 constexpr int kMaxSymlinkHops = 40;
+
+// The kernel would reject anything longer anyway, and resolution allocates roughly
+// 60x the input. A model stuck in a generation loop can emit a megabyte-long argument;
+// rejecting it costs one comparison.
+constexpr std::size_t kMaxPathLength = PATH_MAX;
 }  // namespace
 
 std::string_view to_string(SandboxError e) noexcept {
@@ -27,6 +34,7 @@ std::string_view to_string(PathError e) noexcept {
     case PathError::Empty:           return "path is empty";
     case PathError::EmbeddedNul:     return "path contains a NUL byte";
     case PathError::EscapesRoot:     return "path resolves outside the sandbox root";
+    case PathError::TooLong:         return "path exceeds PATH_MAX";
     case PathError::FilesystemError: return "path could not be resolved";
   }
   return "unknown path error";
@@ -36,7 +44,14 @@ std::expected<Sandbox, SandboxError> Sandbox::open(const fs::path& root) {
   std::error_code ec;
 
   const auto status = fs::status(root, ec);
-  if (ec || !fs::exists(status)) {
+  if (ec) {
+    // Same distinction as in walk(): only "absent" means absent. This branch fails
+    // closed either way, so it is a diagnostics fix rather than a safety one.
+    return std::unexpected(ec == std::errc::no_such_file_or_directory
+                               ? SandboxError::RootNotFound
+                               : SandboxError::FilesystemError);
+  }
+  if (!fs::exists(status)) {
     return std::unexpected(SandboxError::RootNotFound);
   }
   if (!fs::is_directory(status)) {
@@ -111,8 +126,20 @@ std::expected<std::filesystem::path, PathError> Sandbox::walk(const fs::path& in
     std::error_code ec;
     const auto link_status = fs::symlink_status(next, ec);
     if (ec) {
-      // Does not exist (or is unreadable): treat as a plain name. Writes must be able
-      // to name files that are not there yet.
+      // "Not there" and "I could not find out what is there" are different answers and
+      // must not be merged. Only the first is safe to treat as a plain name.
+      //
+      // Merging them is a fail-open: on EACCES this returned a path with an *unexpanded
+      // symlink* still in it, and contains() -- which assumes a fully resolved path --
+      // then accepted it. A link inside an unreadable directory pointing out of the root
+      // yielded a SandboxPath reporting "sub/esc/secret.txt" that read a file outside.
+      // A model can produce that state itself: chmod 000 on a directory it owns.
+      const bool absent = (ec == std::errc::no_such_file_or_directory ||
+                           ec == std::errc::not_a_directory);
+      if (!absent) {
+        return std::unexpected(PathError::FilesystemError);
+      }
+      // Genuinely not there yet: writes must be able to name files that do not exist.
       out = std::move(next);
       continue;
     }
@@ -154,6 +181,9 @@ std::expected<std::filesystem::path, PathError> Sandbox::walk(const fs::path& in
 std::expected<SandboxPath, PathError> Sandbox::resolve(std::string_view raw) const {
   if (raw.empty()) {
     return std::unexpected(PathError::Empty);
+  }
+  if (raw.size() > kMaxPathLength) {
+    return std::unexpected(PathError::TooLong);
   }
   if (raw.find('\0') != std::string_view::npos) {
     // Would truncate silently at the syscall boundary: the path checked here and the

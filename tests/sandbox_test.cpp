@@ -320,6 +320,80 @@ TEST_F(SandboxTest, LeavingAndReenteringTheRootIsAccepted) {
   EXPECT_EQ(p->path(), root_ / "inside.txt");
 }
 
+// --- an uninspectable component must not be assumed harmless -----------------
+
+TEST_F(SandboxTest, UnreadableAncestorIsRejectedNotAssumedAbsent) {
+  // "Not there" and "I cannot tell what is there" are different answers. Merging them
+  // let an unexpanded symlink reach contains(), which assumes a resolved path and so
+  // fails open: this exact input returned a SandboxPath reporting "sub/esc/secret.txt"
+  // that read a file outside the root. A model can create this state itself.
+  fs::create_directories(root_ / "sub");
+  fs::create_directory_symlink(outside_, root_ / "sub" / "esc");
+  fs::permissions(root_ / "sub", fs::perms::none);
+
+  auto p = box_->resolve("sub/esc/secret.txt");
+  fs::permissions(root_ / "sub", fs::perms::owner_all);  // restore before asserting
+
+  ASSERT_FALSE(p.has_value()) << "accepted a path it could not resolve";
+  EXPECT_EQ(p.error(), PathError::FilesystemError);
+}
+
+// --- relative symlink targets resolve against the link, not the root ---------
+
+TEST_F(SandboxTest, RelativeTargetResolvesAgainstTheLinkNotTheRoot) {
+  // Every relative-target link in the fixture sits directly in the root, where those
+  // two bases are indistinguishable. This one is nested, so it tells them apart.
+  fs::create_directories(root_ / "a" / "b" / "c");
+  write_file(root_ / "a" / "b" / "c" / "target.txt", "nested");
+  write_file(root_ / "c" / "target.txt", "decoy");   // what the root-based bug would hit
+  fs::create_directory_symlink("../b/c", root_ / "a" / "b" / "inner");
+
+  auto p = box_->resolve("a/b/inner/target.txt");
+  ASSERT_TRUE(p.has_value()) << to_string(p.error());
+  EXPECT_EQ(p->path(), root_ / "a" / "b" / "c" / "target.txt");
+}
+
+// --- dangling symlinks: the normal shape of writing through a link -----------
+
+TEST_F(SandboxTest, DanglingSymlinkResolvesToItsTarget) {
+  fs::create_symlink("not_created_yet.txt", root_ / "dangling");
+  auto p = box_->resolve("dangling");
+  ASSERT_TRUE(p.has_value()) << to_string(p.error());
+  EXPECT_EQ(p->path(), root_ / "not_created_yet.txt");
+}
+
+TEST_F(SandboxTest, DanglingSymlinkPointingOutIsRejected) {
+  fs::create_symlink("../outside/not_created_yet.txt", root_ / "dangling_out");
+  auto p = box_->resolve("dangling_out");
+  ASSERT_FALSE(p.has_value());
+  EXPECT_EQ(p.error(), PathError::EscapesRoot);
+}
+
+// --- the symlink budget is where the kernel puts it --------------------------
+
+TEST_F(SandboxTest, SymlinkChainBoundaryMatchesTheKernel) {
+  write_file(root_ / "chain_target.txt", "end");
+  fs::create_symlink("chain_target.txt", root_ / "s0");
+  for (int i = 1; i <= 45; ++i) {
+    fs::create_symlink("s" + std::to_string(i - 1), root_ / ("s" + std::to_string(i)));
+  }
+  EXPECT_TRUE(box_->resolve("s38").has_value()) << "a legal chain was rejected";
+
+  auto over = box_->resolve("s44");
+  ASSERT_FALSE(over.has_value()) << "an over-long chain was accepted";
+  EXPECT_EQ(over.error(), PathError::FilesystemError);
+}
+
+// --- input bounds ------------------------------------------------------------
+
+TEST_F(SandboxTest, OverlongPathIsRejectedCheaply) {
+  // A model stuck in a generation loop can emit a megabyte-long argument; resolution
+  // allocates roughly 60x the input, so this is rejected before any of that happens.
+  auto p = box_->resolve(std::string(64 * 1024, 'x'));
+  ASSERT_FALSE(p.has_value());
+  EXPECT_EQ(p.error(), PathError::TooLong);
+}
+
 // --- filesystem-level failures fail closed -----------------------------------
 
 TEST_F(SandboxTest, SymlinkLoopIsReportedNotHung) {
