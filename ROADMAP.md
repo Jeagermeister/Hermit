@@ -111,12 +111,64 @@ don't reach for it.
       `SandboxPath` is constructible only by `Sandbox::resolve`, so any code taking one is
       R1-correct by construction. Resolution is POSIX-order (components walked, symlinks
       expanded as met), which is what makes `..` after a symlink mean what the OS means.
-- [ ] **Model preflight (R9)** — context window and `tools` capability checked before the first
-      request; fail loudly at startup. `hermes-diagnostic`'s 10-check live preflight is a
-      working reference implementation worth reading.
-- [ ] Ollama client over the OpenAI-compatible endpoint (`/v1/chat/completions`).
-      **Verified working 2026-08-12:** `gemma4:12b` emits clean structured `tool_calls`.
-- [ ] JSON handling
+- [x] **Model preflight (R9)** — `src/hermes/ollama/preflight.{h,cpp}`, 15 tests. Six checks
+      are defined; a default run emits five, since the inference warmup is opt-in and the
+      tools gate is waivable. Each check that runs fails closed: "I could not determine the
+      context window" is a failure, not a pass. Findings from building it:
+      - **The two context numbers are not the same number.** `/api/show` reports both
+        `<arch>.context_length` (what the model was built for) and `num_ctx` (what the
+        Modelfile pinned). On `qwen35-agent:latest` they read 262144 and 131072. Reading the
+        wrong one is a real mistake rather than a pedantic one — though which one *binds* is
+        the opposite of what this bullet first claimed; see below.
+      - **Unpinned is undetermined — and the "4096" in R9's evidence is wrong.** This was
+        first written as "unpinned is not unknown, it is 4096", following
+        [REQUIREMENTS.md](./REQUIREMENTS.md). Measured against Ollama **0.32.9** — the same
+        version recorded in the benchmark provenance — an unpinned model loads *far above*
+        4096: `qwen3.6:27b-q8_0` came up at 262144. Controlled against the obvious confound:
+        a pinned variant with a 262144 architecture and a 131072 pin reports 131072 in
+        `/api/ps`, so that field is the allocated context and not an echo of the architecture.
+
+        It is **not** simply "the architectural context", which this bullet also claimed for a
+        while: `nemotron-3.5-lightning:30b` reports an architecture of 1048576 and loaded
+        unpinned at 262144, capped well below it. There is a server-side ceiling whose value
+        no API reports. That makes the unpinned context *less* knowable, not more — which is
+        what the conclusion rests on.
+
+        (Provenance covers 7 runs across the two files that record it; the two larger result
+        files predate version recording, so "the same version as the benchmarks" is
+        established for those 7, not for the whole corpus.)
+        The gate still fails an unpinned model, because the server default is set by the
+        Ollama release and `OLLAMA_CONTEXT_LENGTH` and is reported by neither `/api/show`
+        nor anything else — but it now says "undetermined" instead of naming a number it
+        cannot observe. **R9's stated evidence needs the same correction.**
+      - **The gate asks about the architecture, not the Modelfile pin.** Since
+        [D8](./DECISIONS.md) the client sets `options.num_ctx` on every request, and that
+        **overrides the pin upward** — measured directly: a model pinned to 8192, asked for
+        32768, loaded at 32768. So the pin decides nothing this client cares about. What no
+        request can exceed is the architecture, and that is what is now gated on. The pin is
+        still reported, because it is useful for diagnosis; it just no longer enforces.
+      - Swept across all 14 models installed on `kitchen-desktop`: **14 pass, 0 fail.** Under
+        the earlier pin-based gate the 6 base tags all failed as "unpinned" — and every one of
+        those was a false positive, since the client sets the context itself. The
+        pinned-variant discipline the benchmark harnesses built (8 `-agent` variants against 6
+        base tags) turns out to be an artifact of
+        driving Ollama through an endpoint that could not set `num_ctx`.
+- [x] **Ollama client** — `src/hermes/ollama/client.{h,cpp}`. Native `/api/tags`, `/api/show`
+      and `/api/chat`, non-streamed; verified against a live daemon and clean under ASan/UBSan
+      and clang. Tool-call dispatch is deliberately *not* here — it belongs with the agent loop
+      in Phase 2, and this reads the text half of a reply only.
+      **Settled as [D8](./DECISIONS.md):** native over OpenAI-compatible, because only the
+      native endpoint can set `num_ctx` — and an unsettable context window is what falsified
+      R9's original evidence. The `num_ctx` clamp is part of that decision: Ollama does no
+      admission control on context size, and an oversized request hard-froze `kitchen-desktop`
+      on 2026-08-13 rather than failing.
+- [x] **Toolchain floor** — a `try_compile` feature check for the C++23 library pieces, plus
+      version numbers (g++ 12, clang 16) that exist only to turn a template error into one
+      sentence. The feature check is the real gate, because the binding constraint is the
+      standard *library*: clang here uses libstdc++, so a compiler-version check alone would be
+      interrogating the wrong component. **Verified on g++ 15.2 and clang 21.1, both against
+      libstdc++. libc++ is untested.**
+- [x] JSON handling — nlohmann v3.12.0, in the build with the client (D2)
 - [ ] Config + CLI entry point
 - [ ] Session/history model
 - [ ] **Wall-clock budgets (R8)** — per turn and per session, a timeout recorded as a failure
@@ -124,13 +176,38 @@ don't reach for it.
       failures were 300 s timeouts from a single model, and `nemotron35-lightning` burned
       3,826 s against `gemma26-a4b-q8`'s 642 s.
 
+      **The Ollama client turned up a trap for this — though not the one first recorded
+      here.** An earlier revision of this bullet claimed `eval_count` *omits* thinking tokens
+      and therefore undercounts. **That was wrong, and is retracted.** Re-measured on
+      `gemma31-agent`, prompt `"Give me a city and its country."`, `num_ctx` 32768,
+      `temperature` 0, varying only the budget:
+
+      | `num_predict` | `done_reason` | `eval_count` | thinking | content |
+      |---|---|---|---|---|
+      | 20  | length | 20  | 74 ch  | 0 ch  |
+      | 80  | length | 80  | 274 ch | 0 ch  |
+      | 300 | stop   | 148 | 487 ch | 12 ch |
+
+      The first two rows settle it: content is empty while `eval_count` reads 20 and 80, which
+      is impossible if the count covered content alone. `eval_count` **includes** thinking, as
+      does the budget, and the two agree. Identical on `/v1/chat/completions` (148 for the same
+      generation), so it is Ollama's accounting rather than an API-shape artifact.
+
+      The real hazard survives the correction and is simpler than the one claimed: **a budget
+      too small for the thinking returns empty content with no error.** The model reasons
+      first, exhausts the budget, and writes nothing. Two reliable tells —
+      `done_reason == "length"` (exposed as `ChatReply::truncated()`) and
+      `eval_count == num_predict`. R8's budgets should still be wall-clock, but for the reason
+      originally given in the requirement rather than for the token-accounting one.
+
 ### Decisions to settle first
 
 These are hard to reverse and benefit from being argued out before code exists:
 
 - [x] **Concurrency model** — blocking and single-threaded ([D1](./DECISIONS.md))
-- [x] **HTTP library** — cpp-httplib, pinned ([D7](./DECISIONS.md)). Provisional until the
-      Ollama client exists; loopback only, so no TLS and streaming optional.
+- [x] **HTTP library** — cpp-httplib, pinned v0.53.0 ([D7](./DECISIONS.md)). No longer
+      provisional: the Ollama client exists and the library needed only five configuration calls
+      and one RAII wrapper to scope timeouts per request. Loopback only, so no TLS and streaming optional.
 - [x] **Dependency posture** — FetchContent, pinned ([D3](./DECISIONS.md)). Settled alongside
       these, though it was not on the original list.
 - [x] **Sandbox as a capability type** ([D6](./DECISIONS.md)) — decided *during* implementation

@@ -125,6 +125,27 @@ failure rather than as missing data.
 
 ## R9 — Preflight the model before running anything.
 
+> **⚠ Correction, 2026-08-13.** The claim below that "Ollama's default `num_ctx` is 4096" is
+> **wrong for the Ollama actually in use.** Measured on 0.32.9 — the same version the benchmark
+> runs used — an unpinned model loads at its *full architectural* context, not 4096:
+> `qwen3.6:27b-q8_0` came up at 262144. Controlled against `/api/ps` merely echoing the
+> architecture: a variant pinned to 131072 under a 262144 architecture reports 131072 there.
+>
+> **And the pinned variants turn out not to be needed at all.** Under [D8](./DECISIONS.md) the
+> client sets `options.num_ctx` per request, which **overrides a Modelfile pin upward** —
+> measured: a model pinned to 8192, asked for 32768, loaded at 32768. So "every model needs a
+> pinned variant" was true only of the OpenAI-compatible endpoint, which cannot set the context
+> at all. It was a property of the harness, not of Ollama.
+>
+> The requirement survives, aimed at the right target. What no request can exceed is the
+> **architecture** — the context the model was actually built for — so that is what the gate
+> checks. Re-swept across the 14 installed models: 14 pass, where the pin-based gate failed 7,
+> all of them false positives.
+>
+> The rest of the evidence below stands unchanged: the tools gate, and both disqualified models.
+> Note `llama3-groq-tool-use:8b` still fails, and now for a defensible reason — its 8192 is
+> architectural, so no setting can raise it.
+
 **Evidence.** Hermes hard-refuses any model reporting under 64K context. Ollama's default
 `num_ctx` is 4096, so every model needs a pinned variant. Separately, Ollama `tools` capability
 is an independent gate. Two installed models were disqualified by these — `phi3.5:3.8b`

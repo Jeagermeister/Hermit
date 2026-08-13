@@ -27,9 +27,11 @@ each — not threads inside one session. The bounded-session architecture alread
 
 ## D2 — JSON: nlohmann/json, pinned v3.12.0
 
-**Not yet in the build.** No source parses JSON, so the dependency is deliberately not declared
-in `CMakeLists.txt` — it would cost a clone per build directory for nothing. It arrives with the
-Ollama client.
+**In the build since 2026-08-13**, arriving with the Ollama client as planned. Nothing has
+argued against it. The surface used so far is `find`/`is_*`/`get`/`items`/`array`/`push_back`,
+`parse` with `allow_exceptions=false` plus `is_discarded()`, and `dump` with
+`error_handler_t::replace` — that last one load-bearing, since the throwing default turns a
+non-UTF-8 file into a `std::terminate`. Request building is as pleasant as expected.
 
 **Why.** Ergonomics matter here and throughput does not. The JSON payloads are chat messages and
 tool calls measured in kilobytes, arriving at best once every several seconds. simdjson solves a
@@ -201,11 +203,21 @@ the programmatic frontend, not optional cleanup.** Roughly a day's work. The har
 be closed by path checking at all and needs a separate answer (device/inode comparison against
 the root, or accepting it explicitly).
 
-**HTTP client: cpp-httplib, pinned.** Provisional until the Ollama client is actually written.
-Under this decision the client only ever talks to loopback Ollama: no TLS, no auth, no proxies,
-and headless operation makes streaming optional. Header-only pins cleanly under D3 and adds no
-system dependency. libcurl would only earn its keep against cloud backends, which this decision
-forecloses.
+**HTTP client: cpp-httplib, pinned.** Under this decision the client only ever talks to loopback
+Ollama: no TLS, no auth, no proxies, and headless operation makes streaming optional.
+Header-only pins cleanly under D3 and adds no system dependency. libcurl would only earn its
+keep against cloud backends, which this decision forecloses.
+
+**No longer provisional, as of `src/hermes/ollama/client.cpp` (2026-08-13).** Pinned at v0.53.0
+and exercised against a live daemon on `kitchen-desktop`: `/api/tags`, `/api/show` and a real
+chat completion, clean under ASan and UBSan. (The chat endpoint was `/v1/chat/completions`
+at the time; D8 later moved it to `/api/chat`, which does not change what the library
+was asked to do.) It needed five configuration calls -- three timeouts plus
+`set_follow_location(false)` and `set_keep_alive(true)` -- and one RAII wrapper to scope the
+timeouts per request, and OpenSSL, Brotli and zlib are all forced
+off — none has anything to do over loopback. Its one imposition is being header-only and large,
+which is why it is confined to that single translation unit behind a pimpl rather than being
+allowed into a header.
 
 Recorded as low-stakes on purpose: it is one file behind a small interface, swappable in an
 afternoon — unlike D4, which fifty tools inherit. It should not absorb more thought than it has.
@@ -215,15 +227,52 @@ launching it (which changes the whole security posture, not just the transport),
 model good enough that the supervisor stops earning its keep — in which case the core survives
 and the supervisor layer is what gets reconsidered.
 
+## D8 — Native `/api/chat`, and the `num_ctx` clamp that has to come with it
+
+The client speaks native Ollama throughout. `/v1/chat/completions` was used first and was
+dropped on 2026-08-13.
+
+**Why.** The OpenAI-compatible endpoint cannot set `num_ctx`. That made every model's context
+window a property of its Modelfile *and* of the Ollama server's own default — and that default
+turned out to be reported by no API and to have changed between releases. It is what falsified
+R9's original evidence: "Ollama's default `num_ctx` is 4096" is false on 0.32.9, where an
+unpinned model loads far above that instead — by a rule no API reports, and not simply the
+architectural context either (`nemotron-3.5-lightning:30b` has a 1048576 architecture and
+loaded unpinned at 262144). **Setting the context per
+request replaces an unknowable with a stated value**, which is worth more than the compatibility.
+
+Two smaller gains came with it, both measured against the daemon directly:
+
+- Tool-call arguments arrive as a structured object rather than a JSON string needing a second
+  parse — removing a whole failure class, and one D5 was partly written to mitigate. Measured
+  against the daemon directly with `curl`, **not** through this client, which does not yet
+  send or parse tool calls; that lands in Phase 2.
+- `format` takes a JSON schema directly, without the `{"type":"json_schema", …}` wrapper.
+
+**The cost, and it is not theoretical.** Being able to set the context means being able to set
+it past what the GPU can hold. **Ollama performs no admission control on `num_ctx`**: an
+oversized request is not rejected, not reduced, and not failed — it deadlocks the driver.
+Requesting 262144 on a 29 GB model against a 48 GB W7900 hard-froze `kitchen-desktop` on
+2026-08-13, with no OOM kill and no GPU reset in the logs; the kernel simply stopped.
+
+So the clamp (`ClientOptions::max_num_ctx`, default 65536) is **part of this decision, not an
+implementation detail**. Stated precisely, because that number is doing safety work: 65536 is
+what the `bench/fsops` runs used **on the MSI laptop's 16 GB RTX 5080**, not on this 48 GB
+W7900. It is a value known to work on a smaller card, not one derived from this one. Nothing in
+the API reports free VRAM, so the client cannot compute a safe value; it can only refuse to
+exceed one it was given — the clamp guarantees "at most 65536", never "fits". The clamp is tested offline, deliberately: a test that verified it by
+sending an oversized request would be performing the exact action it exists to prevent.
+
+**What would overturn it.** Ollama gaining real admission control on context size, which would
+make the clamp unnecessary rather than merely conservative. Or a tool-call format divergence
+that made the native shape harder to consume than the OpenAI one — the opposite of what is true
+today.
+
 ---
 
 ## Still open
 
-### HTTP client — settled provisionally in D7
-
-Resolved by [D7](#d7--local-inference-only-two-ways-in-human-and-machine): cpp-httplib, pinned.
-Local-only inference means loopback, so the libcurl case — TLS, proxies, auth, robust streaming
-— never arises. Confirm when the Ollama client is written; the cost of being wrong is one file.
+### ~~Which chat endpoint~~ — settled as D8
 
 ### The hardlink gap
 
