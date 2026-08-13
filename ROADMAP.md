@@ -129,8 +129,8 @@ don't reach for it.
 These are hard to reverse and benefit from being argued out before code exists:
 
 - [x] **Concurrency model** — blocking and single-threaded ([D1](./DECISIONS.md))
-- [ ] **HTTP library** — still open. Deferred until the Ollama client is written; the deciding
-      question is whether responses stream (see [DECISIONS.md](./DECISIONS.md), "Still open")
+- [x] **HTTP library** — cpp-httplib, pinned ([D7](./DECISIONS.md)). Provisional until the
+      Ollama client exists; loopback only, so no TLS and streaming optional.
 - [x] **Dependency posture** — FetchContent, pinned ([D3](./DECISIONS.md)). Settled alongside
       these, though it was not on the original list.
 - [x] **Sandbox as a capability type** ([D6](./DECISIONS.md)) — decided *during* implementation
@@ -157,6 +157,19 @@ These are hard to reverse and benefit from being argued out before code exists:
 
 ---
 
+## Phase 2.5 — Frontends: human and machine
+
+Settled in [D7](./DECISIONS.md): local inference only, driven both by a person and by a larger
+model calling this as a tool.
+
+- [ ] **Close the TOCTOU race before the programmatic frontend ships.** `openat(O_NOFOLLOW)`,
+      one component at a time. D6 accepted the race against a "confused 3B model" threat model;
+      a callable frontend changes that model, so this is a gate rather than cleanup.
+- [ ] **Decide the hardlink answer** — device/inode comparison against the root, or accept it
+      explicitly. No path-based check can catch it.
+- [ ] **MCP server over stdio.** No listener, no port, no auth. Thin: transport only, over the
+      same core the CLI drives.
+
 ## Phase 3 — The supervisor (the actual product)
 
 - [ ] **State verification.** After each turn, check what the model *claims* against what the
@@ -180,7 +193,7 @@ Upstream is ~870k lines of non-test Python. A wholesale port is not the goal and
 
 ## Open questions
 
-- **Test oracle.** Upstream ships 2,877 test files. Are any worth adapting as a behavioural
+- **Test oracle.** Upstream ships 2,889 test files. Are any worth adapting as a behavioural
   spec, given this is not a port and the behaviour is only selectively shared?
 - **Context strategy.** Local models have far less context than cloud models. Agentic file work
   consumes it quickly, so what gets sent, and what gets summarised, is a first-class design

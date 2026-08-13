@@ -129,23 +129,97 @@ inside the root are also accepted; no path-based check can catch that.
 **What would overturn it.** Untrusted input, which promotes the TOCTOU race and the hardlink
 gap from documented to blocking.
 
+## D7 — Local inference only; two ways in, human and machine
+
+**Backend: local Ollama, and nothing else.** No cloud inference provider, ever, unless this
+decision is explicitly overturned.
+
+**Frontends: both a human CLI and a programmatic caller.** The same core is driven by a person
+at a terminal and by a larger model invoking it as a tool.
+
+**Why local-only stays local-only.** The realistic programmatic caller *is* a large cloud model
+— Claude or ChatGPT invoking this as a tool. If the caller is already the big model, putting a
+second cloud model behind this tool pays twice for the same capability. It would also re-import
+precisely what [SCOPE.md](./SCOPE.md) discarded as meaningless against local Ollama:
+`credential_pool.py` (3,178 lines of key rotation) and `iron_proxy.py` (2,494 lines of egress
+firewall for cloud credentials). Staying local keeps credentials, TLS and egress policy out of
+the codebase entirely.
+
+It also bounds the blast radius. A confused local model with filesystem access is a contained
+problem; the same code path reachable by an arbitrary remote endpoint is not.
+
+**Why both frontends, and why that is not scope creep.** [README.md](./README.md) has said from
+the start that the job is filesystem work "either directly or when called as a tool by a larger
+model" — this records a commitment already made rather than adding one. The two surfaces share
+everything that matters and differ only in transport.
+
+**Expected shape.** A local MCP server over **stdio** — a subprocess speaking JSON-RPC on
+stdin/stdout — not an HTTP listener. No port, no auth, no TLS, nothing reachable from off the
+machine. Note this is the opposite direction from upstream's `mcp_tool.py`, which is an MCP
+*client* and stays discarded; being a *server* is not covered by that decision.
+
+This is also where the native-binary argument pays off hardest. A caller invoking a tool pays
+process startup on every call, and bounded sessions mean many calls: ~10 ms for a static binary
+against 1–3 s for a Python interpreter. Speed here is a product feature, not a benchmark number.
+
+**Layering, so the surfaces stay thin:**
+
+| layer | contains | knows about |
+|---|---|---|
+| **core** | sandbox, filesystem ops, verification (R1, R3, R4, R5) | no model, no network |
+| **supervisor** | drives local Ollama; bounded sessions, retry (R6, R7) | the only layer with an HTTP client |
+| **frontends** | CLI today, MCP-over-stdio next | neither of the above, beyond a small API |
+
+A consequence worth naming: the **core is useful with no model at all**. Called by Claude, this
+is a verified, reversible filesystem toolkit and R6/R7 barely matter. Driven locally, the
+supervisor is the product. Same core, two products — which is the strongest argument for the
+split above.
+
+**⚠ Consequence for [D6](#d6--the-sandbox-is-a-capability-type-and-resolution-is-posix-order),
+and it is a real one.** D6 accepts a TOCTOU race and a hardlink gap on the grounds that "the
+threat model is a confused 3B model, not a local attacker," and says to revisit "if untrusted
+input ever reaches this API." A programmatic caller moves that line: paths derived from a
+document someone pasted into a chat are prompt-injection-influenced input reaching a filesystem
+API. Not an attacker with shell access, but no longer a confused 3B model either.
+
+**So closing the TOCTOU race — `openat(O_NOFOLLOW)`, component at a time — is a gate on shipping
+the programmatic frontend, not optional cleanup.** Roughly a day's work. The hardlink gap cannot
+be closed by path checking at all and needs a separate answer (device/inode comparison against
+the root, or accepting it explicitly).
+
+**HTTP client: cpp-httplib, pinned.** Provisional until the Ollama client is actually written.
+Under this decision the client only ever talks to loopback Ollama: no TLS, no auth, no proxies,
+and headless operation makes streaming optional. Header-only pins cleanly under D3 and adds no
+system dependency. libcurl would only earn its keep against cloud backends, which this decision
+forecloses.
+
+Recorded as low-stakes on purpose: it is one file behind a small interface, swappable in an
+afternoon — unlike D4, which fifty tools inherit. It should not absorb more thought than it has.
+
+**What would overturn it.** A caller that must reach this over a network rather than by
+launching it (which changes the whole security posture, not just the transport), or a local
+model good enough that the supervisor stops earning its keep — in which case the core survives
+and the supervisor layer is what gets reconsidered.
+
 ---
 
 ## Still open
 
-### HTTP client — not yet decided
+### HTTP client — settled provisionally in D7
 
-Deferred because nothing written so far touches the network. The realistic candidates are
-**libcurl** (already on the system at 8.21.0, handles streaming well, adds a system dependency
-against D3's grain) and a **header-only client** such as cpp-httplib (pins cleanly, one less
-system dependency, weaker streaming story).
+Resolved by [D7](#d7--local-inference-only-two-ways-in-human-and-machine): cpp-httplib, pinned.
+Local-only inference means loopback, so the libcurl case — TLS, proxies, auth, robust streaming
+— never arises. Confirm when the Ollama client is written; the cost of being wrong is one file.
 
-The deciding question is whether responses are streamed. Streaming matters for a human watching
-a TUI; this runs headless and blocks on the whole reply anyway, which argues the requirement is
-weaker here than it first appears. Settle it when the Ollama client is written.
+### The hardlink gap
+
+D7 makes this concrete rather than theoretical. A hardlink inside the root pointing at an
+outside file is accepted, and no path-based check can detect it — `resolve()` is doing its job
+correctly and still lets it through. Options are device/inode comparison against the root, or
+accepting it explicitly and writing down why. Undecided.
 
 ### Test oracle
 
-Upstream ships 2,877 test files. Whether any are worth adapting as a behavioural spec is still
+Upstream ships 2,889 test files. Whether any are worth adapting as a behavioural spec is still
 open, and is mostly a question about how much behaviour is genuinely shared — which the
 module-level scope work suggests is not much.
