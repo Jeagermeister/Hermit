@@ -27,8 +27,8 @@ if [ $# -ge 1 ]; then
   exit 0
 fi
 
-printf '%-14s %-16s %-14s %-9s %s\n' SUBSYSTEM PORTED_FROM UPSTREAM_NOW STATUS "COMMITS_BEHIND"
-printf '%.0s-' {1..72}; echo
+printf '%-20s %-16s %-14s %-12s %s\n' SUBSYSTEM PORTED_FROM UPSTREAM_NOW STATUS "COMMITS_BEHIND"
+printf '%.0s-' {1..80}; echo
 while IFS=$'\t' read -r sub path from status; do
   [[ "$sub" =~ ^#|^$ ]] && continue
   if [ "$status" = "OUT_OF_SCOPE" ]; then
@@ -39,7 +39,7 @@ while IFS=$'\t' read -r sub path from status; do
     behind=$(git -C "$REF" rev-list --count "$from..$LATEST" -- "$path" 2>/dev/null || echo "?")
     [ "$behind" != "0" ] && [ "$behind" != "?" ] && status="STALE"
   fi
-  printf '%-14s %-16s %-14s %-9s %s\n' "$sub" "$from" "$LATEST" "$status" "$behind"
+  printf '%-20s %-16s %-14s %-12s %s\n' "$sub" "$from" "$LATEST" "$status" "$behind"
 done < "$LEDGER"
 echo
 echo "Detail:  tools/parity <subsystem>"

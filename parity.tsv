@@ -1,21 +1,41 @@
-# Machine-readable scope + parity ledger. One row per upstream subsystem.
+# Machine-readable scope + parity ledger.
 #
-# ported_from = upstream RELEASE TAG whose behaviour this subsystem was implemented against
-#               ("-" = nothing implemented yet).
+# Rows are MODULE-granular for in-scope code and subsystem-granular for what is ignored.
+# Anything under agent/ or tools/ without a row here is implicitly OUT_OF_SCOPE. Tracking
+# whole subsystems made the drift report useless: agent/ and tools/ are 266k lines and only
+# ~38k of that is in scope, so staleness was dominated by code that will never be written.
+# See SCOPE.md for the reasoning and REQUIREMENTS.md for the evidence.
+#
+# ported_from = upstream RELEASE TAG this was implemented against ("-" = nothing yet).
 #
 # status:
 #   NOT_STARTED  - in scope, no implementation yet
 #   PORTED       - implemented against the recorded tag
 #   STALE        - computed, never written by hand (upstream moved past the recorded tag)
+#   REFERENCE    - read for ideas, deliberately not ported; drift is worth knowing, not fixing
 #   OUT_OF_SCOPE - deliberately not being built; upstream drift here is irrelevant
 #
 # Deliberately tag-granular, not commit-granular: upstream lands ~1100 commits/month but only
 # ~2 releases. Tags are the review unit; drill to commits only when actually implementing.
 #
 # subsystem	upstream_path	ported_from	status
-agent	agent/	-	NOT_STARTED
-tools	tools/	-	NOT_STARTED
+conversation_loop	agent/conversation_loop.py	-	NOT_STARTED
+chat_completion	agent/chat_completion_helpers.py	-	NOT_STARTED
+model_metadata	agent/model_metadata.py	-	NOT_STARTED
+agent_init	agent/agent_init.py	-	NOT_STARTED
+tool_executor	agent/tool_executor.py	-	NOT_STARTED
+prompt_builder	agent/prompt_builder.py	-	NOT_STARTED
+error_classifier	agent/error_classifier.py	-	NOT_STARTED
+file_operations	tools/file_operations.py	-	NOT_STARTED
+file_tools	tools/file_tools.py	-	NOT_STARTED
+terminal_tool	tools/terminal_tool.py	-	NOT_STARTED
+process_registry	tools/process_registry.py	-	NOT_STARTED
 providers	providers/	-	NOT_STARTED
+context_compressor	agent/context_compressor.py	-	REFERENCE
+conv_compression	agent/conversation_compression.py	-	REFERENCE
+auxiliary_client	agent/auxiliary_client.py	-	OUT_OF_SCOPE
+mcp_tool	tools/mcp_tool.py	-	OUT_OF_SCOPE
+approval	tools/approval.py	-	OUT_OF_SCOPE
 hermes_cli	hermes_cli/	-	OUT_OF_SCOPE
 gateway	gateway/	-	OUT_OF_SCOPE
 tui_gateway	tui_gateway/	-	OUT_OF_SCOPE

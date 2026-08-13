@@ -1,5 +1,19 @@
 # Hermes-Cpp
 
+## Start here
+
+| document | what it answers |
+|---|---|
+| [REQUIREMENTS.md](./REQUIREMENTS.md) | what this must do, each requirement traced to a measured failure |
+| [SCOPE.md](./SCOPE.md) | what gets built, read, or ignored — and why |
+| [ROADMAP.md](./ROADMAP.md) | sequencing, and what must be settled before code |
+| [parity.tsv](./parity.tsv) | machine-readable scope ledger; `tools/parity` reports drift |
+| [bench/fsops/](./bench/fsops/) | the evidence: 264 runs of local models doing filesystem work |
+
+**Scope in one line:** upstream is ~870k lines of non-test Python; ~38k of it is in scope, and
+the part that matters most — verification, backup, retry — has no upstream equivalent at all.
+
+
 A fast, local-first agent runner in **C/C++**, built around **Ollama**.
 
 Inspired by [NousResearch Hermes Agent](https://github.com/nousresearch/hermes-agent) (Python),
