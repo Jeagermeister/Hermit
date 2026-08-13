@@ -29,7 +29,7 @@ coarse; the drill-down stays sharp.
 
 | Subsystem | Upstream LOC | Status | Why |
 |---|---:|---|---|
-| `agent/` | 136,521 | in scope | The loop. The core idea worth borrowing. |
+| `agent/` | 136,525 | in scope | The loop. The core idea worth borrowing. |
 | `tools/` | 128,965 | in scope | File operations — what this project is *for*. |
 | `providers/` | 452 | in scope | Only Ollama matters here; upstream's is tiny anyway. |
 | `hermes_cli/` | 213,032 | **out** | Largest subsystem, almost all surface area. |

@@ -46,8 +46,9 @@ that overwrote `config.ini` with invented content — came through **file tools*
 did every escape into the repository root.
 
 The conclusion is that *which tool* is the wrong lever. **Verification belongs at the filesystem
-layer, not the tool layer**: snapshot before the turn, diff after, regardless of what the model
-reached for. That is R6, and it makes this question mostly disappear — which is fortunate,
+layer, not the tool layer**: snapshot before the turn (R4), hash-diff after (R3), and decide
+completion from that rather than from the model's claim (R6) — regardless of which tool the
+model reached for. That is what makes this question mostly disappear — which is fortunate,
 because it is not a question that can be won by picking a side.
 
 ## Keep — `agent/` (7 of 188 files, ~25k lines)
@@ -121,7 +122,7 @@ This is the actual product, and none of it is a port:
 |---|---|
 | **R3** | verify by content hash, never by existence |
 | **R4** | backup before mutate; undo as a first-class operation |
-| **R5** | read back after every write |
+| **R5** | read back after every write — note its classification moved; see [REQUIREMENTS.md](./REQUIREMENTS.md) R5 |
 | **R6** | poll filesystem state; never trust a completion claim |
 | **R7** | re-invoke with one concrete remaining failure |
 

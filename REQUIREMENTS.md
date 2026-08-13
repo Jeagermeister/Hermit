@@ -66,9 +66,29 @@ Undo is a first-class operation, not a debugging aid.
 
 **Evidence.** Models write rendering artifacts into file content: `qwen3.5:4b` wrote
 `5|2026-08-12 shipped` (a line-number-style prefix), `llama3.2:3b` wrote `<br>HERMES-OK` (an
-HTML line break). Wire transcripts confirm Hermes renders tool results as raw JSON with no
-prefixes anywhere — **this is model-intrinsic content contamination**, so it must be designed
-around rather than away.
+HTML line break).
+
+> **Corrected 2026-08-13.** This section previously claimed "wire transcripts confirm Hermes
+> renders tool results as raw JSON with no prefixes anywhere" and concluded the contamination
+> was **model-intrinsic**. That is false, and the Phase 0 data falsifies it directly: of 240
+> `read_file` calls recorded in `local-agent-benchmarks/hermes-diagnostic/`, **226 return
+> content with `N|` line-number prefixes**, plus a phantom trailing line marker — a one-line
+> file comes back as `"1|MARKER-ORBIT-7319\n2|"`. The `5|` prefix above is Hermes' own
+> rendering, echoed back by the model.
+>
+> It is caught in the act in `trials/trial-03/results/gemma26-a4b-q8-01_read.json`, where the
+> model's final answer is literally `1|MARKER-ORBIT-7319` and the stage fails for it. Note also
+> that the sweep-2 transcripts cited as proof were not collected — `bench/fsops/SWEEP2.md`
+> records `tool_calls` as empty for both sweeps.
+
+So this is **partly a tool-design artifact and partly model behaviour**, and the two have not
+been separated. It belongs with the E4B rendered-annotation hazard in
+[ROADMAP.md](./ROADMAP.md), not in the model-intrinsic column. A tool that returns undecorated
+content removes most of it; the `<br>` case is not explained by rendering and may be genuinely
+model-intrinsic.
+
+**The requirement is unchanged either way** — read-back is what makes the distinction
+unnecessary at runtime — but its classification and the scope claim below both move.
 
 **Requirement.** Any write whose content must match exactly is read back and compared before the
 turn is allowed to succeed.
@@ -118,9 +138,15 @@ at startup rather than 60 runs into a job.
 
 ## What this means for scope
 
-Requirements R3 through R7 — verification, backup, read-back, state polling, retry — **have no
-upstream equivalent**. Hermes Agent does not do them; that is why the failures above were
-observable. The valuable part of Hermes-Cpp is therefore not ported code, it is new code.
+Requirements R3 through R7 — verification, backup, read-back, state polling, retry — have **no
+upstream equivalent that these runs revealed**. Hermes Agent did not do them in any observed
+run; that is why the failures above were observable at all. The valuable part of Hermes-Cpp is
+therefore not ported code, it is new code.
+
+*Stated precisely, because it is a negative claim about code that has not been read:* this is
+inferred from behaviour across 408 runs, not from auditing upstream's 38k in-scope lines — every
+module in `parity.tsv` is still `NOT_STARTED`. Treat it as well-evidenced, not as verified. If a
+module read later turns up an equivalent, it is a finding, not a contradiction.
 
 That reframes the rewrite: the goal is a thin, correct agent loop plus a supervisor that upstream
 never had, not a reproduction of upstream's surface area. See [SCOPE.md](./SCOPE.md).
