@@ -7,6 +7,7 @@
 | [REQUIREMENTS.md](./REQUIREMENTS.md) | what this must do, each requirement traced to a measured failure |
 | [SCOPE.md](./SCOPE.md) | what gets built, read, or ignored — and why |
 | [ROADMAP.md](./ROADMAP.md) | sequencing, and what must be settled before code |
+| [DECISIONS.md](./DECISIONS.md) | the hard-to-reverse choices, and what would overturn each |
 | [parity.tsv](./parity.tsv) | machine-readable scope ledger; `tools/parity` reports drift |
 | [bench/fsops/](./bench/fsops/) | the evidence: 264 runs of local models doing filesystem work |
 
@@ -50,18 +51,48 @@ structural:
 | **Distribution** | One binary, versus a Python environment plus Node plus system dependencies. |
 
 The evidence lives in its own repo: **[`local-agent-benchmarks`](https://gitea-ec2.tail328f9a.ts.net/Jeagermeister/local-agent-benchmarks)**
-— four harnesses, all runs to date executed on `kitchen-desktop` through OpenCode.
+— five harnesses, across two machines and two agent harnesses: the 264 `fsops` runs on the MSI
+laptop (RTX 5080 16 GB) through Hermes Agent, and the earlier tournaments plus the 144 Phase 0
+diagnostic runs on `kitchen-desktop` (W7900) through OpenCode and Hermes respectively.
 
 ## Layout
 
 | Path | What |
 |---|---|
+| `src/hermes/core/` | Library code. `sandbox.{h,cpp}` implements R1 |
+| `src/main.cpp` | `hermes-cpp` — manual harness for inspecting path resolution |
+| `tests/` | GoogleTest suite; run with `ctest` |
+| `DECISIONS.md` | The hard-to-reverse choices, and what would overturn each |
 | `ROADMAP.md` | Scope, phases, and what has to be settled before code |
 | `parity.tsv` | Which upstream subsystems are in scope, and where each stands |
 | `tools/parity` | Reports drift against upstream for in-scope subsystems |
 | `UPSTREAM-PARITY.md` | How the reference tracking works and why it is tag-granular |
 
-Architecture, build system and source layout are **not yet decided**. Nothing here presumes them.
+## Building
+
+Requires a C++23 compiler, CMake 3.24+, and network access on first configure (dependencies are
+fetched at pinned versions rather than taken from the system — see [D3](./DECISIONS.md)). Verified
+on GCC 16.2.1 and clang 22.1.8.
+
+```bash
+cmake -S . -B build -G Ninja
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+With sanitizers:
+
+```bash
+cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DHERMES_SANITIZE=ON
+cmake --build build-asan && ./build-asan/tests/hermes_tests
+```
+
+`hermes-cpp <root> <path>...` shows how paths resolve against a sandbox root, including from a
+different working directory — which is the R1 failure made visible:
+
+```bash
+cd /tmp && ./build/hermes-cpp ~/some/root note.txt ../../etc/passwd
+```
 
 ## Working with upstream
 
