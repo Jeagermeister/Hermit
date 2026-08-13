@@ -1,6 +1,7 @@
 # Roadmap
 
 Scope, sequencing, and the things that must be settled before code is worth writing.
+Settled decisions have moved to [DECISIONS.md](./DECISIONS.md); the first code landed 2026-08-13.
 
 ---
 
@@ -37,35 +38,66 @@ anything intrinsic to the model. Separating those is the point of Phase 0.
 
 ## Phase 0 — Establish which findings actually transfer
 
-> ### ⚠ There is a deadline on this one
+> ### ✅ The deadline was met — the runs are on the W7900
 >
-> An **RTX PRO 5000 (72 GB, CUDA)** replaces Kitchen's **W7900 (48 GB, ROCm)** on
-> **2026-08-14**. Every OpenCode result was produced on the W7900.
->
-> Run Phase 0 **before** the swap and the comparison is clean: same machine, same card, only
-> the harness differs. Run it after, and Hermes-on-new-GPU versus OpenCode-on-old-GPU
-> confounds harness with hardware — which is the exact error this phase exists to avoid.
->
-> If the window is missed, the honest fix is re-running **both** harnesses on the new card,
-> not reasoning across the gap.
+> An **RTX PRO 5000 (72 GB, CUDA)** replaced Kitchen's **W7900 (48 GB, ROCm)** on
+> **2026-08-14**. All 144 diagnostic runs are stamped `kitchen-desktop` / W7900 and dated
+> 2026-08-12/13, so they sit on the same hardware as the OpenCode results. **The hardware
+> confound is closed.** Anything re-run from here on lands on the new card and is not
+> comparable to either.
 
 **Question:** which OpenCode findings are model-intrinsic, and which are tool-design artifacts?
 A finding you must design *around* is very different from one you can design *away*.
 
-**The harness is written and smoke-tested — see [`bench/`](./bench/).**
+**Harness of record:** `local-agent-benchmarks/hermes-diagnostic/`. That is what produced the
+data — preflight/postflight, three-way classification, controller locking, protected-baseline
+hashing. `bench/run_hermes_diagnostic.py` in *this* repo was superseded and has never been run;
+don't reach for it.
 
-- [ ] **Install Hermes Agent on `kitchen-desktop`.** It is currently only on the MSI laptop.
-- [ ] **Build the `num_ctx`-pinned Ollama variants** from
-      `tournament/models/*.Modelfile`. `bench/run_hermes_diagnostic.py` preflights
-      these and refuses to start if any are missing.
-- [ ] **Run it:** `bench/run_hermes_diagnostic.py --models qwen-9b gemma-12b gemma-e4b --repeats 3`
-- [ ] **Run on `kitchen-desktop`, not the laptop.** The OpenCode results came from there;
-      running the comparison on different hardware would confound harness with GPU.
-- [ ] **Three repeats minimum per model per stage.** Non-negotiable given 6/6-vs-4/6 variance on
-      identical inputs. Single runs are noise.
-- [ ] **Re-pull `qwen3.5:9b`** — the tournament's best performer is not currently installed.
-- [ ] **Record the delta, not the score.** The interesting output is where the two harnesses
-      make the *same model* behave differently. That delta is the tool-design requirements list.
+### Status: ran, and produced a leaderboard rather than the delta
+
+- [x] **Install Hermes Agent on `kitchen-desktop`** — done, v0.20.0.
+- [x] **Run on `kitchen-desktop`, not the laptop** — done; every result records the hostname
+      and the W7900.
+- [x] **Three repeats minimum per model per stage** — done: 8 models × 6 stages × 3 trials =
+      **144 runs**, no gaps. 125/144 passed.
+- [x] **Build the `num_ctx`-pinned Ollama variants** — done for the *current* cohort. **Not**
+      for the tournament tags; see the blocker below.
+- [ ] **Re-pull `qwen3.5:9b`** — still not installed on `kitchen-desktop`.
+- [ ] **Record the delta, not the score.** ❌ **Not produced.** There is zero model overlap
+      between the harnesses: OpenCode ran the `tournament-*:32k` tags, Hermes ran a different
+      8-model cohort. `--suite matched` was built and validated but never run.
+
+> ### ⚠ The matched comparison may be infeasible as specified
+>
+> Hermes hard-refuses any model reporting under 64K context (`AGENT_MIN_CTX = 65536`). The
+> OpenCode tournament tags are pinned at **`num_ctx 32768`**, and `hermes-diagnostic`'s matched
+> preflight requires that same 32768. **So `--suite matched` cannot start** — every model that
+> did run was at 65536 or above.
+>
+> Rebuilding the tournament Modelfiles at 64K+ makes them no longer the configuration OpenCode
+> measured, so the clean like-for-like comparison may simply be unavailable rather than merely
+> pending. Decide deliberately: re-run *both* harnesses at 64K on the new card, or accept that
+> the harness delta is unobtainable and rely on the findings below.
+>
+> Note also that stage `05_recovery` is not like-for-like even in principle — Hermes' `patch`
+> fuzzy-matches, so the OpenCode prompt could never fail there and the harness substitutes an
+> absent sentinel. A matched run yields 5 comparable stages, not 6.
+
+**What Phase 0 did establish:**
+
+- **Confirmed model-intrinsic:** models skip a prescribed diagnostic sequence and solve
+  directly — reproduced under Hermes in 4 runs across 3 models, having also appeared under
+  OpenCode. Harness-independent, and exactly what R6/R7 exist for.
+- **Confirmed:** run-to-run variance is large. 5 of 8 models were not perfect across three
+  identical trials; `qwen35` went 6/6, 6/6, 4/6. The three-repeats rule is vindicated.
+- **New, and it moved a requirement:** Hermes' own `read_file` decorates content with `N|`
+  line-number prefixes (226 of 240 calls) plus a phantom trailing marker, and a model echoed
+  that decoration into its answer and failed the stage. This falsifies the evidence stated for
+  **R5** — see [REQUIREMENTS.md](./REQUIREMENTS.md).
+- **Still untested:** the E4B rendered-annotation finding and the short-file edit guidance —
+  the two the phase existed to adjudicate. E4B was never run under Hermes. The `read_file`
+  finding above answers the *same question* by a different route, but not for that model.
 
 > Phase 1 does not depend on any of this and can run in parallel.
 
@@ -73,25 +105,36 @@ A finding you must design *around* is very different from one you can design *aw
 
 ## Phase 1 — Foundations (no blockers)
 
+- [x] **Sandbox root and path resolution (R1)** — `src/hermes/core/sandbox.{h,cpp}`, 36 tests.
+      `SandboxPath` is constructible only by `Sandbox::resolve`, so any code taking one is
+      R1-correct by construction. Resolution is POSIX-order (components walked, symlinks
+      expanded as met), which is what makes `..` after a symlink mean what the OS means.
+- [ ] **Model preflight (R9)** — context window and `tools` capability checked before the first
+      request; fail loudly at startup. `hermes-diagnostic`'s 10-check live preflight is a
+      working reference implementation worth reading.
 - [ ] Ollama client over the OpenAI-compatible endpoint (`/v1/chat/completions`).
       **Verified working 2026-08-12:** `gemma4:12b` emits clean structured `tool_calls`.
 - [ ] JSON handling
 - [ ] Config + CLI entry point
 - [ ] Session/history model
+- [ ] **Wall-clock budgets (R8)** — per turn and per session, a timeout recorded as a failure
+      rather than dropped from the denominator. Phase 0 strengthens this considerably: 11 of 19
+      failures were 300 s timeouts from a single model, and `nemotron35-lightning` burned
+      3,826 s against `gemma26-a4b-q8`'s 642 s.
 
 ### Decisions to settle first
 
 These are hard to reverse and benefit from being argued out before code exists:
 
-- [ ] **Concurrency model** — threads, an event loop, or blocking-and-simple?
-- [ ] **HTTP library** — libcurl, or something lighter?
-- [ ] **JSON library** — nlohmann for ergonomics, simdjson for speed, or both at different layers?
-- [ ] **Tool interface shape** — this is the one that matters. Fifty tools will be added over
-      time; the interface decides whether that is pleasant or awful.
-- [ ] **Constrained decoding.** Ollama supports a JSON schema via `format`. This turns "hope the
-      12B emits valid tool JSON" into "it structurally cannot emit invalid JSON" — likely the
-      single biggest reliability lever available for small local models. Decide early; it shapes
-      the tool interface.
+- [x] **Concurrency model** — blocking and single-threaded ([D1](./DECISIONS.md))
+- [ ] **HTTP library** — still open. Deferred until the Ollama client is written; the deciding
+      question is whether responses stream (see [DECISIONS.md](./DECISIONS.md), "Still open")
+- [x] **JSON library** — nlohmann, pinned v3.12.0 ([D2](./DECISIONS.md))
+- [x] **Tool interface shape** — virtual dispatch for dispatch, a declarative `Args` struct for
+      schema and parsing ([D4](./DECISIONS.md)). No static reflection exists on this toolchain,
+      which is what ruled out full compile-time generation.
+- [x] **Constrained decoding** — on from the start ([D5](./DECISIONS.md)). Fixes malformed tool
+      calls, not wrong ones; the supervisor handles the rest.
 
 ---
 
