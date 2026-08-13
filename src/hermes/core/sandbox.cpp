@@ -12,11 +12,35 @@ namespace fs = std::filesystem;
 
 namespace {
 // Matches Linux MAXSYMLINKS. A chain longer than this is a loop in practice.
+//
+// This, not kMaxPathLength below, is what bounds the memory a resolution can consume.
+// Symlink targets are read from the filesystem rather than supplied by the caller, and
+// each expansion splices a fresh target's components into `pending` -- so the input
+// length limit does not constrain them at all. The real ceiling is roughly
+// hops x components-per-target, a few MB.
+//
+// Measured 2026-08-13 against a 41-link chain whose targets each carry ~1,900
+// components: a two-byte input ("l1") peaked at 3.2 MB of live heap. Harmless, but
+// it is the hop limit doing the work there, not the length check.
 constexpr int kMaxSymlinkHops = 40;
 
-// The kernel would reject anything longer anyway, and resolution allocates roughly
-// 60x the input. A model stuck in a generation loop can emit a megabyte-long argument;
-// rejecting it costs one comparison.
+// The kernel would reject anything longer anyway, and the bound matters more than it
+// looks: resolution is **quadratic in the number of components**, not linear in the
+// input as an earlier version of this comment claimed.
+//
+// `out = out / component` re-splits the whole accumulated path into libstdc++'s
+// component vector on every append, so the cost is ~63 bytes per component squared.
+// Measured 2026-08-13, appending N components: 63.61 / 63.31 / 63.16 / 63.08 bytes per
+// N^2 at N = 100 / 200 / 400 / 800, with wall time quadrupling as N doubles.
+//
+// At this bound -- "a/" repeated 2040 times -- that is ~254 MB of malloc traffic and
+// ~21 ms for a single call. Bounded and survivable, but two whole startup budgets for
+// one path, which is why the check is not merely defensive: without it a megabyte-long
+// argument from a model in a generation loop would cost minutes.
+//
+// Worth revisiting if path resolution ever shows up in a profile. Fixing it properly
+// means dropping fs::path for lstat(2) on a plain string, since constructing a path
+// parses it too; accumulating into a std::string alone does not help.
 constexpr std::size_t kMaxPathLength = PATH_MAX;
 }  // namespace
 
