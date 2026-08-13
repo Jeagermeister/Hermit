@@ -1,5 +1,9 @@
 # fsops results — 2026-08-12
 
+**Two sweeps, 252 runs.** Sweep 1 (qwen + llama floor) below; sweep 2 (three non-thinking
+models + control) in [SWEEP2.md](./SWEEP2.md). Read SWEEP2 first — it corrects two
+conclusions drawn here.
+
 `cachyos-x8664` (MSI laptop) · **NVIDIA RTX 5080 Laptop 16 GB** · `num_ctx` 65536 ·
 3 repeats · model-default sampling · transcripts off · Hermes Agent
 
