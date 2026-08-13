@@ -4,9 +4,6 @@ Every requirement here traces to a failure observed on this hardware, in
 [`bench/fsops`](./bench/fsops/). None of them are preferences, and none are inherited from
 upstream's design. Where a requirement came from a single run, it says so.
 
-> **Naming:** referred to as **SIGIL** in conversation as of 2026-08-13. The repository and
-> Gitea remote are still `Hermes-Cpp`. Renaming is an open decision, not a settled one.
-
 Evidence base: **264 runs** across two sweeps plus targeted probes, 2026-08-12/13,
 `cachyos-x8664`, RTX 5080 Laptop 16 GB, Hermes Agent v0.20.0, Ollama 0.32.9.
 
@@ -123,7 +120,7 @@ at startup rather than 60 runs into a job.
 
 Requirements R3 through R7 — verification, backup, read-back, state polling, retry — **have no
 upstream equivalent**. Hermes Agent does not do them; that is why the failures above were
-observable. The valuable part of SIGIL is therefore not ported code, it is new code.
+observable. The valuable part of Hermes-Cpp is therefore not ported code, it is new code.
 
 That reframes the rewrite: the goal is a thin, correct agent loop plus a supervisor that upstream
 never had, not a reproduction of upstream's surface area. See [SCOPE.md](./SCOPE.md).
