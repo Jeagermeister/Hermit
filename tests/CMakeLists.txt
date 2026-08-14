@@ -10,10 +10,11 @@ FetchContent_MakeAvailable(googletest)
 add_executable(hermes_tests
   sandbox_test.cpp
   ollama_client_test.cpp
-  preflight_test.cpp)
+  preflight_test.cpp
+  config_test.cpp)
 
 target_link_libraries(hermes_tests
-  PRIVATE hermes_core hermes_ollama hermes_warnings GTest::gtest_main)
+  PRIVATE hermes_app hermes_core hermes_ollama hermes_warnings GTest::gtest_main)
 
 include(GoogleTest)
 # A symlink-loop bug shows up as non-termination, not as a wrong answer, so the loop

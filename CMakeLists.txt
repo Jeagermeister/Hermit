@@ -151,9 +151,21 @@ target_link_libraries(hermes_ollama
   PUBLIC  hermes_sanitizers nlohmann_json::nlohmann_json)
 add_library(hermes::ollama ALIAS hermes_ollama)
 
+# The frontend layer of D7's table. It names a model and a base URL, so it cannot be
+# core; it is a library rather than code inside main() because the CLI and the eventual
+# MCP-over-stdio server are supposed to compose themselves from the same settings.
+add_library(hermes_app
+  src/hermes/app/config.cpp)
+
+target_include_directories(hermes_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(hermes_app
+  PRIVATE hermes_warnings
+  PUBLIC  hermes_core hermes_ollama hermes_sanitizers nlohmann_json::nlohmann_json)
+add_library(hermes::app ALIAS hermes_app)
+
 # --- the binary --------------------------------------------------------------
 add_executable(hermes-cpp src/main.cpp)
-target_link_libraries(hermes-cpp PRIVATE hermes_core hermes_ollama hermes_warnings)
+target_link_libraries(hermes-cpp PRIVATE hermes_app hermes_core hermes_ollama hermes_warnings)
 
 # --- tests -------------------------------------------------------------------
 if(HERMES_BUILD_TESTS)

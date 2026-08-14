@@ -92,11 +92,28 @@ cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DHERMES_SANITIZE=ON
 cmake --build build-asan && ./build-asan/tests/hermes_tests
 ```
 
-`hermes-cpp <root> <path>...` shows how paths resolve against a sandbox root, including from a
-different working directory — which is the R1 failure made visible:
+The binary is a manual harness for the pieces that exist, not the product's CLI:
 
 ```bash
-cd /tmp && "$OLDPWD/build/hermes-cpp" ~/some/root note.txt ../../etc/passwd
+hermes-cpp resolve   --root DIR <path>...   # R1 path resolution
+hermes-cpp preflight --model NAME           # R9 model gates, against a live daemon
+hermes-cpp config                           # every setting in force, and where it came from
+```
+
+`resolve` shows how paths land against a sandbox root from a *different* working directory —
+the R1 failure made visible:
+
+```bash
+cd /tmp && "$OLDPWD/build/hermes-cpp" resolve --root ~/some/root note.txt ../../etc/passwd
+```
+
+Settings come from four places, in increasing precedence: **defaults < `--config` file <
+environment < flags**. There is deliberately no default sandbox root and no implicit search for
+a config file — either one would be an inferred root, which is R1's original bug. `hermes-cpp
+config` prints the resolved set with the origin of each value:
+
+```bash
+hermes-cpp config --config ./hermes.json --model qwen35-agent
 ```
 
 ## Working with upstream

@@ -169,7 +169,122 @@ don't reach for it.
       interrogating the wrong component. **Verified on g++ 15.2 and clang 21.1, both against
       libstdc++. libc++ is untested.**
 - [x] JSON handling — nlohmann v3.12.0, in the build with the client (D2)
-- [ ] Config + CLI entry point
+- [x] **Config + CLI entry point** — `src/hermes/app/config.{h,cpp}`, 78 tests. Four sources
+      overlaid field by field — defaults < `--config` file < environment < flags — with each
+      field recording which source last wrote it. A new `hermes_app` target, because settings
+      that name a model and a base URL cannot live in `core` under D7's layering table, and
+      because the MCP-over-stdio frontend has to compose itself from the same settings rather
+      than from a second parser. `hermes-cpp config` prints the resolved set. Findings from
+      building it:
+      - **R1 is a rule about configuration, not just about path resolution.** Its own words are
+        "never inherit a working directory, never infer a project or git root," and applying
+        that here settles two questions that would otherwise have been taste. The sandbox root
+        gets **no default** — not the working directory, not `$HOME`, not a git root, because
+        every candidate default *is* an inferred root. And there is **no implicit config-file
+        search**: walking up from the working directory looking for `.hermes.json` is the same
+        act, so a file is read when it is named and never otherwise.
+      - **A relative sandbox root has three different honest answers, one per source.** This was
+        not anticipated and is the most interesting thing the work turned up. A path in a *file*
+        anchors to that file's own directory — anything else makes one file mean different
+        things depending on where the binary was launched. A path typed as a *flag* anchors to
+        the working directory, legitimately: it was typed at launch, where that directory is
+        whatever the operator is looking at. A path in the *environment* has neither anchor, so
+        it is **rejected** rather than resolved against a guess. `load` settles all three before
+        anything downstream sees the value, which is also what lets the printed config show the
+        directory that will actually be used instead of the two characters somebody typed.
+      - **D7's loopback rule now fails at configuration rather than at connect.** `validate`
+        calls `ollama::validate_base_url` instead of restating it — there must be exactly one
+        answer to "is this URL local?", since that is what keeps sandbox file contents on the
+        machine. The gain is when, not whether: `--url http://10.0.0.5:11434` is refused before
+        a Client exists.
+      - **`nlohmann`'s `is_number_integer` would have accepted `-1` as a clamp of
+        18446744073709551615.** Signed, converted to `uint64_t`, it sails past every range check
+        as an enormous positive number — for `max_num_ctx` specifically, that is D8's
+        machine-freezing value arriving through a typo. `is_number_unsigned` is what makes it a
+        type error instead.
+      - **Unknown keys are errors.** A typo'd `max_num_ctx` that is silently dropped leaves the
+        D8 clamp at its default while the operator believes they raised it. Silently discarding
+        a setting somebody wrote down is the failure mode this codebase keeps finding in other
+        people's tools.
+      - **The printed config is a product surface, not a debugging aid.** Four sources feed
+        these settings and two of them (`max_num_ctx`, `minimum_context`) are safety limits
+        whose numbers this project has already had to correct in public once. A raised clamp, a
+        disabled R9 floor and a waived tools gate are each legal and each earn a marked line:
+        nothing is rejected for being unusual, but nothing unusual can be in force silently.
+
+      **Four defects found in review, all reproduced against the binary before being fixed.**
+      Recorded because three of them are the same shape as failures this project already has
+      requirements about:
+
+      - **`std::ifstream` opens a *directory* successfully on Linux, and then aborts the
+        process.** `!file` is false, so the guard passes; libstdc++ throws
+        `std::ios_base::failure` out of `basic_filebuf::underflow` on the first read — from
+        inside the streambuf, where the stream's exception mask does not gate it —
+        `istreambuf_iterator` propagates it, and `main` has no handler. `hermes-cpp config
+        --config /etc` dumped core. Pointing at a config *directory* instead of the file inside
+        it is an ordinary slip. Fixed by requiring a regular file before opening, which also
+        covers a FIFO (where the `open` itself would have blocked forever) and a device node,
+        plus a `try`/`catch` so "no exception escapes" is a guarantee rather than a list.
+      - **An oversized timeout did not lengthen the wait, it removed it.**
+        `std::chrono::seconds::rep` is `int64_t`, so `--chat-timeout 18446744073709551615`
+        arrived as **−1**; cpp-httplib casts to `int` milliseconds and hands that to `poll(2)`,
+        where a negative timeout means *block forever*. A fail-open on the one setting whose
+        job is to bound a wedged daemon — the same shape as R9's original fail-open and the
+        sandbox's EACCES bug. Now bounded at both ends, in the overlays and again in
+        `validate`.
+      - **`HERMES_CONFIG=` set-but-empty read no file and said nothing** — the fail-closed rule
+        broken for the single variable that selects every other setting. It was also the one
+        setting read through a bare `getenv` rather than the injected lookup, so no test could
+        reach it; that is why it survived. Both fixed together, which is not a coincidence.
+      - **Two parsers over one command line disagreed about which tokens are values.**
+        `--model --config x.json` loaded `x.json` — the config-file scan saw `--config`
+        followed by a path, while the flag parser read a model literally named `--config`. A
+        file the operator never asked for was applied. The scan now steps over other flags'
+        values from a shared table, a flag where a value belongs is rejected outright, and a
+        drift test asserts the two still describe the same command line. `--` was added at the
+        same time, since a path-resolution tool that cannot name a path beginning with a dash
+        has a real gap and the *model* picks those names.
+
+      Also from review, and worth keeping in view: `load` hands back `string_view`s into its
+      own arguments. Free from `main`, where they point into `argv`; a trap for the MCP
+      frontend, which would naturally build them from `std::string`s that then go out of scope,
+      leaving the positional list dangling next to a `Config` that owns its strings and looks
+      perfectly healthy. Documented on the declaration.
+
+      **A second review round, against the fixed code, found four more — including one the
+      first round's own fix introduced.** Recorded because the pattern is the lesson:
+
+      - **`HERMES_CONFIG` was resolved against the working directory, while
+        `HERMES_SANDBOX_ROOT` right beside it was rejected for exactly that.** The fix that
+        routed the variable through the testable seam never asked whether the value was
+        relative. Same doctrine, opposite treatment, three functions apart — and the longer
+        route was worse: a cwd-dependent *file* can itself set a relative `sandbox_root`
+        anchored to whichever directory won. An inferred root arriving by the back door. Now
+        rejected, with the same message as its sibling.
+      - **The D7 loopback check ran for commands that never open a socket.** An
+        `HERMES_OLLAMA_URL` exported for some other tool broke `resolve`, which is pure
+        filesystem work — and stopped `hermes-cpp config` printing, which is the command whose
+        entire job is showing you which value is wrong. Gated on a new `Requirements::ollama`,
+        with `render()` marking a non-loopback URL instead. Verified that `preflight` still
+        refuses one, since that is the half that matters.
+      - **Only `apply_json` had been made transactional; `apply_env` and `apply_flags` still
+        left partial state behind on error.** Fixing one instance of a pattern and not its two
+        siblings is its own failure mode. All three now commit or do nothing.
+      - **The drift guard was not bidirectional, and the test was itself a third copy of the
+        flag table.** Now `flags_taking_a_value()` exposes the real table so the test cannot
+        drift from it, and `take()` refuses to run for a flag missing from that table — so the
+        dangerous direction (a value-taking flag added to the chain and forgotten in the table,
+        re-creating the two-parser divergence) fails loudly the first time it is used.
+
+      **One fix collided with another, which is the most useful thing this round produced.**
+      Making `find_config_flag` skip only well-formed values — so a `--` terminator stayed
+      visible — silently re-opened the `--model --config x.json` hole the previous round had
+      closed. The test suite caught it immediately. The right answer was not to make that
+      scanner cleverer but to remove its exposure: `load` now parses the flags once against a
+      throwaway config before any file is opened, so a bad command line is reported against the
+      flag the operator actually got wrong and no file is read on the strength of a line
+      already known to be invalid. Two parsers over one command line can only be reconciled by
+      ordering, not by making each smarter.
 - [ ] Session/history model
 - [ ] **Wall-clock budgets (R8)** — per turn and per session, a timeout recorded as a failure
       rather than dropped from the denominator. Phase 0 strengthens this considerably: 11 of 19
