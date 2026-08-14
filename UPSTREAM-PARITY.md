@@ -33,7 +33,7 @@ coarse; the drill-down stays sharp.
 |---|---:|---|---|
 | `agent/` | 136,525 | in scope | The loop. The core idea worth borrowing. |
 | `tools/` | 128,965 | in scope | File operations — what this project is *for*. |
-| `providers/` | 452 | in scope | Only Ollama matters here; upstream's is tiny anyway. |
+| `providers/` | 452 | in scope | Only local backends matter here — Ollama, and vLLM per D9; upstream's is tiny anyway. |
 | `hermes_cli/` | 213,032 | **out** | Largest subsystem, almost all surface area. |
 | `gateway/` | 103,744 | **out** | Discord/Telegram/messaging. Not wanted. |
 | `plugins/` | 128,457 | **out** | Extension surface for a program that does not exist yet. |

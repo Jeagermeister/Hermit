@@ -482,6 +482,12 @@ These are hard to reverse and benefit from being argued out before code exists:
       Cheap insurance regardless of whether the contamination is the tool's or the model's,
       which is exactly why the requirement outlived the correction to its evidence.
 - [ ] `move`, `search`
+- [ ] **Do not foreclose the second backend ([D9](./DECISIONS.md)).** vLLM is decided in
+      principle and **deferred** — Kitchen's default runtime is Ollama, so nothing is blocked
+      today. The Phase 2 obligation is only to avoid adding new per-request assumptions to
+      the client. The implementation, and its two gates (per-backend preflight; where the
+      context window lives), are recorded in D9 and become schedulable if Kitchen's default
+      flips to vLLM.
 
 ---
 

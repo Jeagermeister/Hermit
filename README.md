@@ -17,7 +17,7 @@ runs revealed. That last claim is inferred from behaviour, not from reading upst
 [REQUIREMENTS.md](./REQUIREMENTS.md).
 
 
-A fast, local-first agent runner in **C/C++**, built around **Ollama**.
+A fast, local-first agent runner in **C/C++**, built around **local inference** (Ollama today, vLLM from [D9](./DECISIONS.md)).
 
 Inspired by [NousResearch Hermes Agent](https://github.com/nousresearch/hermes-agent) (Python),
 but **not a port of it**. Upstream is a reference for behaviour worth having, not a target to
