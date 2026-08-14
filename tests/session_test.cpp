@@ -1,0 +1,595 @@
+// Session and history, exercised without a daemon.
+//
+// That is the point of the class taking a ChatReply rather than a Client: the policy
+// that decides what to drop, and the check that catches a server-side discard, are both
+// reachable from a unit test. The behaviour being defended against was measured against
+// a live Ollama (see session.h) and is reproduced here as data rather than as a live
+// call, for the same reason D8's clamp is tested offline -- verifying it for real means
+// performing the failure.
+
+#include <hermes/supervisor/session.h>
+
+#include <gtest/gtest.h>
+
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
+#include <string>
+
+namespace {
+
+using hermes::supervisor::calibrate;
+using hermes::supervisor::kInitialCharsPerToken;
+using hermes::supervisor::kPerMessageOverhead;
+using hermes::supervisor::looks_truncated;
+using hermes::supervisor::Session;
+using hermes::supervisor::SessionError;
+using hermes::supervisor::SessionOptions;
+
+hermes::ollama::ClientOptions client_with(std::uint64_t max_num_ctx) {
+  hermes::ollama::ClientOptions options;
+  options.max_num_ctx = max_num_ctx;
+  return options;
+}
+
+SessionOptions options_with(std::uint64_t num_ctx, std::uint64_t reserve) {
+  SessionOptions options;
+  options.model = "test-model";
+  options.num_ctx = num_ctx;
+  options.reply_reserve = reserve;
+  // The generation budget has to fit the room reserved for it, so these move together
+  // unless a test is deliberately setting them against each other.
+  options.max_tokens = static_cast<int>(reserve);
+  return options;
+}
+
+std::string text_of(std::size_t chars) { return std::string(chars, 'x'); }
+
+/// A session with a 1000-token window and 100 reserved, so the prompt budget is 900 and
+/// the arithmetic in these tests can be done by hand.
+Session small_session(const std::string& system = "sys") {
+  auto session = Session::open(options_with(1000, 100), client_with(65536), system);
+  // Not EXPECT_TRUE: that is non-fatal, so a helper using it would go on to dereference
+  // an empty expected and crash the whole binary instead of failing one test.
+  if (!session) throw std::runtime_error("small_session: " + session.error().message());
+  return std::move(*session);
+}
+
+hermes::ollama::ChatReply reply_with(std::string content, std::uint64_t prompt_tokens,
+                                     std::uint64_t completion_tokens = 10) {
+  hermes::ollama::ChatReply reply;
+  reply.content = std::move(content);
+  reply.prompt_tokens = prompt_tokens;
+  reply.completion_tokens = completion_tokens;
+  reply.finish_reason = "stop";
+  return reply;
+}
+
+// --- the window, and the clamp that decides it ------------------------------
+
+TEST(SessionWindow, PlansAgainstTheClampedWindowRatherThanTheRequestedOne) {
+  // The trap this guards: asking for 131072 while the client will send 65536 fills the
+  // window to twice its size, and the server discards the overflow without a word.
+  const auto session = Session::open(options_with(131072, 4096), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  EXPECT_EQ(session->window(), 65536u);
+  EXPECT_EQ(session->prompt_budget(), 65536u - 4096u);
+}
+
+TEST(SessionWindow, LeavesTheRequestedWindowAloneWhenItIsUnderTheClamp) {
+  const auto session = Session::open(options_with(8192, 1024), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  EXPECT_EQ(session->window(), 8192u);
+}
+
+TEST(SessionWindow, RefusesAReserveThatLeavesNoRoomForAPrompt) {
+  const auto session = Session::open(options_with(4096, 4096), client_with(65536), "sys");
+  ASSERT_FALSE(session.has_value());
+  EXPECT_EQ(session.error().kind, SessionError::WindowTooSmall);
+}
+
+TEST(SessionWindow, RefusesAWindowThatCannotHoldTheSystemPromptAndAnExchange) {
+  const auto session =
+      Session::open(options_with(600, 100), client_with(65536), text_of(4000));
+  ASSERT_FALSE(session.has_value());
+  EXPECT_EQ(session.error().kind, SessionError::WindowTooSmall);
+  // The message has to name both numbers, or the operator cannot tell which to change.
+  EXPECT_NE(session.error().message().find("600"), std::string::npos);
+}
+
+TEST(SessionWindow, RefusesAGenerationBudgetLargerThanTheReserveHoldingItsRoom) {
+  // The reserve is what keeps the prompt from filling the window; a larger generation
+  // budget means the model runs past it and the server shifts the window, which is the
+  // same silent discard arriving from the other end.
+  SessionOptions options = options_with(65536, 1024);
+  options.max_tokens = 4096;
+  const auto session = Session::open(options, client_with(65536), "sys");
+  ASSERT_FALSE(session.has_value());
+  EXPECT_EQ(session.error().kind, SessionError::WindowTooSmall);
+}
+
+TEST(SessionWindow, AcceptsAGenerationBudgetThatFitsItsReserve) {
+  SessionOptions options = options_with(65536, 4096);
+  options.max_tokens = 4096;
+  EXPECT_TRUE(Session::open(options, client_with(65536), "sys").has_value());
+}
+
+TEST(SessionWindow, RefusesANonPositiveGenerationBudget) {
+  // Ollama reads a non-positive num_predict as "generate without limit", so the field
+  // meant to bound the model would remove its bound instead -- the same shape as the
+  // oversized --chat-timeout that wrapped to -1 and meant "wait forever".
+  SessionOptions options = options_with(65536, 4096);
+  options.max_tokens = -1794967296;  // what max_num_ctx/4 casts to at 1e10
+  const auto session = Session::open(options, client_with(65536), "sys");
+  ASSERT_FALSE(session.has_value());
+  EXPECT_EQ(session.error().kind, SessionError::WindowTooSmall);
+
+  options.max_tokens = 0;
+  EXPECT_FALSE(Session::open(options, client_with(65536), "sys").has_value());
+}
+
+TEST(SessionWindow, TheArchitectureCeilingBoundsThePlanningWindow) {
+  // R9 gates on the architecture because it is the one limit no per-request setting can
+  // raise. D8 invites raising max_num_ctx for a bigger card, and the two constants that
+  // make the defaults cohere are independent -- so the clamp alone is not enough.
+  SessionOptions options = options_with(65536, 4096);
+  options.architecture_context = 8192;
+  const auto session = Session::open(options, client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  EXPECT_EQ(session->window(), 8192u);
+}
+
+TEST(SessionWindow, AGenerousArchitectureDoesNotRaiseTheClamp) {
+  SessionOptions options = options_with(65536, 4096);
+  options.architecture_context = 1048576;
+  const auto session = Session::open(options, client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  EXPECT_EQ(session->window(), 65536u);
+}
+
+TEST(SessionWindow, AnAbsentArchitectureSimplyIsNotApplied) {
+  SessionOptions options = options_with(32768, 4096);
+  options.architecture_context = std::nullopt;
+  const auto session = Session::open(options, client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  EXPECT_EQ(session->window(), 32768u);
+}
+
+TEST(SessionWindow, AnEmptySystemPromptAddsNoTurn) {
+  const auto session = Session::open(options_with(4096, 512), client_with(65536), "");
+  ASSERT_TRUE(session.has_value());
+  EXPECT_TRUE(session->turns().empty());
+}
+
+// --- estimation --------------------------------------------------------------
+
+TEST(SessionEstimate, StartsBelowEveryMeasuredRatioIncludingTheWorstOne) {
+  // Not merely below realistic traffic: below the worst figure in the table, which is
+  // base64 at 1.36 on qwen35-agent. An earlier 2.0 sat above that and under-counted a
+  // base64-dense blob by up to 47%, while the header called under-counting the direction
+  // that ends in a discard. Attribution is what makes this affordable -- the guess now
+  // covers one unsent message rather than the whole conversation.
+  EXPECT_LE(kInitialCharsPerToken, 1.36);
+}
+
+TEST(SessionEstimate, CountsPerMessageTemplateOverhead) {
+  auto session = small_session("");
+  session.add_user(text_of(100));
+  const auto content = static_cast<std::uint64_t>(std::ceil(100.0 / kInitialCharsPerToken));
+  EXPECT_EQ(session.estimated_prompt_tokens(), content + kPerMessageOverhead);
+}
+
+TEST(SessionEstimate, AnEmptyMessageStillCostsItsTemplateOverhead) {
+  auto session = small_session("");
+  session.add_user("");
+  EXPECT_EQ(session.estimated_prompt_tokens(), kPerMessageOverhead);
+}
+
+// --- preparing a request -----------------------------------------------------
+
+TEST(SessionPrepare, SendsTheClampedWindowAsNumCtx) {
+  auto session = Session::open(options_with(131072, 4096), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user("hello");
+  const auto request = session->prepare();
+  ASSERT_TRUE(request.has_value());
+  ASSERT_TRUE(request->num_ctx.has_value());
+  EXPECT_EQ(*request->num_ctx, 65536u);
+  EXPECT_EQ(request->model, "test-model");
+}
+
+TEST(SessionPrepare, KeepsEverythingWhenItFits) {
+  auto session = small_session();
+  session.add_user("first");
+  const auto request = session.prepare();
+  ASSERT_TRUE(request.has_value());
+  ASSERT_EQ(request->messages.size(), 2u);
+  EXPECT_EQ(request->messages[0].role, "system");
+  EXPECT_EQ(request->messages[1].content, "first");
+  EXPECT_EQ(session.dropped(), 0u);
+}
+
+TEST(SessionPrepare, DropsTheOldestUnpinnedTurnToMakeRoom) {
+  // Derived from the ratio rather than hand-written, so tightening the constant tunes
+  // the estimate instead of breaking the test that checks the drop policy.
+  auto session = small_session();
+  const auto per_turn =
+      static_cast<std::uint64_t>(std::ceil(200.0 / kInitialCharsPerToken)) + kPerMessageOverhead;
+  const auto system_cost =
+      static_cast<std::uint64_t>(std::ceil(3.0 / kInitialCharsPerToken)) + kPerMessageOverhead;
+  const auto fits = (session.prompt_budget() - system_cost) / per_turn;
+
+  for (std::uint64_t i = 0; i < fits + 1; ++i) session.add_user(text_of(200));
+
+  const auto request = session.prepare();
+  ASSERT_TRUE(request.has_value());
+  EXPECT_EQ(session.dropped(), 1u);
+  EXPECT_EQ(request->messages.size(), fits + 1);  // system plus the survivors
+  EXPECT_EQ(request->messages[0].role, "system");
+  EXPECT_LE(session.estimated_prompt_tokens(), session.prompt_budget());
+}
+
+TEST(SessionPrepare, NeverDropsTheSystemPrompt) {
+  auto session = small_session();
+  for (int i = 0; i < 40; ++i) session.add_user(text_of(200));
+  const auto request = session.prepare();
+  ASSERT_TRUE(request.has_value());
+  ASSERT_FALSE(request->messages.empty());
+  EXPECT_EQ(request->messages.front().role, "system");
+  EXPECT_EQ(request->messages.front().content, "sys");
+  EXPECT_GT(session.dropped(), 1u);
+}
+
+TEST(SessionPrepare, NeverDropsTheMessageCurrentlyBeingAnswered) {
+  auto session = small_session();
+  for (int i = 0; i < 20; ++i) session.add_user(text_of(200));
+  session.add_user("the question that matters");
+
+  const auto request = session.prepare();
+  ASSERT_TRUE(request.has_value());
+  EXPECT_EQ(request->messages.back().content, "the question that matters");
+}
+
+TEST(SessionPrepare, RefusesAMessageLargerThanTheWindowInsteadOfLettingTheServerManageIt) {
+  // A tool returning more than the window holds is the tool's bug. Reporting it here
+  // beats handing it over to be silently gutted -- which is what the server does, and
+  // it keeps the system prompt while doing it, so the model still looks configured.
+  auto session = small_session();
+  session.add_user(text_of(10000));  // 5000 tokens against a 900-token budget
+
+  const auto request = session.prepare();
+  ASSERT_FALSE(request.has_value());
+  EXPECT_EQ(request.error().kind, SessionError::MessageTooLarge);
+}
+
+TEST(SessionPrepare, CountsEveryDropAcrossTheWholeSession) {
+  auto session = small_session();
+  for (int i = 0; i < 8; ++i) session.add_user(text_of(200));
+  ASSERT_TRUE(session.prepare().has_value());
+  const std::size_t after_first = session.dropped();
+  ASSERT_GT(after_first, 0u);
+
+  for (int i = 0; i < 4; ++i) session.add_user(text_of(200));
+  ASSERT_TRUE(session.prepare().has_value());
+  EXPECT_GT(session.dropped(), after_first);
+}
+
+// --- recording a reply -------------------------------------------------------
+
+TEST(SessionRecord, AppendsTheReplyAndAccumulatesTheGenerationCount) {
+  auto session = small_session();
+  session.add_user("question");
+  ASSERT_TRUE(session.prepare().has_value());
+
+  ASSERT_TRUE(session.record(reply_with("answer", 30, 42)).has_value());
+  EXPECT_EQ(session.turns().back().message.role, "assistant");
+  EXPECT_EQ(session.turns().back().message.content, "answer");
+  EXPECT_EQ(session.completed_turns(), 1u);
+  EXPECT_EQ(session.generated_tokens(), 42u);
+}
+
+TEST(SessionRecord, RefusesAReplyWithNoPreparedRequestBehindIt) {
+  auto session = small_session();
+  const auto recorded = session.record(reply_with("answer", 30));
+  ASSERT_FALSE(recorded.has_value());
+  EXPECT_EQ(recorded.error().kind, SessionError::NoRequestOutstanding);
+}
+
+TEST(SessionRecord, RefusesToRecordTheSameReplyTwice) {
+  auto session = small_session();
+  session.add_user("question");
+  ASSERT_TRUE(session.prepare().has_value());
+  ASSERT_TRUE(session.record(reply_with("answer", 30)).has_value());
+
+  const auto again = session.record(reply_with("answer", 30));
+  ASSERT_FALSE(again.has_value());
+  EXPECT_EQ(again.error().kind, SessionError::NoRequestOutstanding);
+}
+
+TEST(SessionRecord, AMessageAddedAfterPrepareInvalidatesTheOutstandingRequest) {
+  // Otherwise the assistant reply lands after the new user message and the history is
+  // silently out of order -- which is worse than an error, because it still works.
+  auto session = small_session();
+  session.add_user("question");
+  ASSERT_TRUE(session.prepare().has_value());
+  session.add_user("second thought");
+
+  const auto recorded = session.record(reply_with("answer", 30));
+  ASSERT_FALSE(recorded.has_value());
+  EXPECT_EQ(recorded.error().kind, SessionError::NoRequestOutstanding);
+}
+
+TEST(SessionRecord, ReportsAServerSideDiscardRatherThanAbsorbingIt) {
+  // The measured case: gemma31-agent evaluated 64 tokens of a 9005-token prompt and the
+  // reply came back looking entirely healthy.
+  auto session = Session::open(options_with(65536, 4096), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user(text_of(20000));  // ~10000 estimated tokens, comfortably inside
+  ASSERT_TRUE(session->prepare().has_value());
+
+  const auto recorded = session->record(reply_with("looks fine", 64));
+  ASSERT_FALSE(recorded.has_value());
+  EXPECT_EQ(recorded.error().kind, SessionError::PromptWasTruncated);
+  EXPECT_NE(recorded.error().message().find("64"), std::string::npos);
+}
+
+TEST(SessionRecord, KeepsTheReplyInHistoryEvenWhenItReportsADiscard) {
+  // The turn happened. Dropping it would leave the caller unable to see what the model
+  // was actually answering when it went wrong.
+  auto session = Session::open(options_with(65536, 4096), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user(text_of(20000));
+  ASSERT_TRUE(session->prepare().has_value());
+
+  ASSERT_FALSE(session->record(reply_with("looks fine", 64)).has_value());
+  EXPECT_EQ(session->turns().back().message.content, "looks fine");
+  EXPECT_EQ(session->completed_turns(), 1u);
+}
+
+TEST(SessionRecord, DoesNotMistakeOrdinaryOverEstimationForADiscard) {
+  // English prose measures near 5.9 chars/token against the 2.0 assumed, so a healthy
+  // reply routinely evaluates about a third of the estimate. That must not fire.
+  auto session = Session::open(options_with(65536, 4096), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user(text_of(20000));
+  const auto request = session->prepare();
+  ASSERT_TRUE(request.has_value());
+
+  const std::uint64_t estimated = session->estimated_prompt_tokens();
+  EXPECT_TRUE(session->record(reply_with("fine", estimated / 3)).has_value());
+}
+
+TEST(SessionRecord, DoesNotCalibrateOnATruncatedPrompt) {
+  // A truncated prompt_tokens describes a prompt this session did not send. Tightening
+  // the ratio on it would be calibrating against a measurement of something else.
+  auto session = Session::open(options_with(65536, 4096), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user(text_of(20000));
+  ASSERT_TRUE(session->prepare().has_value());
+  const double before = session->chars_per_token();
+
+  ASSERT_FALSE(session->record(reply_with("looks fine", 64)).has_value());
+  EXPECT_DOUBLE_EQ(session->chars_per_token(), before);
+}
+
+// --- calibration -------------------------------------------------------------
+
+TEST(SessionCalibrate, TightensWhenTheEstimateWasTooGenerous) {
+  // 1000 chars measured at 1000 tokens is about 1.03 chars/token, well under the 2.0
+  // assumed, so the assumption was optimistic and must come down.
+  const double revised = calibrate(2.0, 1000, 2, 1000);
+  EXPECT_LT(revised, 2.0);
+  EXPECT_GT(revised, 0.5);
+}
+
+TEST(SessionCalibrate, NeverLoosensOnAGenerousObservation) {
+  // One prose-heavy turn must not raise the ratio just in time for the next turn to
+  // carry a file full of paths.
+  EXPECT_DOUBLE_EQ(calibrate(2.0, 1000, 2, 100), 2.0);
+}
+
+TEST(SessionCalibrate, HasAFloorSoOneOddSampleCannotDriveItToAbsurdity) {
+  EXPECT_GE(calibrate(2.0, 100, 0, 100000), 0.5);
+}
+
+TEST(SessionCalibrate, IgnoresAMeasurementSwallowedEntirelyByTheOverheadAssumption) {
+  EXPECT_DOUBLE_EQ(calibrate(2.0, 1000, 10, kPerMessageOverhead * 10), 2.0);
+  EXPECT_DOUBLE_EQ(calibrate(2.0, 0, 2, 500), 2.0);
+}
+
+TEST(SessionCalibrate, ATightenedRatioRaisesTheEstimateForUnseenContent) {
+  auto session = Session::open(options_with(65536, 4096), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user(text_of(2000));
+  ASSERT_TRUE(session->prepare().has_value());
+
+  // 2000 chars that actually cost 1800 tokens: about 1.1 chars/token, well under the
+  // 2.0 assumed, so the assumption must come down.
+  ASSERT_TRUE(session->record(reply_with("", 1800)).has_value());
+  const double tightened = session->chars_per_token();
+  ASSERT_LT(tightened, 2.0);
+
+  // The tightened ratio governs the *next* message, which is the one nothing has
+  // measured yet.
+  const std::uint64_t before = session->estimated_prompt_tokens();
+  session->add_user(text_of(1000));
+  const std::uint64_t added = session->estimated_prompt_tokens() - before;
+  const auto at_initial_ratio =
+      static_cast<std::uint64_t>(std::ceil(1000.0 / kInitialCharsPerToken)) + kPerMessageOverhead;
+  EXPECT_GT(added, at_initial_ratio);
+}
+
+// --- attribution: guessing only about what has never been sent ---------------
+
+TEST(SessionAttribution, PricesTheSentTurnsFromTheReplyRatherThanLeavingThemGuessed) {
+  auto session = small_session();
+  session.add_user(text_of(200));
+  ASSERT_TRUE(session.prepare().has_value());
+  EXPECT_EQ(session.measured_turns(), 0u);
+
+  ASSERT_TRUE(session.record(reply_with("ok", 90)).has_value());
+  // System and user were both in the prompt the reply priced; the assistant reply was
+  // not, so it stays on its estimate.
+  EXPECT_EQ(session.measured_turns(), 2u);
+  EXPECT_TRUE(session.turns()[0].measured_tokens.has_value());
+  EXPECT_TRUE(session.turns()[1].measured_tokens.has_value());
+  EXPECT_FALSE(session.turns()[2].measured_tokens.has_value());
+}
+
+TEST(SessionAttribution, NeverCreditsTheReplyItselfWithPromptTokens) {
+  // The measurement covers the prompt. Sharing it across the answer the model produced
+  // afterwards would price a message the server never saw.
+  auto session = small_session();
+  session.add_user("short");
+  ASSERT_TRUE(session.prepare().has_value());
+  ASSERT_TRUE(session.record(reply_with(text_of(400), 40)).has_value());
+
+  const auto& assistant = session.turns().back();
+  ASSERT_EQ(assistant.message.role, "assistant");
+  EXPECT_FALSE(assistant.measured_tokens.has_value());
+}
+
+TEST(SessionAttribution, TheAccountingConvergesOnWhatTheServerActuallyCharged) {
+  // The behaviour the live harness was built to show: before attribution a session
+  // over-estimated 935 against a measured 268 and dropped five turns it could have kept.
+  auto session = Session::open(options_with(65536, 4096), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user(text_of(4000));
+  ASSERT_TRUE(session->prepare().has_value());
+  const std::uint64_t guessed = session->estimated_prompt_tokens();
+
+  ASSERT_TRUE(session->record(reply_with("", 700)).has_value());
+  // Only the assistant reply is still a guess, and it is empty.
+  EXPECT_LT(session->estimated_prompt_tokens(), guessed / 2);
+  EXPECT_GE(session->estimated_prompt_tokens(), 700u);
+}
+
+TEST(SessionAttribution, AnAlreadyPricedTurnKeepsItsFigureAcrossLaterTurns) {
+  auto session = small_session();
+  session.add_user("first");
+  ASSERT_TRUE(session.prepare().has_value());
+  ASSERT_TRUE(session.record(reply_with("one", 60)).has_value());
+  const std::uint64_t system_cost = *session.turns()[0].measured_tokens;
+
+  session.add_user("second");
+  ASSERT_TRUE(session.prepare().has_value());
+  ASSERT_TRUE(session.record(reply_with("two", 140)).has_value());
+  // Its content has not changed, so neither has what it costs.
+  EXPECT_EQ(*session.turns()[0].measured_tokens, system_cost);
+}
+
+TEST(SessionAttribution, LeavesTurnsGuessedWhenTheMeasurementIsAlreadySpent) {
+  // A measurement no larger than what earlier turns were already priced at leaves
+  // nothing to share out. Falling back to the pessimistic estimate is the safe reading.
+  auto session = small_session();
+  session.add_user("first");
+  ASSERT_TRUE(session.prepare().has_value());
+  ASSERT_TRUE(session.record(reply_with("one", 300)).has_value());
+
+  session.add_user(text_of(100));
+  ASSERT_TRUE(session.prepare().has_value());
+  ASSERT_TRUE(session.record(reply_with("two", 300)).has_value());
+  EXPECT_FALSE(session.turns()[2].measured_tokens.has_value());
+}
+
+TEST(SessionAttribution, DoesNotPriceTurnsFromATruncatedPrompt) {
+  auto session = Session::open(options_with(65536, 4096), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user(text_of(20000));
+  ASSERT_TRUE(session->prepare().has_value());
+
+  ASSERT_FALSE(session->record(reply_with("looks fine", 64)).has_value());
+  EXPECT_EQ(session->measured_turns(), 0u);
+}
+
+TEST(SessionAttribution, PricesTheReplyWithTheRatioAsCalibrationLeavesIt) {
+  // The reply is appended after calibration, so it must be priced at the tightened
+  // ratio. Pricing it first left a stale, too-low figure that re_estimate() could not
+  // reach -- it walks the history, which the reply had not joined yet -- and the next
+  // prepare() then admitted it against the budget. Under-count, unsafe direction, and
+  // it landed on the very first turn, which is when the big calibration jump happens.
+  auto session = Session::open(options_with(65536, 4096), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user(text_of(2000));
+  ASSERT_TRUE(session->prepare().has_value());
+
+  const double before = session->chars_per_token();
+  ASSERT_TRUE(session->record(reply_with(text_of(2000), 1800)).has_value());
+  const double after = session->chars_per_token();
+  ASSERT_LT(after, before) << "this test is meaningless unless the ratio actually moved";
+
+  const auto stale = static_cast<std::uint64_t>(std::ceil(2000.0 / before));
+  const auto correct = static_cast<std::uint64_t>(std::ceil(2000.0 / after));
+  EXPECT_EQ(session->turns().back().estimated_tokens, correct);
+  EXPECT_GT(correct, stale);
+}
+
+TEST(SessionAttribution, IgnoresAPromptCountLargerThanTheWindowItWasSentIn) {
+  // num_ctx is exactly what bounds prompt_eval_count, so a bigger number is a daemon
+  // this code cannot reason about. Left unbounded it drives calibration to its floor
+  // and reaches share_out, where a value near the limit of the type stops being safe.
+  auto session = Session::open(options_with(8192, 1024), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user(text_of(2000));
+  ASSERT_TRUE(session->prepare().has_value());
+
+  ASSERT_TRUE(session->record(reply_with("ok", std::numeric_limits<std::uint64_t>::max()))
+                  .has_value());
+  EXPECT_GE(session->chars_per_token(), 0.5);
+  for (const auto& turn : session->turns()) {
+    EXPECT_LE(turn.cost(), session->window() + kPerMessageOverhead);
+  }
+}
+
+TEST(SessionShareOut, DividesInProportionToWeight) {
+  const std::vector<std::size_t> weights = {100, 300};
+  const auto shares = hermes::supervisor::share_out(weights, 400);
+  ASSERT_EQ(shares.size(), 2u);
+  EXPECT_EQ(shares[0], 100u);
+  EXPECT_EQ(shares[1], 300u);
+}
+
+TEST(SessionShareOut, RoundsUpSoALongHistoryDoesNotBleedTokens) {
+  const std::vector<std::size_t> weights = {1, 1, 1};
+  const auto shares = hermes::supervisor::share_out(weights, 10);
+  ASSERT_EQ(shares.size(), 3u);
+  std::uint64_t total = 0;
+  for (const std::uint64_t s : shares) total += s;
+  EXPECT_GE(total, 10u);
+}
+
+TEST(SessionShareOut, GivesUpRatherThanDividingByNothing) {
+  const std::vector<std::size_t> none;
+  EXPECT_TRUE(hermes::supervisor::share_out(none, 100).empty());
+
+  const std::vector<std::size_t> weightless = {0, 0};
+  EXPECT_TRUE(hermes::supervisor::share_out(weightless, 100).empty());
+
+  const std::vector<std::size_t> weights = {5, 5};
+  EXPECT_TRUE(hermes::supervisor::share_out(weights, 0).empty());
+}
+
+// --- the truncation predicate ------------------------------------------------
+
+TEST(SessionTruncationPredicate, FiresOnTheCollapseThatWasActuallyMeasured) {
+  EXPECT_TRUE(looks_truncated(9005, 64));
+  EXPECT_TRUE(looks_truncated(9018, 70));
+}
+
+TEST(SessionTruncationPredicate, StaysQuietOnShortPromptsWhereTheRatioIsNoise) {
+  EXPECT_FALSE(looks_truncated(100, 1));
+}
+
+TEST(SessionTruncationPredicate, StaysQuietWithinTheRangeOverEstimationCanProduce) {
+  EXPECT_FALSE(looks_truncated(1000, 500));
+  EXPECT_FALSE(looks_truncated(1000, 334));  // the prose case, about a third
+}
+
+TEST(SessionTruncationPredicate, DoesNotWrapOnALargeMeasurement) {
+  // Phrased as multiplication this would overflow and report a truncation that did not
+  // happen, on an unsigned type, silently.
+  EXPECT_FALSE(looks_truncated(1000, std::numeric_limits<std::uint64_t>::max()));
+}
+
+}  // namespace

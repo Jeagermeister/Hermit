@@ -65,7 +65,10 @@ The evidence sits in two places, across two machines and two agent harnesses:
 | Path | What |
 |---|---|
 | `src/hermes/core/` | Library code. `sandbox.{h,cpp}` implements R1 |
-| `src/main.cpp` | `hermes-cpp` — manual harness for inspecting path resolution |
+| `src/hermes/ollama/` | The only layer that speaks HTTP: client and R9 preflight |
+| `src/hermes/supervisor/` | Bounded sessions and the context budget ([D7](./DECISIONS.md)'s middle layer) |
+| `src/hermes/app/` | Configuration, shared by the CLI and the coming MCP frontend |
+| `src/main.cpp` | `hermes-cpp` — manual harness for the pieces that exist |
 | `tests/` | GoogleTest suite; run with `ctest` |
 | `DECISIONS.md` | The hard-to-reverse choices, and what would overturn each |
 | `ROADMAP.md` | Scope, phases, and what has to be settled before code |
@@ -97,6 +100,7 @@ The binary is a manual harness for the pieces that exist, not the product's CLI:
 ```bash
 hermes-cpp resolve   --root DIR <path>...   # R1 path resolution
 hermes-cpp preflight --model NAME           # R9 model gates, against a live daemon
+hermes-cpp session   --model NAME           # context accounting, against a live model
 hermes-cpp config                           # every setting in force, and where it came from
 ```
 
@@ -105,6 +109,17 @@ the R1 failure made visible:
 
 ```bash
 cd /tmp && "$OLDPWD/build/hermes-cpp" resolve --root ~/some/root note.txt ../../etc/passwd
+```
+
+`session` exists because the token estimate is the one thing no unit test can settle — there is
+no tokenizer in the process, so only the daemon can say whether the guess is conservative
+enough. Each turn prints what the session expected against what Ollama actually evaluated.
+Run it with a small window to watch the session compact history *deliberately*, which is the
+whole point: left to itself the server discards the middle of an over-long prompt, keeps the
+system message, and says nothing.
+
+```bash
+hermes-cpp session --model gemma31-agent --max-num-ctx 2048
 ```
 
 Settings come from four places, in increasing precedence: **defaults < `--config` file <

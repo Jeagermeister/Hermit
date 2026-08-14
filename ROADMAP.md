@@ -285,7 +285,143 @@ don't reach for it.
       flag the operator actually got wrong and no file is read on the strength of a line
       already known to be invalid. Two parsers over one command line can only be reconciled by
       ordering, not by making each smarter.
-- [ ] Session/history model
+- [x] **Session/history model** — `src/hermes/supervisor/session.{h,cpp}`, 49 tests, plus a
+      `hermes-cpp session` harness for the one property a unit test cannot settle. A new
+      `hermes_supervisor` target: [D7](./DECISIONS.md)'s table puts bounded sessions in the
+      supervisor layer, and this is the first code that belongs there. It drives no socket
+      itself — `prepare()` returns a `ChatRequest` and `record()` consumes a `ChatReply` — so
+      every policy decision in it is testable offline, for the same reason D8's clamp is.
+
+      **The premise turned out to be worse than assumed, and it was measured rather than
+      taken on trust.** Six messages carrying one codeword each, sent whole at three window
+      sizes, Ollama 0.32.9, `kitchen-desktop`. Columns are [system, u1, a1, u2 (40 KB), a2]:
+
+      | model | `num_ctx` | `prompt_eval_count` | codewords returned |
+      |---|---|---|---|
+      | gemma31-agent | 32768 | 9005 | sys ✓ u1 ✓ a1 ✓ u2 ✓ a2 ✓ |
+      | gemma31-agent | 2048 | **64** | sys ✓ u1 ✗ a1 ✗ u2 ✗ a2 ✓ |
+      | gemma31-agent | 1024 | **64** | sys ✓ u1 ✗ a1 ✗ u2 ✗ a2 ✓ |
+      | qwen35-agent | 32768 | 9018 | sys ✓ u1 ✓ a1 ✓ u2 ✓ a2 ✓ |
+      | qwen35-agent | 2048 | **70** | sys ✓ u1 ✗ a1 ✗ u2 ✗ a2 ✓ |
+
+      - **It is silent, and it keeps the system prompt.** No error, no warning, no flag: a
+        9005-token prompt became 64 and the reply looked entirely healthy. The surviving
+        system prompt is what makes it dangerous — the model still *sounds* correctly
+        configured, having forgotten everything it did. This is R6's shape with the client
+        as the party being misled, and it is the whole argument for the class.
+      - **It discards a contiguous middle, not the oldest turn.** `u1` and `a1` are a few
+        tokens each and would have fitted with room to spare. They went anyway.
+      - **It does not use the window it has** — 64 tokens kept out of 2048 available, and
+        nothing packed back in. So the cost of letting the server handle overflow is not
+        "lose the oldest turn", it is "lose almost everything". Cross-family, so not a
+        gemma quirk.
+      - **`prompt_eval_count` reports the whole prompt, not the newly-evaluated part.**
+        Checked because the opposite would have made a prefix-cache hit indistinguishable
+        from a discard and killed the detection outright: the same prompt sent twice read
+        2127 then 2127, and a two-message continuation 2143 then 2143. So a shortfall
+        against it is real evidence, and `record()` verifies every prompt was received
+        whole — R5's read-back discipline applied to the prompt rather than to a file.
+      - **Four characters per token is not a safe assumption for an agent.** It is an
+        average over English prose, and this sends paths, code and JSON:
+
+        | content | gemma31-agent | qwen35-agent |
+        |---|---|---|
+        | english prose | 5.88 | 5.96 |
+        | source code | 2.85 | 3.11 |
+        | JSON | 2.52 | 3.11 |
+        | filesystem paths | 2.40 | 2.83 |
+        | base64-ish | 1.63 | 1.36 |
+
+        A 4.0 assumption under-counts real traffic by 40% and a base64 blob by nearly 3×,
+        and under-counting is the direction that ends in a discard. There is no tokenizer
+        in this process and Ollama exposes no endpoint for one, so the estimate starts
+        pessimistic and is only ever revised *downwards*.
+      - **Pessimism has a price, and the manual harness is what showed how steep.** This is
+        the second time `src/main.cpp` has earned its keep. The first live run estimated 935
+        tokens for a prompt Ollama evaluated at 268 and **dropped five turns it did not need
+        to drop** — a supervisor discarding history it could have kept, failing in the same
+        direction as the server and only more politely. The fix is that pessimism is only
+        *necessary* for content the model has not seen yet: every prompt already sent has an
+        exact count in `prompt_tokens`, so the measurement is attributed back onto the
+        messages it covered and they stop being guesses. The same run afterwards: **zero
+        turns dropped**, and the model answering "red, blue, and yellow" where it had
+        previously been able to recall only the last one. The guess now applies to one new
+        message instead of compounding across the whole conversation.
+      - **A reserve smaller than the generation budget reserves nothing.** `reply_reserve`
+        keeps the prompt from filling the window; a larger `num_predict` just means the
+        model generates past it and the server shifts the window — the same silent discard
+        arriving from the other end. `open()` refuses the combination rather than leaving a
+        setting that looks protective and is not.
+
+      Dropping, not summarising, is the interim policy: **Context strategy** below is still
+      an open question and quietly answering it here would be the wrong place. What the
+      class does guarantee is that the choice is *this code's* and that it is counted —
+      `dropped()` is a fact about the run, not an implementation detail.
+
+      **Two review rounds found five more defects, and one of them was a measurement the
+      reviews asked for rather than a bug either of them found.**
+
+      - **The reply was priced with the ratio from before its own calibration.** `record()`
+        built the assistant turn, *then* tightened the chars-per-token figure, and
+        `re_estimate()` could not reach the new turn because it walks the history the reply
+        had not joined yet. The stale figure is too *low*, so the next `prepare()` admitted
+        a prompt larger than the session's own belief — under-counting, the unsafe
+        direction, landing on the very first turn because that is when the calibration jump
+        is biggest. Fixed by ordering: the reply is priced last.
+      - **The pessimistic constant was not pessimistic.** It sat at 2.0 and the comment
+        called it "near the base64 worst case", while the table in the same header measures
+        base64 at **1.36** — a 47% under-count, of exactly the content an agent reading
+        files runs into. Now 1.3, below every measured figure. Attribution is what made
+        that affordable: the guess covers one unsent message instead of the whole
+        conversation, so the price of proper pessimism is a message occasionally refused
+        as too large — loud and recoverable — rather than a silent collapse.
+      - **`num_predict` could be handed a negative number, which Ollama reads as
+        "unlimited".** `max_num_ctx` is deliberately unbounded above (D8 invites raising it
+        for a bigger card), the harness derived a reply reserve from it, and
+        `--max-num-ctx 10000000000` cast to **−1794967296**. The setting whose job is to
+        bound generation would have removed its bound. This is the third appearance of the
+        same shape, after R9's original fail-open and the `--chat-timeout` overflow that
+        meant "wait forever"; bounded at both ends now, and `Session::open` refuses a
+        non-positive budget outright.
+      - **Nothing stopped the planning window exceeding the model's architecture.** The
+        defaults cohere only because R9's `minimum_context` floor and D8's `max_num_ctx`
+        clamp are *independently* 65536. Raise the clamp — which D8 explicitly invites —
+        and a session plans against tokens the model cannot hold, discovering it from the
+        collapse afterwards. `SessionOptions::architecture_context` is now a third ceiling
+        and the harness reads it from `/api/show`. It fires on the case above: the same
+        `--max-num-ctx 10000000000` now yields a 262144 window, gemma31's actual
+        architecture, instead of a wrapped generation budget.
+      - **The "planned window and sent window can never disagree" claim was convention, not
+        construction.** `Session::open` took a `ClientOptions` that nothing tied to the
+        `Client` a caller would actually dial, and `Client` exposed no way to check. Now it
+        takes the `Client` itself and reads `max_num_ctx()` from it; the options overload
+        survives as a documented testing seam.
+
+      **The measurement the reviews prompted is the most useful thing here.** Everything
+      above had overflowed the window by 4–100×. Whether a *marginal* overshoot is trimmed
+      proportionally was unmeasured, and it decides whether a collapse-shaped detector is
+      the right shape at all. Swept across a 4096-token window:
+
+      | prompt | evaluated | kept | |
+      |---|---|---|---|
+      | 4052 | 4052 | 100% | fits |
+      | 4496 | **44** | 1.0% | 1.10× over |
+      | 5385 | **44** | 0.8% | 1.31× over |
+      | 8940 | **44** | 0.5% | 2.18× over |
+
+      **It is a cliff, not a slope.** Ten percent over costs the same as 118% over. There is
+      no proportional-trim regime, so one token past the window is the whole loss — which
+      makes prevention the only strategy that helps and confirms the detector should key on
+      collapse. It also retires the worry that a tighter estimate had narrowed detection:
+      there is no marginal case to miss.
+
+      Known and accepted, in the manner [D6](./DECISIONS.md) treats its own TOCTOU race: a
+      measurement is shared across messages *by character count*, and cost per character
+      spans 1.36 to 5.96. The total stays right, which is what `prepare()` reads, so this is
+      harmless while every priced turn is present; it stops being harmless when one is
+      dropped, and the next reply re-anchors the total. Bounded to the turns between a drop
+      and the following exchange, with the cliff detector behind it. Fixing it properly
+      needs a per-message token count that no Ollama endpoint exposes.
 - [ ] **Wall-clock budgets (R8)** — per turn and per session, a timeout recorded as a failure
       rather than dropped from the denominator. Phase 0 strengthens this considerably: 11 of 19
       failures were 300 s timeouts from a single model, and `nemotron35-lightning` burned

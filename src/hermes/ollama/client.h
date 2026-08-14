@@ -254,13 +254,25 @@ class Client {
 
   [[nodiscard]] const std::string& base_url() const noexcept { return options_.base_url; }
 
+  /// The ceiling this client will impose on any `num_ctx` it sends (D8).
+  ///
+  /// Exposed so a caller planning a context budget can read the limit from the client
+  /// that will enforce it, instead of from a `ClientOptions` that merely ought to be
+  /// the same one. A budget planned against a larger window than gets sent overflows,
+  /// and the server's response to overflow is to discard most of the prompt silently.
+  [[nodiscard]] std::uint64_t max_num_ctx() const noexcept { return options_.max_num_ctx; }
+
   /// GET /api/tags -- every installed model.
   [[nodiscard]] Result<std::vector<ModelTag>> tags() const;
 
   /// POST /api/show -- metadata for one model.
   [[nodiscard]] Result<ModelCard> show(std::string_view model) const;
 
-  /// POST /v1/chat/completions -- one non-streamed completion.
+  /// POST /api/chat -- one non-streamed completion.
+  ///
+  /// (Said `/v1/chat/completions` until 2026-08-13, which had been wrong since D8 moved
+  /// this to the native endpoint; the file's own header comment and the implementation
+  /// both said `/api/chat` while this line disagreed.)
   [[nodiscard]] Result<ChatReply> chat(const ChatRequest& request) const;
 
  private:

@@ -186,6 +186,16 @@ against 1–3 s for a Python interpreter. Speed here is a product feature, not a
 | **supervisor** | drives local Ollama; bounded sessions, retry (R6, R7) | the only layer with an HTTP client |
 | **frontends** | CLI today, MCP-over-stdio next | neither of the above, beyond a small API |
 
+**Amended 2026-08-13, when the supervisor layer got its first code.** The table has three
+rows and the tree has four directories: `src/hermes/ollama/` is the transport, and it sits
+*under* the supervisor rather than inside it. "The only layer with an HTTP client" is
+therefore loose — `hermes_supervisor` links `hermes_ollama` for the request and reply types
+but never httplib, which stays `PRIVATE` to the transport target and absent from its headers
+behind a pimpl. The commitment the row was making still holds, and holds more strongly than
+written: nothing above the transport can reach HTTP even by accident. Recorded rather than
+silently re-drawn, because a layering table that is approximately true is the kind of document
+this project has already had to correct once.
+
 A consequence worth naming: the **core is useful with no model at all**. Called by Claude, this
 is a verified, reversible filesystem toolkit and R6/R7 barely matter. Driven locally, the
 supervisor is the product. Same core, two products — which is the strongest argument for the
