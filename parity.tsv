@@ -26,6 +26,7 @@ agent_init	agent/agent_init.py	-	NOT_STARTED
 tool_executor	agent/tool_executor.py	-	NOT_STARTED
 prompt_builder	agent/prompt_builder.py	-	NOT_STARTED
 error_classifier	agent/error_classifier.py	-	NOT_STARTED
+deadline	agent/deadline.py	-	NOT_STARTED
 file_operations	tools/file_operations.py	-	NOT_STARTED
 file_tools	tools/file_tools.py	-	NOT_STARTED
 terminal_tool	tools/terminal_tool.py	-	NOT_STARTED

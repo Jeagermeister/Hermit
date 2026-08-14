@@ -465,3 +465,36 @@ accepting it explicitly and writing down why. Undecided.
 Upstream ships 2,889 test files. Whether any are worth adapting as a behavioural spec is still
 open, and is mostly a question about how much behaviour is genuinely shared — which the
 module-level scope work suggests is not much.
+
+### A bounded-execution primitive, or per-site timeouts
+
+**Noticed 2026-08-14**, reviewing upstream `v2026.8.13..main` (185 commits, 21 touching
+in-scope paths). Upstream landed `agent/deadline.py` — 471 lines plus 401 lines of tests —
+and explicitly framed it as *"one shared foundation for the timeout/hang backlog instead of
+per-incident site-local fixes"*. Four follow-up commits already build on it, and the commit
+message says later phases migrate tool execution, MCP, and subprocess call sites onto it.
+
+That is a direct statement about this project's subject matter. This repo's one-line
+description is a supervisor for local models doing **bounded** filesystem work; upstream has
+just concluded that bounding needs to be a primitive rather than a property of each call site.
+
+The parts that look load-bearing rather than Python-specific:
+
+- **A deadline that survives a blocked executor.** Upstream uses a thread timer because an
+  async deadline is worthless when the event loop is the thing that wedged. D1 makes this
+  blocking and single-threaded, so the shape differs — but the failure mode does not, and a
+  timeout enforced by the same thread doing the work cannot fire.
+- **Whole-tree process termination.** Killing the direct child leaves orphans. This is
+  squarely a `terminal_tool` / `process_registry` concern and both are already in scope.
+- **Our deadline vs. the provider's, mechanically distinct.** Upstream raises a dedicated
+  `DeadlineExpired` rather than letting a supervisor timeout look like a model timeout. That
+  distinction is a classification decision, and `error_classifier` is in scope.
+- **Clamping at the boundary**, to kill an integer-overflow class before it reaches a syscall.
+
+**Not decided here.** Adopting a shared primitive before there are call sites to share it
+between is the classic premature abstraction, and D1's threading model means at least the
+first item cannot be copied. But the question is now on the record with the evidence, rather
+than being rediscovered when the third hang gets its own bespoke fix.
+
+`agent/deadline.py` is tracked in `parity.tsv` as of this note so the ledger stops missing the
+file upstream is actively building out.
