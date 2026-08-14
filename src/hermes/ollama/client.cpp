@@ -402,7 +402,7 @@ std::expected<void, Failure> validate_base_url(std::string_view url) {
   }
 
   if (!is_loopback_host(host)) {
-    return reject("D7 permits loopback Ollama only, and this client carries sandbox file "
+    return reject("D7 permits loopback backends only, and this client carries sandbox file "
                   "contents; refusing host \"" +
                   std::string{host} + "\"");
   }

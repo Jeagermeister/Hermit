@@ -147,8 +147,16 @@ gap from documented to blocking.
 
 ## D7 — Local inference only; two ways in, human and machine
 
-**Backend: local Ollama, and nothing else.** No cloud inference provider, ever, unless this
+**Backend: local inference, and nothing else.** No cloud inference provider, ever, unless this
 decision is explicitly overturned.
+
+> **Amended 2026-08-14 by [D9](#d9--two-local-backends-ollama-and-vllm): two local backends,
+> Ollama and vLLM.** This clause originally read *"local Ollama, and nothing else"*, and is
+> widened here on the record because the sentence above requires exactly that rather than a
+> convenient reading. **The cloud prohibition is untouched, and it is the part doing the
+> work** — vLLM qualifies because it is local, not because the bar moved. Every reason given
+> below still holds verbatim: no credential pool, no egress proxy, no TLS, nothing reachable
+> from off the machine.
 
 **Frontends: both a human CLI and a programmatic caller.** The same core is driven by a person
 at a terminal and by a larger model invoking it as a tool.
@@ -183,7 +191,7 @@ against 1–3 s for a Python interpreter. Speed here is a product feature, not a
 | layer | contains | knows about |
 |---|---|---|
 | **core** | sandbox, filesystem ops, verification (R1, R3, R4, R5) | no model, no network |
-| **supervisor** | drives local Ollama; bounded sessions, retry (R6, R7) | the only layer with an HTTP client |
+| **supervisor** | drives the local backend; bounded sessions, retry (R6, R7) | the only layer with an HTTP client |
 | **frontends** | CLI today, MCP-over-stdio next | neither of the above, beyond a small API |
 
 **Amended 2026-08-13, when the supervisor layer got its first code.** The table has three
@@ -213,8 +221,9 @@ the programmatic frontend, not optional cleanup.** Roughly a day's work. The har
 be closed by path checking at all and needs a separate answer (device/inode comparison against
 the root, or accepting it explicitly).
 
-**HTTP client: cpp-httplib, pinned.** Under this decision the client only ever talks to loopback
-Ollama: no TLS, no auth, no proxies, and headless operation makes streaming optional.
+**HTTP client: cpp-httplib, pinned.** Under this decision the client only ever talks to a
+loopback backend (Ollama, and from [D9](#d9--two-local-backends-ollama-and-vllm) vLLM): no
+TLS, no auth, no proxies, and headless operation makes streaming optional.
 Header-only pins cleanly under D3 and adds no system dependency. libcurl would only earn its
 keep against cloud backends, which this decision forecloses.
 
@@ -277,6 +286,166 @@ sending an oversized request would be performing the exact action it exists to p
 make the clamp unnecessary rather than merely conservative. Or a tool-call format divergence
 that made the native shape harder to consume than the OpenAI one — the opposite of what is true
 today.
+
+---
+
+## D9 — Two local backends: Ollama and vLLM
+
+**Decided 2026-08-14 in principle; implementation deferred — see Sequencing.** Hermes drives
+local Ollama *and* local vLLM behind one interface.
+This amends D7's backend clause, which required an explicit overturn to widen. **It does not
+touch D7's prohibition on cloud inference** — vLLM is admitted because it is local, and for
+no other reason.
+
+**What forced it.** Kitchen is due to move to an RTX PRO 5000 (72 GB, CUDA, single-GPU) on
+2026-08-14, the same day Qwen3.8-27B's open weights were scheduled to land. **Both are stated
+here as scheduled rather than done**: the cited source marks the hardware "arriving", the
+model section "unverified", and no local tag exists. Specs, and an unresolved question about
+whether the config those specs came from is even this model's:
+`gitea-selfhost/AI-FABRIC.md § The Qwen family on Kitchen`.
+
+That model is multimodal and uses hybrid Gated DeltaNet attention. Multimodal GGUFs ship a
+separate `mmproj` projector, and Gated DeltaNet needs very recent llama.cpp operators that
+Ollama lags.
+
+> **Correction, made before this decision was a day old.** The first draft of D9 argued that
+> Ollama "cannot load the model at all", making the R9 `tools` gate unevaluable, and treated
+> that as the forcing argument. **The cited source refutes it**: `AI-FABRIC.md` records a
+> live `qwen3.6:27b` Ollama tag and gives `qwen3.6` a "vision" role. The likely reality is
+> that such models load **text-only, without the projector** — capability loss, not load
+> failure. If it loads, `ollama show` runs and the gate *can* be evaluated. The strong form
+> of the argument does not survive, and is recorded here rather than quietly deleted because
+> the decision was taken while it was believed.
+
+**What survives, and is sufficient.** Not "unreachable", but *late, degraded, and not ours to
+schedule*: vision is lost on the Ollama path, Gated DeltaNet arrives late and slow, and the
+official FP8/NVFP4 checkpoints are unusable. Generalised — GGUF conversion and Ollama's
+template layer both sit downstream of the model authors, so binding to one backend means
+**this project's reachable model set is set by someone else's release cadence**. That is the
+durable reason; Qwen3.8-27B is the occasion that exposed it.
+
+Qwen3.8-27B is the occasion, not the whole reason. The general form is that GGUF conversion
+and Ollama's template layer both sit downstream of the model authors, and every new
+architecture arrives there late. Binding to one backend means the project's reachable model
+set is set by someone else's release cadence.
+
+**Why D7's reasoning survives intact.** Every justification in D7 concerns *cloud* — the
+credential pool, the egress proxy, TLS, off-machine reachability, the blast radius of a
+remote endpoint. vLLM reintroduces none of it. `credential_pool.py` and `iron_proxy.py`
+stay discarded for the same reason as before. Widening "local Ollama" to "local inference"
+costs nothing D7 was protecting, which is why this is an amendment and not a reversal.
+
+**Relationship to D8, which is the subtle part.** D8 chose native `/api/chat` because
+`options.num_ctx` is per request. **vLLM has no per-request context override at all** —
+`--max-model-len` is fixed when the server launches. This does *not* reopen what D8 closed.
+D8's real objection was that the effective context became an unknowable value reported by no
+API and varying between releases; a launch flag is a **stated** value, which is what D8
+wanted. Context moves from per-request to per-server, and the `fsops-*:64k` Modelfile
+pattern becomes a launch argument. Both designs replace the unknowable with something
+written down.
+
+**What this costs, accepted rather than elided.** D8 recorded three gains from the native
+endpoint, and D9 above addresses only the first. The other two are **reopened on the vLLM
+path**, and on exactly the surface where the second backend lands:
+
+- **Tool-call arguments come back as a JSON string needing a second parse.** D8 called this
+  "removing a whole failure class, and one D5 was partly written to mitigate". The OpenAI
+  schema puts `function.arguments` back as a string. The failure class returns.
+- **Structured output goes back through the `{"type":"json_schema", …}` wrapper** that D8
+  recorded escaping.
+
+Both are accepted, in the manner D6 accepts its TOCTOU race: written down, scoped to one
+backend, and not traded away silently. The Ollama path keeps both gains.
+
+> **D8's "what would overturn it" did not anticipate this case.** It listed Ollama gaining
+> admission control, or a tool-call format divergence. It did not list *a model Ollama
+> cannot load*. D8 is not overturned — native `/api/chat` remains correct for the Ollama
+> backend — but its list read as exhaustive and was not. Recorded because that is the
+> reusable lesson.
+
+**What it buys beyond reach.** vLLM performs precisely the admission control whose absence
+D8 had to engineer around: it preallocates the KV pool at startup and refuses to launch when
+the cache will not fit, rather than accepting the request and deadlocking the driver. The
+`max_num_ctx` clamp exists because "nothing in the API reports free VRAM, so the client
+cannot compute a safe value."
+
+Two precisions the first draft skipped. **The clamp does not carry over**: it is applied in
+`build_chat_options` while assembling Ollama's `options` object (`client.cpp:266`), and an
+OpenAI-shaped request has no such field. On a vLLM client the clamp is *absent* unless
+deliberately reimplemented against `max_model_len`. And **the 2026-08-13 freeze was an
+amdgpu/ROCm failure mode on the W7900** (`client.h:131`); that card is leaving, so the swap
+alone makes it unreachable whichever runtime runs. Two variables changed at once — do not
+credit the backend with what the hardware also did. vLLM's guarantee is narrower and still
+worth having: it refuses to launch when the KV pool will not fit at the configured
+`gpu_memory_utilization`, which is admission control Ollama does not perform.
+It also unlocks the official FP8 and NVFP4 checkpoints — of the three runtimes considered
+(Ollama, llama.cpp, vLLM), only vLLM has an NVFP4 tensor-core path. Other stacks outside that
+comparison, such as TensorRT-LLM, also do.
+
+**The shape of the work.** Not a base-URL swap — and **there is no existing interface to sit
+behind**. `hermes::ollama::Client` has no virtual functions, is constructed by a static
+`open()` returning a concrete type, and `hermes_supervisor`, `hermes_app` and the binary all
+link `hermes_ollama` directly (`CMakeLists.txt:164,176,181`). So the work is: introduce the
+abstraction, lift the shared request/reply types out of `namespace hermes::ollama`, and
+re-plumb three CMake targets. `src/hermes/ollama/` and the `ollama.*` config namespace
+(`config.cpp:284,701`) become misnomers; D7's own layering amendment, which is built on
+`src/hermes/ollama/` being *the* transport singular, becomes approximate and needs revisiting
+with it. The wire mapping itself is known and small: `format` → `guided_json`, `thinking` →
+`reasoning_content` (`--reasoning-parser`), tool calls → `--enable-auto-tool-choice
+--tool-call-parser`.
+
+**Two gates, both to be settled before the second client is written.**
+
+**Gate 1 — preflight has no vLLM equivalent (R9).** `preflight.h:75` reads the `tools`
+capability from Ollama's `/api/show` `capabilities` array; `ContextWindow` and
+`ModelMetadata` come from the same proprietary endpoint. vLLM's OpenAI server exposes none
+of it. And `preflight.h:18` states the policy: every check **fails closed**, so "I could not
+determine it" is a failure, not a pass. Left alone, *every* vLLM model fails preflight. The
+checks therefore need per-backend implementations, and the fail-closed policy must survive
+the change rather than being quietly relaxed to accommodate a backend that cannot answer.
+This gate is the same class as the one below and was missed on the first pass.
+
+**Gate 2 — where the context window lives.** `ClientOptions` and the `max_num_ctx` clamp both
+assume context is a per-request property; under vLLM it is a property of the running server.
+This reaches further than one field: `session.cpp:93` seeds `echo.max_num_ctx` from
+`client.max_num_ctx()`, `:104` computes the window as `min(options.num_ctx, max_num_ctx)`,
+and `main.cpp:186` seeds the request from the same value. Against vLLM, `max_num_ctx()`
+would report 65536 while the server's real window is `--max-model-len` — possibly smaller —
+and a budget planned against the larger of the two walks into the overflow cliff recorded at
+`ROADMAP.md` (1.10x over → ~1% of the prompt survives).
+
+**This is a plumbing problem, not an unknowability problem**, and the distinction points at
+the answer. An earlier draft said silently ignoring a request-level `num_ctx` would "rebuild
+the unknowable-context problem D8 exists to prevent". That is too strong: vLLM *reports*
+`max_model_len` per model on `GET /v1/models`, so the effective window is queryable at
+runtime — strictly better than Ollama, where D8's whole complaint was that it was "reported
+by no API". vLLM also rejects an over-length prompt with a 400 rather than silently
+truncating. So the third option, absent from that draft and better than either no-op or
+error, is: **read `max_model_len` at startup and populate the same budget field the clamp
+feeds.** That is closer to D8's intent than refusing to model the difference.
+**Settle it before writing the second client, not during.**
+
+**Sequencing — deliberately deferred, and this is part of the decision.** Kitchen's default
+runtime is **Ollama**, settled 2026-08-14; vLLM is the situational backend for models built
+and trained to run on it. That answer is what sets the timing, because D7 enforces loopback:
+Hermes runs on the same box as its backend, so an Ollama-only Hermes is only *blocked* when
+Kitchen is toggled to vLLM. While Ollama is the default, it is not blocked.
+
+So the implementation does **not** land in Phase 2. Phase 2's job is the core loop and
+minimal tools, and the agent loop does not exist yet; building a second transport before the
+first one has a working loop is the wrong altitude. **The Phase 2 obligation is narrower:
+do not foreclose this.** When the client is touched, do not add new per-request assumptions
+beyond those already recorded — that is cheap now and expensive to retrofit.
+
+Revisit when either of two things is known: whether the Qwen family actually loads and
+reports `tools` under Ollama, or whether Kitchen's default flips to vLLM. **If the default
+flips, this becomes blocking work rather than deferred work** — that is the trigger to watch,
+and it is a decision about Kitchen, not about this repo.
+
+**What would overturn it.** Ollama gaining timely support for the architectures that forced
+this — multimodal `mmproj` loading and current llama.cpp operators — which would make the
+second backend redundant rather than merely unused. Or the two-backend interface proving to
+cost more in the core than the reachable-model gain is worth, measured rather than assumed.
 
 ---
 
