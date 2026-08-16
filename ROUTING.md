@@ -111,7 +111,14 @@ Under the hash design those were two incompatible units.
 
 ### `edit` fails closed on a stale target
 
-`edit` takes the identity tuple the caller last observed and refuses when it no longer matches.
+`edit` is checked against the identity tuple **this session last observed** for its target —
+session state, never an argument — and refuses when the tuple no longer matches. It has to be
+session state: a caller-supplied tuple could not express *unseen*, so it would let a fresh
+session hand in a tuple for a file it never read, which "nothing is persisted" below exists to
+forbid. (Settled 2026-08-16, resolving a reading of the earlier wording under which the tuple
+arrived as an argument; the table below was always written for the session-state reading, and
+it is what keeps `String`/`Path`/`PathList` sufficient as the argument types for every settled
+tool.)
 This is a **second layer**, not a replacement for anything in §6: it is a per-tool control and
 covers only the tools the model chose to use, which is exactly the limit §6 names. It earns its
 place by converting one specific silent failure — a write to a file the model never read, or
