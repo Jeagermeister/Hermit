@@ -10,6 +10,10 @@ FetchContent_MakeAvailable(googletest)
 add_executable(hermes_tests
   sandbox_test.cpp
   tool_test.cpp
+  fsio_test.cpp
+  sha256_test.cpp
+  observe_tools_test.cpp
+  search_tools_test.cpp
   ollama_client_test.cpp
   preflight_test.cpp
   config_test.cpp
