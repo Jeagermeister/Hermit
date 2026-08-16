@@ -131,6 +131,21 @@ auditing upstream's code, every module of which `parity.tsv` still lists as `NOT
 is precisely why `bench/fsops` could observe the failures it did — a model replying `DONE` on an untouched tree, an `05_copy` that destroyed the
 original while "the file still exists" passed, a run that finished its work and then hung.
 
+**Re-tested against four unrelated harnesses, 2026-08-15.** The claim above is scoped to
+upstream, which is a narrow test for a load-bearing statement — so it was re-run against
+DeepSeek Harness, Prime Agent and the two Recursive Language Model repos, all actively developed
+this month. R3, R4 and R6 hold: every `sha256` in Prime Agent hashes socket paths, credentials
+and session leases rather than file content; neither harness snapshots before mutating; nothing
+polls the filesystem to decide completion.
+
+**R5's wording does not survive intact, and the neighbour is worth knowing.** DeepSeek Harness's
+`fs-observation-policy` is 130 lines that refuse an edit to a file the model has not read, and a
+write to a file it has not observed. It is not R5 — it *prevents* the stale write where R5
+*confirms* the fresh one — but "no upstream equivalent" reads as "nobody does anything in this
+area", which is now false. What that policy became here is the staleness guard on `edit`, in
+[ROUTING.md](./ROUTING.md) §4, recorded there as a second layer under §6 rather than as a
+substitute for it.
+
 **The rewrite is a thin, correct agent loop plus a supervisor upstream never had.** The porting
 is supporting cast.
 

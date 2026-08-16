@@ -481,7 +481,8 @@ These are hard to reverse and benefit from being argued out before code exists:
       whose content must match exactly is read back and compared before the turn succeeds.
       Cheap insurance regardless of whether the contamination is the tool's or the model's,
       which is exactly why the requirement outlived the correction to its evidence.
-- [ ] `move`, `search`
+- [ ] `move`, ~~`search`~~ — `search` was split into `find` and `grep` when the tool surface
+      was settled; [ROUTING.md](./ROUTING.md) §4 is the decided list and this bullet defers to it
 - [ ] **Do not foreclose the second backend ([D9](./DECISIONS.md)).** vLLM is decided in
       principle and **deferred** — Kitchen's default runtime is Ollama, so nothing is blocked
       today. The Phase 2 obligation is only to avoid adding new per-request assumptions to
@@ -496,11 +497,17 @@ These are hard to reverse and benefit from being argued out before code exists:
 Settled in [D7](./DECISIONS.md): local inference only, driven both by a person and by a larger
 model calling this as a tool.
 
-- [ ] **Close the TOCTOU race before the programmatic frontend ships.** `openat(O_NOFOLLOW)`,
-      one component at a time. D6 accepted the race against a "confused 3B model" threat model;
-      a callable frontend changes that model, so this is a gate rather than cleanup.
-- [ ] **Decide the hardlink answer** — device/inode comparison against the root, or accept it
-      explicitly. No path-based check can catch it.
+- [ ] **Clear D7's gate — two conditions since 2026-08-15, and this bullet used to name one.**
+      Kernel confinement ([D10](./DECISIONS.md)) for containment, *and* `openat(O_NOFOLLOW)`
+      component-walking for in-root correctness. D6 accepted the race against a "confused 3B
+      model" threat model; a callable frontend changes that model, so both are a gate rather
+      than cleanup. Confinement alone is not enough — an in-root redirection is invisible to
+      the kernel and is D6's own worked example. [ROUTING.md](./ROUTING.md) §12 step 4 carries
+      the implementation detail, including the grant set and the denied-write probe.
+- [x] ~~**Decide the hardlink answer**~~ — decided with D10, recorded under "Still open" in
+      [DECISIONS.md](./DECISIONS.md): creation is blocked by the one-writable-root rule; a link
+      planted before the sandbox starts is accepted explicitly, with the threat-model reasoning
+      written down.
 - [ ] **MCP server over stdio.** No listener, no port, no auth. Thin: transport only, over the
       same core the CLI drives.
 
@@ -510,6 +517,9 @@ model calling this as a tool.
       filesystem *shows*.
 - [ ] **Re-invocation** with one concrete remaining failure, per the tournament recommendation.
 - [ ] **Guardrails** — dry-run, backup-before-mutate, undo. The erased `tally.py` is the argument.
+      *Where* backups live was settled 2026-08-15 — never granted to the confined child, per
+      [D10](./DECISIONS.md) and [ROUTING.md](./ROUTING.md) §11 — so what remains here is
+      retention and how undo is invoked, which is still the load-bearing half.
 - [ ] **Bounded sessions** — fresh session per unit of work rather than one long autonomous run.
 
 ---
