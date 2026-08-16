@@ -618,6 +618,70 @@ tool surface to gate on the probe result rather than on presence.
 
 ---
 
+## D11 — The substrate is probed, not assumed
+
+**Decided 2026-08-16.** Every guarantee this codebase makes is a claim about *a particular
+filesystem*. R1's containment, R3's hash-diff, R4's snapshot, R5's read-back and
+[ROUTING.md](./ROUTING.md) §4's identity tuple all rest on POSIX semantics that `ext4` provides
+and other substrates do not. **A `Sandbox` therefore probes the ground it is rooted on and
+records which guarantees hold, rather than assuming them.**
+
+**What forced it.** ROUTING.md §4 settles `dev:ino:size:mtime:ctime` as the single identity
+currency shared by `list`, the staleness guard and `edit`'s fail-closed check — and its
+justification is explicitly semantic:
+
+- `dev:ino` "catches a file that was unlinked and recreated, or a symlink retargeted to a
+  different file — replacement with byte-identical content, which a hash cannot see at all."
+- `ctime` "is not settable directly", which is exactly what makes it trustworthy where `mtime`
+  is forgeable — a property [D10](#d10--kernel-confinement-for-shell-landlock-vendored-one-writable-root)
+  established by measuring a confined process calling `utimes`.
+
+**Both properties are substrate-dependent, and neither was checked anywhere.** On a 9p/DrvFs
+mount — WSL2's view of a Windows drive, which is where a Windows developer's repository actually
+lives — inode stability is not guaranteed and the metadata is emulated. On NFS and CIFS, inode
+reuse and coarse timestamp granularity are both live concerns. **The failure is silent and it
+lands on the one mechanism designed to fail closed:** an identity tuple that cannot be trusted
+turns `edit`'s stale-target guard into a spurious refusal at best, and a pass at worst.
+
+**Why a probe rather than a mount-type table.** The same argument D10 makes about Landlock and
+R9 makes about the daemon. A `statfs` `f_type` lookup is a version-string check by another name:
+it reports what the kernel *calls* the mount, not whether `link()` works on it, and it cannot
+describe a substrate nobody has enumerated yet. Attempt the operation; read the result.
+
+**What is probed.** Each is a falsifiable operation inside the sandbox root, never an inference:
+
+| Property | Probe | What it guards |
+|---|---|---|
+| case sensitivity | create `a`, `stat("A")` | `edit` targeting, D6 resolution |
+| `dev:ino` stability | stat, close, reopen, compare | the identity tuple |
+| hardlink support | `link()`, read `errno` | D10's one-writable-root reasoning |
+| symlink + `O_NOFOLLOW` | create a link, open with the flag | D6 resolution, D7's gate |
+| `ctime` behaviour | `chmod` and confirm it moved; attempt to set it directly | the staleness guard |
+| `O_TRUNC` / `mkstemp` | create, then truncate | D10 records this as a trap already |
+| `EACCES` fidelity | attempt a denied read | R1's fail-closed resolution |
+
+**Fail closed, per R9's policy.** "I could not determine it" is a failure, not a pass. A
+substrate that cannot answer is one Hermes declines to root on, with the reason reported **as
+data** — the same vocabulary ROUTING.md §8 already established for the confinement probe, and
+for the same reason: the difference between substrates becomes something the binary reports,
+never a second build or a stripped tool surface.
+
+**Where it lives.** `hermes_core`, beside `Sandbox`. It touches no model and no network, so it is
+Tier 0 by ROUTING.md §2 and needs no new link edge — it is implementable before the two edges in
+ROUTING.md §12 step 1.
+
+**This is a Linux feature first, not a Windows one.** It answers `/mnt/c` under WSL, network
+mounts, `tmpfs`, and an overlayfs inside a container, uniformly and today. Its effect on WSL is
+worth stating plainly because it is the case that prompted it: **WSL becomes usable on its Linux
+side and explicitly refused on its Windows side**, rather than under-delivering silently across
+a boundary already known to be lossy.
+
+**What would overturn it.** A probe expensive enough to matter at sandbox construction — unlikely,
+since it is a handful of syscalls once per root, against the 250–390 ns per `open()` D10 already
+accepted in steady state.
+
+---
+
 ## Still open
 
 ### ~~Which chat endpoint~~ — settled as D8

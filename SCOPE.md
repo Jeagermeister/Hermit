@@ -161,3 +161,58 @@ Anything under `agent/` or `tools/` not listed as a row is implicitly out of sco
 same argument [UPSTREAM-PARITY.md](./UPSTREAM-PARITY.md) makes for tag-granularity over
 commit-granularity: pick the
 unit that keeps the report answerable.
+
+---
+
+## Platforms — Linux is the product, Windows is a separate package
+
+**Decided 2026-08-16.** Hermes-Cpp targets **Linux**. That is not a placeholder for "portable
+eventually": it is the substrate [D6](./DECISIONS.md#d6--the-sandbox-is-a-capability-type-and-resolution-is-posix-order),
+[D10](./DECISIONS.md#d10--kernel-confinement-for-shell-landlock-vendored-one-writable-root) and R1
+were designed against, and the only one where the guarantees have been measured.
+
+**If Windows happens, it is a separate package and a separate release on Gitea — never an
+`#ifdef` in this tree.** The reason is not tidiness. It is that D6 does not *port*; it gets
+**rewritten**, because Win32 path parsing has no POSIX analogue and every difference is a
+containment question:
+
+8.3 short names (`PROGRA~1`) · alternate data streams (`file.txt:evil`) · reserved device names
+(`CON`, `NUL`, `COM1`) · silently stripped trailing dots and spaces · `\\?\` bypassing
+normalisation entirely · UNC and drive-relative paths (`C:foo`) · junctions behaving unlike
+symlinks · case-insensitivity by default.
+
+Each is a distinct way for *the path that was resolved* to differ from *the path that is opened*,
+which is precisely the property D6 exists to guarantee. A speculative Windows D6 written before
+the Linux one has proved its value would be wrong, and wrong in a way that is expensive to
+discover.
+
+**What appears to port cleanly**, recorded so the eventual effort is not re-derived from scratch.
+⚠️ **All of this is unverified — neither this laptop nor Kitchen runs Windows, and nothing below
+has been compiled or executed.** It is a research note, not a measurement, and is marked as such
+deliberately in the manner this repo already distinguishes the two:
+
+| Need | Apparent Windows answer |
+|---|---|
+| `realpath(3)` | `GetFinalPathNameByHandleW` — resolves from an open handle, arguably *stronger* than realpath |
+| `openat` (handle-relative) | `NtCreateFile` with `RootDirectory` in `OBJECT_ATTRIBUTES` (NT native, not Win32) |
+| `O_NOFOLLOW` | `FILE_FLAG_OPEN_REPARSE_POINT` |
+| `st_dev` / `st_ino` | `GetFileInformationByHandleEx` → `FILE_ID_INFO` (128-bit; ReFS needs it) |
+| `ctime` staleness guard | NTFS **does** carry `ChangeTime`, via `FileBasicInfo` — [ROUTING.md](./ROUTING.md) §4's guard survives |
+
+**Landlock has no Windows equivalent**, and that degrades correctly rather than breaking:
+ROUTING.md §8 gates on the confinement probe rather than the platform, so absence is *reported*
+and `shell` stays off the MCP surface — which is already the default. Nothing else in the tool
+surface changes.
+
+**macOS is not a target.** Not because it is hard — it is the easy one — but because the
+workplace case that raised the question has no Mac dev teams, and an untargeted platform with no
+user is scope without a beneficiary.
+
+**The boundary is made explicit rather than assumed**, which is
+[D11](./DECISIONS.md#d11--the-substrate-is-probed-not-assumed)'s job: WSL becomes usable on its
+Linux side and explicitly refused on `/mnt/c`, instead of quietly offering guarantees that do not
+hold there.
+
+**Why this ordering.** This is first and foremost a personal tool, built on this machine, for
+this machine's evidence. A workplace is a possible beneficiary, not a requirement — and building
+portability before value is backwards.

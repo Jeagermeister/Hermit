@@ -451,6 +451,14 @@ don't reach for it.
       `eval_count == num_predict`. R8's budgets should still be wall-clock, but for the reason
       originally given in the requirement rather than for the token-accounting one.
 
+- [ ] **Substrate probe (D11)** — probe the filesystem under the sandbox root and record which
+      guarantees actually hold, rather than assuming them. [ROUTING.md](./ROUTING.md) §4's
+      `dev:ino:size:mtime:ctime` identity tuple is shared by `list`, the staleness guard and
+      `edit`'s fail-closed check, and **every component of it is substrate-dependent and was
+      unchecked**. Lives in `hermes_core` beside `Sandbox`, needs no new link edge, and is
+      implementable before ROUTING.md §12 step 1. See
+      [D11](./DECISIONS.md#d11--the-substrate-is-probed-not-assumed).
+
 ### Decisions to settle first
 
 These are hard to reverse and benefit from being argued out before code exists:
@@ -508,6 +516,11 @@ model calling this as a tool.
       [DECISIONS.md](./DECISIONS.md): creation is blocked by the one-writable-root rule; a link
       planted before the sandbox starts is accepted explicitly, with the threat-model reasoning
       written down.
+- [ ] **Kiro is the named caller, and it decides the platform question.** Kiro consumes MCP
+      over stdio exactly as specified below, so no new frontend shape is needed — but Kiro CLI
+      runs natively on Windows, where a Linux binary is not spawnable. A "Power" is the wrong
+      vehicle and that is settled. [ROUTING.md](./ROUTING.md) §8 carries the integration detail;
+      [SCOPE.md](./SCOPE.md) § Platforms carries the Windows scope decision.
 - [ ] **MCP server over stdio.** No listener, no port, no auth. Thin: transport only, over the
       same core the CLI drives.
 
