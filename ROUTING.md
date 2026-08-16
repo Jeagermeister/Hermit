@@ -118,6 +118,25 @@ place by converting one specific silent failure — a write to a file the model 
 read before something else changed it — into a loud one at the point it happens, which is the
 argument §6 already makes for keeping per-tool verification despite that limit.
 
+Observed state is per-session and in memory: a path is **unseen**, **absent**, or **present at
+tuple T**. A successful `read`, `list` or mutation records presence; a miss records absence.
+Nothing is persisted, which is the correct semantics under bounded sessions — a fresh session
+has observed nothing and must read before it may edit.
+
+| Intent | Observed | Decision |
+|---|---|---|
+| `write` | unseen or absent | create-if-absent |
+| `write` | present at `T` | replace only if the tuple still matches `T` |
+| `edit` | unseen | refuse — the file must be read first |
+| `edit` | absent | refuse — not found |
+| `edit` | present at `T` | compare against `T`, refuse on mismatch |
+
+**The load-bearing row is the first one, and only if create-if-absent is honest.** It must fail
+when the target already exists — that refusal is what stops a model overwriting a file it never
+read, which is the `05_copy` shape SCOPE.md records. Implemented as a plain existence check it
+is a race; the reference implementation this came from publishes by hard-link-no-replace
+instead, so a file created *after* the check is still preserved and still rejected.
+
 ### `shell` — kept, and it is a special case
 
 The instinct is to drop shell and expose structured file tools only.

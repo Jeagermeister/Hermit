@@ -483,6 +483,22 @@ from `landlock-run` (BSD-3-Clause, ~300 lines of C11 over the raw kernel UAPI) r
 shipped as a helper binary, so [D3](#d3--dependencies-fetchcontent-pinned)'s single-artifact
 property survives.
 
+**Where the source is.** Recorded precisely because it is not vendored yet and is not findable
+by guessing — it lives several directories inside an unrelated TypeScript monorepo:
+
+| | |
+|---|---|
+| repo | `https://github.com/deepseek-ai/deepseek-harness.git` |
+| path | `native/landlock-run/packages/entry/src/main.c` |
+| commit | `6e05cb7ff5bc9834fcf303800264fa3cdb3724e8` (2026-08-13) |
+| sha256 | `c2d6f330e31924ccba7c9b70416e05b427bb7aacfc21dcd8d610cf22c20bd53a` |
+| license | BSD-3-Clause — *not* the MIT of its parent repository |
+
+The file is self-contained: it defines the Landlock UAPI locally rather than including
+`<linux/landlock.h>`, deliberately, so the audit surface is that one file plus the kernel's
+stable syscall contract. Nothing else in that monorepo is needed. A blobless clone costs
+seconds; do not treat the absence of a local checkout as a blocker.
+
 **What forced it.** [ROUTING.md](./ROUTING.md) §4 records that `shell` is "the one tool that
 cannot be R1-correct by construction": every other tool takes a `SandboxPath`, which only
 `Sandbox::resolve` can build, while a shell command is an opaque string with no path argument
@@ -512,6 +528,27 @@ inferred. With one root there is nothing to pair with. Two consequences, both lo
 grants to file-compatible bits and `REFER` is not among them. It looks like an exception and is
 not — worth a comment at the vendoring site, since the next reader will ask.
 
+**The grant set, and why each entry is there.** Landlock denies everything not granted, so this
+is not tuning: omit `/usr` and the launcher cannot `execvp` at all. Each row below was measured
+by removing it.
+
+| Grant | Why |
+|---|---|
+| `--rw <sandbox root>` | The work. The only writable *directory*, per above |
+| `--ro /usr` | `ld.so` and the shared libraries; covers `/lib64` by symlink resolution, and locale under `/usr/lib/locale`. Without it: `exec failed: Permission denied` |
+| `--ro /etc` | Ordinary tooling reads it — `nsswitch.conf`, `passwd`, `gitconfig`. Also required for name resolution, **including `localhost`**: `getaddrinfo("localhost")` fails without `/etc/hosts` while `127.0.0.1` succeeds |
+| `--ro /proc` | Self-inspection. Without it `/proc/self/maps` and friends are denied |
+| `--rw /dev/null` | Denied unless granted explicitly; a great deal of tooling redirects to it |
+| `--ro /dev/urandom` | Same — denied unless named |
+
+Temp space is inside the sandbox root, per above. Note that `mkstemp` and any `O_TRUNC` open
+need `MAKE_REG` **and** `TRUNCATE`, so a grant that omits truncate breaks file creation in a way
+that reads as a permissions bug rather than a policy one.
+
+This is the **child's** grant set. The parent is unrestricted, so its Ollama connection, its
+config reads and its R4 backup writes are unaffected and must not be granted here — granting
+them would be the second writable root this decision exists to prevent.
+
 **What this does not close.** Stated at length because the mechanism's own documentation invites
 the opposite reading.
 
@@ -532,6 +569,17 @@ the opposite reading.
   `chown`, `utimes`, `stat` and `access` are not hooked: a confined process changed both the
   mode and the mtime of a file it held no grant on. This is why the observed-state guard in
   ROUTING.md §4 keys on `ctime`, which cannot be set directly, rather than on `mtime` alone.
+- **Descriptors opened before the restriction keep working, and they are inherited.** Measured:
+  `read` and `write` on a file descriptor opened before `restrict_self` succeed even when the
+  path is outside every grant, and an established TCP connection survives intact. Re-`open`ing
+  the same path is denied — it is the *open* that is hooked, not the descriptor.
+  **This is an implementation obligation, not a footnote.** Any descriptor the parent holds when
+  it forks — the Ollama socket, the config file, a log — is inherited by the confined child and
+  is a hole in the sandbox that no grant describes. **Set `O_CLOEXEC` on everything the parent
+  opens**, and audit `/proc/self/fd` before the first spawn rather than trusting that.
+  One asymmetry is worth knowing because it is unintuitive: a held `O_PATH` *directory*
+  descriptor does **not** launder `openat` — the kernel re-derives the ancestry — so only
+  already-open file descriptions carry rights forward.
 
 **"Fully enforced" is a claim about the binary, not the kernel.** The launcher reports it
 whenever `abi >= MAX_ABI`, which on an ABI-9 kernel is unconditional while four ABI levels go
@@ -574,12 +622,43 @@ tool surface to gate on the probe result rather than on presence.
 
 ### ~~Which chat endpoint~~ — settled as D8
 
-### The hardlink gap
+### ~~The hardlink gap~~ — halved by D10, and the remainder is now decided
 
-D7 makes this concrete rather than theoretical. A hardlink inside the root pointing at an
-outside file is accepted, and no path-based check can detect it — `resolve()` is doing its job
-correctly and still lets it through. Options are device/inode comparison against the root, or
-accepting it explicitly and writing down why. Undecided.
+D7 made this concrete rather than theoretical. A hardlink inside the root pointing at an outside
+file is accepted, and no path-based check can detect it — `resolve()` is doing its job correctly
+and still lets it through.
+
+[D10](#d10--kernel-confinement-for-shell-landlock-vendored-one-writable-root) splits it in two
+and answers both halves, which is why this is no longer open:
+
+- **Creation is blocked.** Cross-hierarchy link and rename are denied in every Landlock domain
+  unless `REFER` is granted on both ends, and the one-writable-root rule means there is no
+  second end. A confined shell cannot build the escape.
+- **A pre-existing link is accepted, explicitly.** Landlock evaluates the ancestry of the path
+  actually walked, so a link planted inside the root before the sandbox starts is readable *and
+  writable* through its in-root name. Device/inode comparison against the root would catch it
+  and is not being done: it costs a `stat` on every resolution to defend against an actor who
+  already had write access to the root beforehand — which is not this project's threat model,
+  and which R4's snapshot and R3's hash-diff would surface after the fact regardless.
+
+Revisit only if the threat model widens to an actor with prior filesystem access, which is a
+larger change than this entry.
+
+### The trim loop and tool results
+
+**Noticed 2026-08-15**, from Prime Agent's compaction rules. Their cut-point selection never cuts
+at a tool result, because a result must stay with the call that produced it.
+
+`Session::prepare()`'s trim loop erases the first unpinned turn one at a time, and
+`pin_latest_user()` pins only the system message and the most recent user turn — an assistant
+turn is explicitly unpinned. **Today this cannot bite**: `ollama::ChatMessage` is `{role,
+content}`, nothing in `src/` defines or parses a tool call, and the only roles reaching `turns_`
+are `system`, `user` and `assistant`.
+
+It bites the moment Phase 2 adds tool messages. A trim that drops a result while keeping its
+call leaves the model looking at an orphaned request, and the reliable response to that is to
+re-issue it — which is the repeat-call loop the supervisor exists to break. Recorded here rather
+than fixed, because there is nothing yet to fix.
 
 ### Test oracle
 
