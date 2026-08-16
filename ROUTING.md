@@ -473,6 +473,15 @@ Ordered. Steps 1–4 are Phase 2 and 2.5 as already written; only the tool list 
    - **`openat(O_NOFOLLOW)` component-walking** — the in-root correctness half, which
      confinement does not supply. A swap that redirects to a different file *inside* the root is
      permitted by the kernel and is D6's own worked example.
+
+     **Settled 2026-08-16, out of PR #6's review: allow the semantics, funnel the spelling.**
+     Tools never spell `open()` themselves. One core primitive beside `Sandbox` carries every
+     open from the first tool onward — plain `open` with `O_NOFOLLOW` on the final component
+     until this step lands (free now, and it already catches a final-component swap), the
+     component walk plus a post-open identity check after. Direct opens today would sit inside
+     D6's accepted race either way; the funnel exists so clearing this gate swaps one function
+     body instead of rewriting eight tools' I/O — and so the widened parse-to-use window PR #6
+     introduced (arguments resolve before the tool runs) is closed at the same single site.
 5. **`mcp.cpp`** in `app`. Callable from here on.
 6. **Tier 1** (`triage`, `summarize`) in `supervisor`, once model selection is settled.
 
