@@ -304,6 +304,57 @@ would be wrong the first time someone new connected.
 
 ---
 
+### Kiro is the first named programmatic caller
+
+Recorded 2026-08-16 because it is the concrete case D7's "programmatic caller" was abstract
+about, and because the shape of the integration turned out to constrain the platform question
+rather than the reverse.
+
+**Kiro is an AWS agentic IDE forked from Code OSS, with a separate CLI.** It consumes MCP over
+stdio natively — `command`, `args`, `env`, `disabled`, `autoApprove` under an `mcpServers` map,
+read from `.kiro/settings/mcp.json` (workspace, taking precedence) and `~/.kiro/settings/mcp.json`
+(user), hot-reloaded on save. **That is exactly the transport D7 already specifies**, so no new
+frontend shape is needed: a Hermes-Cpp binary is a `command` entry and nothing more.
+
+**A "Power" is the wrong vehicle, and this is settled rather than open.** Powers are pre-built
+integrations *maintained by Kiro* for Kiro Web, toggled in agent settings; some wrap MCP servers
+internally for OAuth. There is no documented path to author, package or distribute a third-party
+Power, and the ones that exist solve an authentication problem this project does not have — D7
+forecloses credentials entirely. **Ship a plain stdio MCP server.** If a Power path ever opens,
+it wraps the same binary and changes nothing here.
+
+**`autoApprove` maps onto the tier split for free**, which is a genuine piece of luck worth
+using: it is a per-tool allow-list, and §4's surface already separates tools that observe from
+tools that mutate. `read`, `list`, `find`, `grep` and `hash` are natural entries; `write`, `edit`
+and `move` are not, and `shell` is off this surface by default per above. **This is caller
+policy, not ours** — we do not ship a config that pre-approves a mutating tool, per §11's rule
+about not legislating the caller's budget.
+
+**The value proposition is sharper than "another MCP server", and Kiro's own documentation makes
+the argument.** It warns that stdio MCP servers "execute arbitrary commands inside your
+environment with the same privileges and access as the agent itself, including access to your
+source code, environment variables, secrets, and any credentials available in the session."
+Ambient full authority is the ecosystem default. Hermes-Cpp is the MCP server that *reduces*
+it — R1 containment by construction, D10 confinement for the one tool that cannot be, R3/R4/R5
+verification on every mutation. That is the pitch, and it is stronger for a programmatic caller
+than for a human one.
+
+**The platform consequence, which is the load-bearing part.** Kiro CLI 2.0 runs **natively on
+Windows 11**, MCP servers included. So on a Windows developer's machine Kiro spawns MCP servers
+as native Windows processes, and a Linux ELF binary is not spawnable. Two paths, and neither is
+free:
+
+| Path | Cost |
+|---|---|
+| `"command": "wsl.exe", "args": ["-e", "hermes-cpp", …]` | Requires WSL, which is not a safe assumption. Kiro passes Windows paths; the sandbox root needs a Linux path. **The translation layer sits directly on `Sandbox::resolve`** |
+| A native Windows build | A separate package — see [SCOPE.md](./SCOPE.md) § Platforms |
+
+**Neither is on the near path, and that is the decision.** Linux is the product. This section
+exists so the integration is not re-derived, and so the Windows question is understood as *a
+consequence of Kiro's platform*, not as generic portability anxiety.
+
+---
+
 ## 9. Machine differences are configuration, never code
 
 **There is no laptop build and no desktop build.** One binary, one tool surface, no `#ifdef`, no
@@ -427,6 +478,12 @@ Independent of the above, and cheap:
    - `gemma-e4b` still has no data and is now unblocked — the tag is present locally.
 
    This is what turns the model-selection question in step 6 into a measurement.
+
+8. **The substrate probe** ([D11](./DECISIONS.md#d11--the-substrate-is-probed-not-assumed)) —
+   independent of every step above and needs no link edge, because it touches no model and no
+   network. It validates §4's identity tuple against the ground it is actually standing on,
+   which is a Linux concern today (`/mnt/c`, network mounts, `tmpfs`, overlayfs) and not a
+   Windows one.
 
 ---
 
