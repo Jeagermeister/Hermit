@@ -157,10 +157,11 @@ add_library(hermes::ollama ALIAS hermes_ollama)
 # types but opens no socket itself -- every policy decision in it is meant to be
 # testable without a daemon.
 #
-# hermes_core is the first of ROUTING.md section 7's two missing edges: a Tier 1 tool
-# placed here without it could not construct a SandboxPath, which would make it
-# R1-unsafe by construction -- the exact inverse of the property this build graph
-# exists to enforce.
+# hermes_core is the first of the two edges ROUTING.md section 7 recorded missing.
+# In-tree the gap was masked -- every target shares one include dir and the final
+# binaries link all four archives, so a Tier 1 tool here would have compiled by
+# accident. The edge turns that accident into a declared dependency; an out-of-tree
+# consumer of hermes::supervisor alone is who it would actually have broken.
 add_library(hermes_supervisor
   src/hermes/supervisor/session.cpp)
 
@@ -175,8 +176,9 @@ add_library(hermes::supervisor ALIAS hermes_supervisor)
 # MCP-over-stdio server are supposed to compose themselves from the same settings.
 #
 # hermes_supervisor is the second of ROUTING.md section 7's missing edges: registry
-# composition happens in this layer, and before the edge existed only the executable
-# saw all four targets, so the frontends could not have composed anything.
+# composition happens in this layer, and before it no library target saw all four --
+# only the two final binaries did -- so composition code here would have leaned on
+# the binaries' link lines rather than a declared dependency.
 add_library(hermes_app
   src/hermes/app/config.cpp)
 

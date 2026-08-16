@@ -1,6 +1,7 @@
 # Routing — the tool surface, and who is allowed to call what
 
-Drafted 2026-08-15. **Nothing here is implemented yet.** This settles the surface
+Drafted 2026-08-15; implementation began 2026-08-16. **§12 records what is done — everything
+not marked there is still design intent.** This settles the surface
 [Phase 2](./ROADMAP.md) will build: which tools exist, what they return, where each one lives in
 the build graph, and which frontend exposes which subset.
 
@@ -234,13 +235,16 @@ true at tool #37.
 
 Verified missing against `CMakeLists.txt` on 2026-08-15; **both added 2026-08-16**:
 
-1. **`hermes_supervisor` did not link `hermes_core`.** A Tier 1 tool placed there could not
-   have constructed a `SandboxPath` — it would have been R1-unsafe by construction, the exact
-   inverse of the property this codebase is built on. The edge was required before `triage` or
-   `summarize` exists.
-2. **`hermes_app` did not link `hermes_supervisor`.** Only the executable linked all four
-   targets, so registry composition could not happen in `app` as the frontend layer needs. The
-   edge was required before `mcp.cpp` exists.
+1. **`hermes_supervisor` did not link `hermes_core`.** Stated precisely: the gap was a missing
+   *usage-requirement declaration*, not an in-tree link failure — every target publishes the
+   same include dir and the two final binaries linked all four archives, so a Tier 1 tool here
+   would in fact have compiled and linked by accident. The edge turns that accident into a
+   declared dependency, which is exactly what an out-of-tree consumer of `hermes::supervisor`
+   alone would have been broken by. Required before `triage` or `summarize` exists.
+2. **`hermes_app` did not link `hermes_supervisor`.** No *library* target saw all four — only
+   the final binaries (the CLI and the test runner) did — so registry composition in `app`
+   would likewise have leaned on the binaries' link lines rather than a declared edge. Required
+   before `mcp.cpp` exists.
 
 ### Tool descriptors stay JSON-free in `core`
 

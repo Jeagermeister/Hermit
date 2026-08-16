@@ -92,6 +92,7 @@ std::expected<ToolArgs, ArgError> parse_args(const ToolSpec& spec,
   }
 
   ToolArgs parsed;
+  parsed.spec_ = &spec;
   parsed.entries_.reserve(raw.size());
 
   for (const ArgSpec& a : spec.args) {
@@ -158,21 +159,21 @@ std::expected<ToolArgs, ArgError> parse_args(const ToolSpec& spec,
   return parsed;
 }
 
-const std::string* ToolArgs::string(std::string_view name) const noexcept {
+const std::string* ToolArgs::string(std::string_view name) const& noexcept {
   for (const Entry& e : entries_) {
     if (e.name == name) return std::get_if<std::string>(&e.value);
   }
   return nullptr;
 }
 
-const SandboxPath* ToolArgs::path(std::string_view name) const noexcept {
+const SandboxPath* ToolArgs::path(std::string_view name) const& noexcept {
   for (const Entry& e : entries_) {
     if (e.name == name) return std::get_if<SandboxPath>(&e.value);
   }
   return nullptr;
 }
 
-std::span<const SandboxPath> ToolArgs::paths(std::string_view name) const noexcept {
+std::span<const SandboxPath> ToolArgs::paths(std::string_view name) const& noexcept {
   for (const Entry& e : entries_) {
     if (e.name == name) {
       if (const auto* v = std::get_if<std::vector<SandboxPath>>(&e.value)) return *v;

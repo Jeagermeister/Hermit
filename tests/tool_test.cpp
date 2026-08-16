@@ -49,6 +49,7 @@ class EchoTool final : public Tool {
  public:
   [[nodiscard]] const ToolSpec& spec() const noexcept override { return kEchoSpec; }
 
+ private:
   [[nodiscard]] std::expected<ToolOutput, ToolError> run(const ToolArgs& args) override {
     ToolOutput out;
     out.rows.push_back({{{"pattern", *args.string("pattern")},
@@ -57,6 +58,21 @@ class EchoTool final : public Tool {
       out.rows.push_back({{{"extra", p.relative().string()}}});
     }
     return out;
+  }
+};
+
+// A second, argument-free tool, for the zero-arg parse tests and for proving
+// invoke refuses arguments parsed against somebody else's declaration.
+constexpr std::span<const ArgSpec> kNoArgs{};
+const ToolSpec kNoopSpec{"noop", "takes nothing, does nothing", kNoArgs};
+
+class NoopTool final : public Tool {
+ public:
+  [[nodiscard]] const ToolSpec& spec() const noexcept override { return kNoopSpec; }
+
+ private:
+  [[nodiscard]] std::expected<ToolOutput, ToolError> run(const ToolArgs&) override {
+    return ToolOutput{};
   }
 };
 
@@ -132,6 +148,18 @@ TEST(ToolSpecValidate, TwoArgumentsSharingANameAreRefused) {
   EXPECT_EQ(result.error(), SpecError::DuplicateArgName);
 }
 
+TEST(ToolSpecValidate, NonAdjacentDuplicateArgNamesAreRefused) {
+  static constexpr std::array<ArgSpec, 3> args{{
+      {.name = "a", .doc = "first"},
+      {.name = "b", .doc = "between"},
+      {.name = "a", .doc = "again"},
+  }};
+  const ToolSpec spec{"tool", "described", args};
+  auto result = validate(spec);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), SpecError::DuplicateArgName);
+}
+
 // --- parsing: the happy path -------------------------------------------------
 
 TEST_F(ToolTest, AllThreeTypesParseAndResolve) {
@@ -166,6 +194,59 @@ TEST_F(ToolTest, AnAbsentOptionalArgumentReadsAsNullAndEmpty) {
 
   EXPECT_EQ(parsed->string("note"), nullptr);
   EXPECT_TRUE(parsed->paths("extras").empty());
+}
+
+TEST_F(ToolTest, AnOptionalArgumentSuppliedIsParsedNotDiscarded) {
+  const RawArgs raw{
+      {"pattern", std::string{"hello"}},
+      {"target", std::string{"inside.txt"}},
+      {"note", std::string{"remember this"}},
+  };
+  auto parsed = parse_args(kEchoSpec, raw, *box_);
+  ASSERT_TRUE(parsed.has_value()) << to_string(parsed.error());
+
+  ASSERT_NE(parsed->string("note"), nullptr);
+  EXPECT_EQ(*parsed->string("note"), "remember this");
+}
+
+TEST_F(ToolTest, APathThatDoesNotExistYetParsesForWrites) {
+  // Writes create files, so resolve accepts a nonexistent target inside the
+  // root (sandbox.h). An existence check sneaking into parse_args would break
+  // every future write-tool call; this pins that it cannot.
+  const RawArgs raw{
+      {"pattern", std::string{"hello"}},
+      {"target", std::string{"brand_new.txt"}},
+  };
+  auto parsed = parse_args(kEchoSpec, raw, *box_);
+  ASSERT_TRUE(parsed.has_value()) << to_string(parsed.error());
+  EXPECT_EQ(parsed->path("target")->path(), box_->root() / "brand_new.txt");
+}
+
+TEST_F(ToolTest, DuplicatePathListEntriesAreKeptInOrder) {
+  const RawArgs raw{
+      {"pattern", std::string{"hello"}},
+      {"target", std::string{"inside.txt"}},
+      {"extras", std::vector<std::string>{"inside.txt", "inside.txt"}},
+  };
+  auto parsed = parse_args(kEchoSpec, raw, *box_);
+  ASSERT_TRUE(parsed.has_value()) << to_string(parsed.error());
+
+  auto extras = parsed->paths("extras");
+  ASSERT_EQ(extras.size(), 2u) << "no silent dedup";
+  EXPECT_EQ(extras[0], extras[1]);
+}
+
+TEST_F(ToolTest, AZeroArgSpecAcceptsAnEmptyCall) {
+  auto parsed = parse_args(kNoopSpec, RawArgs{}, *box_);
+  EXPECT_TRUE(parsed.has_value());
+}
+
+TEST_F(ToolTest, AZeroArgSpecRefusesAnyArgument) {
+  const RawArgs raw{{"anything", std::string{"at all"}}};
+  auto parsed = parse_args(kNoopSpec, raw, *box_);
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error().kind, ArgErrorKind::UnknownArg);
+  EXPECT_EQ(parsed.error().arg, "anything");
 }
 
 TEST_F(ToolTest, AccessorsForANameOutsideTheSpecReturnNull) {
@@ -204,6 +285,76 @@ TEST_F(ToolTest, AMissingRequiredArgumentIsNamed) {
   ASSERT_FALSE(parsed.has_value());
   EXPECT_EQ(parsed.error().kind, ArgErrorKind::MissingRequired);
   EXPECT_EQ(parsed.error().arg, "target");
+}
+
+TEST_F(ToolTest, TheFirstMissingRequiredInSpecOrderIsNamed) {
+  // Both required args absent: the one earlier in the spec is the one named.
+  auto parsed = parse_args(kEchoSpec, RawArgs{}, *box_);
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error().kind, ArgErrorKind::MissingRequired);
+  EXPECT_EQ(parsed.error().arg, "pattern") << "spec order, not reverse";
+}
+
+TEST_F(ToolTest, AListWhereAPathBelongsIsTheWrongShape) {
+  const RawArgs raw{
+      {"pattern", std::string{"hello"}},
+      {"target", std::vector<std::string>{"inside.txt"}},
+  };
+  auto parsed = parse_args(kEchoSpec, raw, *box_);
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error().kind, ArgErrorKind::WrongShape);
+  EXPECT_EQ(parsed.error().arg, "target");
+}
+
+TEST_F(ToolTest, TheFirstProblemInInputOrderWinsAcrossKinds) {
+  // Duplicate at index 1, unknown at index 2: the duplicate is first.
+  const RawArgs dup_first{
+      {"pattern", std::string{"a"}},
+      {"pattern", std::string{"b"}},
+      {"bogus", std::string{"c"}},
+  };
+  auto parsed = parse_args(kEchoSpec, dup_first, *box_);
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error().kind, ArgErrorKind::DuplicateArg);
+  EXPECT_EQ(parsed.error().arg, "pattern");
+
+  // Unknown at index 1, duplicate at index 2: the unknown is first.
+  const RawArgs unknown_first{
+      {"pattern", std::string{"a"}},
+      {"bogus", std::string{"c"}},
+      {"pattern", std::string{"b"}},
+  };
+  parsed = parse_args(kEchoSpec, unknown_first, *box_);
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error().kind, ArgErrorKind::UnknownArg);
+  EXPECT_EQ(parsed.error().arg, "bogus");
+}
+
+TEST_F(ToolTest, ShapeProblemsReportInSpecOrderNotInputOrder) {
+  // Two wrong shapes, supplied with `extras` before `pattern`. The parse
+  // walks the spec, so `pattern` is the one named -- pinning the ordering
+  // the parse_args contract documents.
+  const RawArgs raw{
+      {"extras", std::string{"not-a-list"}},
+      {"pattern", std::vector<std::string>{"not-a-scalar"}},
+      {"target", std::string{"inside.txt"}},
+  };
+  auto parsed = parse_args(kEchoSpec, raw, *box_);
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error().kind, ArgErrorKind::WrongShape);
+  EXPECT_EQ(parsed.error().arg, "pattern");
+}
+
+TEST_F(ToolTest, AnEmptyRawNameIsUnknown) {
+  const RawArgs raw{
+      {"", std::string{"x"}},
+      {"pattern", std::string{"hello"}},
+      {"target", std::string{"inside.txt"}},
+  };
+  auto parsed = parse_args(kEchoSpec, raw, *box_);
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error().kind, ArgErrorKind::UnknownArg);
+  EXPECT_EQ(parsed.error().arg, "");
 }
 
 TEST_F(ToolTest, AnUnknownArgumentIsRefusedNotIgnored) {
@@ -289,6 +440,8 @@ TEST_F(ToolTest, AnEscapingEntryInAListNamesTheEntryThatEscaped) {
   ASSERT_FALSE(parsed.has_value());
   EXPECT_EQ(parsed.error().kind, ArgErrorKind::BadPath);
   EXPECT_EQ(parsed.error().arg, "extras");
+  ASSERT_TRUE(parsed.error().path_error.has_value());
+  EXPECT_EQ(*parsed.error().path_error, PathError::EscapesRoot);
   EXPECT_EQ(parsed.error().detail, "../outside/secret.txt");
 }
 
@@ -300,8 +453,20 @@ TEST_F(ToolTest, ArgErrorRendersAsOneReadableLine) {
   auto parsed = parse_args(kEchoSpec, raw, *box_);
   ASSERT_FALSE(parsed.has_value());
   const std::string line = to_string(parsed.error());
+  // The whole model-facing message: argument, kind, the sandbox's reason, and
+  // the refused value. Each half of the sentence has to actually be there.
   EXPECT_NE(line.find("target"), std::string::npos);
+  EXPECT_NE(line.find(to_string(ArgErrorKind::BadPath)), std::string::npos);
+  EXPECT_NE(line.find(to_string(PathError::EscapesRoot)), std::string::npos);
   EXPECT_NE(line.find("../outside/secret.txt"), std::string::npos);
+}
+
+TEST_F(ToolTest, AMissingRequiredErrorRendersWithoutDetail) {
+  auto parsed = parse_args(kEchoSpec, RawArgs{}, *box_);
+  ASSERT_FALSE(parsed.has_value());
+  const std::string line = to_string(parsed.error());
+  EXPECT_NE(line.find("pattern"), std::string::npos);
+  EXPECT_NE(line.find(to_string(ArgErrorKind::MissingRequired)), std::string::npos);
 }
 
 // --- the registry ------------------------------------------------------------
@@ -311,6 +476,24 @@ TEST(ToolRegistryTest, AddedToolsAreFoundByName) {
   ASSERT_TRUE(registry.add(std::make_unique<EchoTool>()).has_value());
   EXPECT_NE(registry.find("echo"), nullptr);
   EXPECT_EQ(registry.find("no_such_tool"), nullptr);
+}
+
+TEST(ToolRegistryTest, FindThroughAConstRegistryWorks) {
+  ToolRegistry registry;
+  ASSERT_TRUE(registry.add(std::make_unique<EchoTool>()).has_value());
+
+  const ToolRegistry& read_only = registry;
+  const Tool* found = read_only.find("echo");
+  ASSERT_NE(found, nullptr);
+  EXPECT_EQ(found->spec().name, "echo");
+  EXPECT_EQ(read_only.find("no_such_tool"), nullptr);
+}
+
+TEST(ToolToString, RegistryErrorKindsRenderDistinctly) {
+  EXPECT_EQ(to_string(RegistryErrorKind::NullTool), "null tool");
+  EXPECT_EQ(to_string(RegistryErrorKind::BadSpec), "tool spec failed validation");
+  EXPECT_EQ(to_string(RegistryErrorKind::DuplicateName),
+            "a tool with this name is already registered");
 }
 
 TEST(ToolRegistryTest, ANullToolIsRefused) {
@@ -395,7 +578,7 @@ TEST_F(ToolTest, ParsedArgumentsCrossTheVirtualInterfaceIntact) {
   auto parsed = parse_args(tool->spec(), raw, *box_);
   ASSERT_TRUE(parsed.has_value()) << to_string(parsed.error());
 
-  auto output = tool->run(*parsed);
+  auto output = tool->invoke(*parsed);
   ASSERT_TRUE(output.has_value()) << output.error().reason;
   ASSERT_EQ(output->rows.size(), 2u);
 
@@ -410,6 +593,40 @@ TEST_F(ToolTest, ParsedArgumentsCrossTheVirtualInterfaceIntact) {
   ASSERT_EQ(second.size(), 1u);
   EXPECT_EQ(second[0].name, "extra");
   EXPECT_EQ(std::get<std::string>(second[0].value), "sub/deep.txt");
+}
+
+TEST_F(ToolTest, InvokeRefusesArgsParsedForADifferentTool) {
+  // Parsed against noop's declaration, dispatched to echo: the cross-tool
+  // wiring bug the spec binding exists to catch. Loud refusal, not a null
+  // dereference inside run().
+  auto parsed = parse_args(kNoopSpec, RawArgs{}, *box_);
+  ASSERT_TRUE(parsed.has_value());
+
+  EchoTool echo;
+  auto output = echo.invoke(*parsed);
+  ASSERT_FALSE(output.has_value());
+  EXPECT_FALSE(output.error().reason.empty());
+
+  NoopTool noop;
+  EXPECT_TRUE(noop.invoke(*parsed).has_value()) << "the right tool still works";
+}
+
+TEST_F(ToolTest, InvokeRefusesAMovedFromToolArgs) {
+  const RawArgs raw{
+      {"pattern", std::string{"hello"}},
+      {"target", std::string{"inside.txt"}},
+  };
+  auto parsed = parse_args(kEchoSpec, raw, *box_);
+  ASSERT_TRUE(parsed.has_value());
+
+  hermes::ToolArgs taken = std::move(*parsed);
+
+  EchoTool echo;
+  auto refused = echo.invoke(*parsed);
+  ASSERT_FALSE(refused.has_value()) << "a moved-from ToolArgs must not reach run()";
+
+  auto output = echo.invoke(taken);
+  EXPECT_TRUE(output.has_value()) << "the moved-to instance is fully valid";
 }
 
 }  // namespace
