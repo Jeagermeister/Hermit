@@ -7,6 +7,7 @@
 | [REQUIREMENTS.md](./REQUIREMENTS.md) | what this must do, each requirement traced to a measured failure |
 | [SCOPE.md](./SCOPE.md) | what gets built, read, or ignored — and why |
 | [ROADMAP.md](./ROADMAP.md) | sequencing, and what must be settled before code |
+| [ROUTING.md](./ROUTING.md) | the tool surface: three tiers, the eight tools, who may call what |
 | [DECISIONS.md](./DECISIONS.md) | the hard-to-reverse choices, and what would overturn each |
 | [parity.tsv](./parity.tsv) | machine-readable scope ledger; `tools/parity` reports drift |
 | [bench/fsops/](./bench/fsops/) | the evidence: 259 runs of local models doing filesystem work |
@@ -41,6 +42,48 @@ The design follows an empirical finding rather than a preference. Local-model to
 So this is **a supervisor, not a chatbot**. Its job is keeping a 9–12B model on rails: bounded
 sessions, verified state between turns, and guardrails on anything destructive.
 
+## What this looks like in use
+
+Two front doors, and that is a decision ([D7](./DECISIONS.md)): a person drives it directly, or
+a larger model calls it as a tool.
+
+**A person, one machine, no cloud.** John has a folder of meeting notes and wants order out of
+chaos:
+
+```
+hermes-cpp session --root ~/notes --prompt "Find every note that mentions
+'Project Falcon' and create falcon-index.md listing each one with its date."
+```
+
+Hermes sends the prompt to a small model on John's own GPU (`qwen3.5:9b` through Ollama —
+nothing leaves the machine), **with the tool menu attached**: `find`, `grep`, `read`, `write`,
+each with a description. That menu is the whole trick — there is no magic by which a model
+"knows" tools exist; the menu travels with every request, and models are trained to answer with
+"call tool X" when a task needs hands. The model calls `grep`, reads the matches, writes the
+index — and every call runs inside `~/notes` only, every write is read back byte-for-byte, and
+anything overwritten is backed up first to an archive the model cannot touch. When the model
+says "done," Hermes does not believe it: it inspects the folder. Index present and verified?
+Done. Model claimed done on an untouched tree — a thing the 259 runs actually recorded? Re-run,
+with the one concrete failure: *falcon-index.md does not exist.*
+
+**An assistant that delegates.** John works in an agentic IDE (Kiro is the named first caller —
+[ROUTING.md](./ROUTING.md) §8; any MCP client fits the same socket). Hermes-Cpp is registered
+there as an MCP server over stdio, so the IDE's cloud model sees the same tool menu at the
+assistant level. John types *"clean up the reports folder — everything from 2025 goes into an
+archive subfolder."* The big model does the thinking and calls Hermes for the hands: `find`,
+then `move` per file, each hash-verified at both ends, none able to overwrite what already
+exists. Ask for a file outside `~/reports` and the request is refused before any tool runs —
+not a rule the model follows, the only door it has. The pitch is sharper than "another MCP
+server", and it is the ecosystem's own warning inverted: a typical stdio MCP server runs with
+*all* the launching user's authority; this is the one that **reduces** authority instead of
+inheriting it.
+
+**Status, honestly** (2026-08-16): the second half of these stories is built — the sandbox, all
+eight Tier 0 tools with per-call verification, the staleness guard, and the backup store are
+merged and tested. The first half — the loop that drives the local model, and the MCP server —
+is [ROUTING.md](./ROUTING.md) §12 steps 4–5, the next work. Until then the stories describe the
+destination, and §12 is the honest odometer.
+
 ## Why native code, honestly
 
 Not for inference speed — the process is blocked on the model, and always will be. The wins are
@@ -64,7 +107,8 @@ The evidence sits in two places, across two machines and two agent harnesses:
 
 | Path | What |
 |---|---|
-| `src/hermes/core/` | Library code. `sandbox.{h,cpp}` implements R1 |
+| `src/hermes/core/` | Library code. `sandbox` (R1), `tool` (D4's interface), `fsio` (the one open primitive), `sha256` (R3's hash), `observed` (the staleness guard), `backup` (R4's archive) |
+| `src/hermes/core/tools/` | The eight Tier 0 tools — read, list, find, grep, hash, write, edit, move — [ROUTING.md](./ROUTING.md) §4's surface, verified per call |
 | `src/hermes/ollama/` | The only layer that speaks HTTP: client and R9 preflight |
 | `src/hermes/supervisor/` | Bounded sessions and the context budget ([D7](./DECISIONS.md)'s middle layer) |
 | `src/hermes/app/` | Configuration, shared by the CLI and the coming MCP frontend |
