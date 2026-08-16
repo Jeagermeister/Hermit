@@ -127,7 +127,7 @@ This is the actual product, and none of it is a port:
 | **R7** | re-invoke with one concrete remaining failure |
 
 Hermes Agent did not do any of these in any observed run — inferred from behaviour, not from
-auditing upstream's code, every module of which `parity.tsv` still lists as `NOT_STARTED`. That
+auditing upstream's code, every module of which `parity.tsv` still lists as `NOT_PORTED`. That
 is precisely why `bench/fsops` could observe the failures it did — a model replying `DONE` on an untouched tree, an `05_copy` that destroyed the
 original while "the file still exists" passed, a run that finished its work and then hung.
 

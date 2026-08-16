@@ -166,7 +166,7 @@ therefore not ported code, it is new code.
 
 *Stated precisely, because it is a negative claim about code that has not been read:* this is
 inferred from behaviour across 403 runs, not from auditing upstream's 38k in-scope lines — every
-module in `parity.tsv` is still `NOT_STARTED`. Treat it as well-evidenced, not as verified. If a
+module in `parity.tsv` is still `NOT_PORTED`. Treat it as well-evidenced, not as verified. If a
 module read later turns up an equivalent, it is a finding, not a contradiction.
 
 That reframes the rewrite: the goal is a thin, correct agent loop plus a supervisor that upstream
