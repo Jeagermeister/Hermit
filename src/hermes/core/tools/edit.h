@@ -6,10 +6,11 @@
 // present at T -> compare tuples, refuse on mismatch.
 //
 // The occurrence rule, settled 2026-08-16: `old` must appear EXACTLY ONCE.
-// Zero occurrences is "not found"; two or more is "ambiguous, N occurrences,
-// give more context". Replace-first would silently guess which occurrence was
-// meant -- the adjacent success section 3 forbids -- and replace-all lets one
-// confused call rewrite a whole file. Both refusals are actionable.
+// Zero occurrences is "not found"; two or more is "ambiguous, give more
+// context" (deliberately uncounted -- two is already ambiguous, and exact
+// totals buy nothing). Replace-first would silently guess which occurrence
+// was meant -- the adjacent success section 3 forbids -- and replace-all lets
+// one confused call rewrite a whole file. Both refusals are actionable.
 //
 // Shares `read`'s cap and reasoning: the file must be loaded to be edited.
 

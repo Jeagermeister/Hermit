@@ -1,9 +1,17 @@
 #pragma once
 
 // Observed state -- ROUTING.md section 4: per-session, in memory, nothing
-// persisted. A path is unseen, absent, or present at tuple T; a successful
-// read, list or mutation records presence, a miss records absence, and a
-// fresh session has observed nothing and must read before it may edit.
+// persisted. A path is unseen, absent, or present at tuple T. Presence is
+// recorded by a successful read (committed only when the whole call
+// succeeds), a listing's regular-file entries, and every completed mutation.
+// Absence is recorded by the misses that prove it: an ENOENT read, and a
+// guarded mutation finding its observed file vanished. Other failures --
+// EACCES, not-regular, over-cap, a refused listing -- record nothing, because
+// they prove nothing about existence. A fresh session has observed nothing
+// and must observe (read or list) before it may edit.
+//
+// Tools hold an ObservedState& for their whole life; the composition layer
+// must keep it alive at least as long as the registry holding those tools.
 //
 // The identity tuple is the one currency the whole surface shares: what
 // `list` returns per entry is directly usable as the expected value the

@@ -142,7 +142,8 @@ polls the filesystem to decide completion.
 `fs-observation-policy` is 130 lines that refuse an edit to a file the model has not read, and a
 write to a file it has not observed. It is not R5 — it *prevents* the stale write where R5
 *confirms* the fresh one — but "no upstream equivalent" reads as "nobody does anything in this
-area", which is now false. What that policy became here is the staleness guard on `edit`, in
+area", which is now false. What that policy became here is the staleness guard on `write` and
+`edit`, in
 [ROUTING.md](./ROUTING.md) §4, recorded there as a second layer under §6 rather than as a
 substitute for it.
 

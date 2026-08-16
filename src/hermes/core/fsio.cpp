@@ -1,11 +1,12 @@
 #include <hermes/core/fsio.h>
 
+#include <array>
 #include <cerrno>
 #include <cstdio>
-#include <random>
 #include <system_error>
 
 #include <fcntl.h>
+#include <sys/random.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -25,6 +26,8 @@ std::string to_string(const IoError& e) {
     case IoError::Kind::TooLarge:
       return "file is " + std::to_string(e.size) + " bytes, over the " +
              std::to_string(e.cap) + "-byte read cap";
+    case IoError::Kind::Refused:
+      return std::string{e.note};
   }
   return "unknown I/O error";
 }
@@ -111,18 +114,29 @@ std::expected<void, IoError> write_all(int fd, std::string_view bytes) {
 
 std::expected<std::filesystem::path, IoError> write_temp_beside(
     const SandboxPath& target, std::string_view bytes, ::mode_t mode) {
-  static std::random_device entropy;
-
   const std::filesystem::path parent = target.path().parent_path();
   const std::string base = "." + target.path().filename().string() + ".hermes-tmp.";
 
   for (int attempt = 0; attempt < 32; ++attempt) {
+    // getrandom(2), not std::random_device: the latter can throw, and a
+    // terminate is not an acceptable failure mode here any more than it was
+    // for the JSON dump (D2) -- entropy trouble is an IoError like any other.
+    std::array<unsigned char, 8> rnd{};
+    std::size_t filled = 0;
+    while (filled < rnd.size()) {
+      const ssize_t got = ::getrandom(rnd.data() + filled, rnd.size() - filled, 0);
+      if (got < 0) {
+        if (errno == EINTR) continue;
+        return std::unexpected{IoError{.code = errno}};
+      }
+      filled += static_cast<std::size_t>(got);
+    }
     std::string suffix;
-    for (int i = 0; i < 2; ++i) {
-      char hex[16];
-      const auto r = static_cast<unsigned long>(entropy());
-      std::snprintf(hex, sizeof hex, "%08lx", r);
-      suffix += hex;
+    suffix.reserve(16);
+    static constexpr char kHex[] = "0123456789abcdef";
+    for (const unsigned char byte : rnd) {
+      suffix.push_back(kHex[byte >> 4]);
+      suffix.push_back(kHex[byte & 0x0f]);
     }
     const std::filesystem::path candidate = parent / (base + suffix);
 

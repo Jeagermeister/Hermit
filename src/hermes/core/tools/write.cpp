@@ -1,10 +1,12 @@
 #include <hermes/core/tools/write.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstdio>
 #include <filesystem>
 #include <string>
-#include <utility>
+#include <string_view>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -78,8 +80,11 @@ std::expected<ToolOutput, ToolError> WriteTool::run(const ToolArgs& args) {
       if (current.error().kind == IoError::Kind::Kernel &&
           current.error().code == ENOENT) {
         observed_.record_absent(target.relative());
+        // Honest advice: absence is now recorded, and the table says
+        // absent -> create-if-absent, so a deliberate retry creates.
         return refuse(target, "was present when last observed, now missing; "
-                              "read or list before writing");
+                              "absence is now recorded, so retrying will "
+                              "create the file fresh");
       }
       return refuse(target, to_string(current.error()));
     }
@@ -94,8 +99,11 @@ std::expected<ToolOutput, ToolError> WriteTool::run(const ToolArgs& args) {
       return refuse(target, "backup failed: " + to_string(kept.error()) +
                                 "; nothing was written");
     }
+    // Permission bits only: carrying setuid/setgid/sticky onto model-chosen
+    // content would be granting privilege nobody asked for. Recorded in
+    // ROUTING.md section 4.
     auto temp = write_temp_beside(target, content,
-                                  current->meta.st_mode & 07777);
+                                  current->meta.st_mode & 0777);
     if (!temp) return refuse(target, to_string(temp.error()));
     if (::rename(temp->c_str(), target.path().c_str()) != 0) {
       const int e = errno;
@@ -105,6 +113,8 @@ std::expected<ToolOutput, ToolError> WriteTool::run(const ToolArgs& args) {
   } else {
     // Create-if-absent. link() refuses an existing target atomically, so a
     // file that appeared since observation is preserved, never replaced.
+    // umask has no read-only accessor; setting it twice is the only way to
+    // ask, and single-threaded D1 makes the empty window harmless.
     ::mode_t mask = ::umask(0);
     ::umask(mask);
     auto temp = write_temp_beside(target, content, 0666 & ~mask);
@@ -114,6 +124,15 @@ std::expected<ToolOutput, ToolError> WriteTool::run(const ToolArgs& args) {
     ::unlink(temp->c_str());
     if (linked != 0) {
       if (link_errno == EEXIST) {
+        struct ::stat st {};
+        if (::fstatat(AT_FDCWD, target.path().c_str(), &st,
+                      AT_SYMLINK_NOFOLLOW) == 0 &&
+            S_ISDIR(st.st_mode)) {
+          // "read it first" is unfollowable advice for a directory -- read
+          // would refuse NotRegular and record nothing, looping the model.
+          return refuse(target, "target is a directory; write a file inside "
+                                "it instead");
+        }
         return refuse(target,
                       "exists but was never read this session; read it first, "
                       "then write to replace it");

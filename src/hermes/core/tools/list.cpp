@@ -35,10 +35,6 @@ std::string_view type_of(mode_t mode) noexcept {
   return "other";
 }
 
-std::int64_t to_ns(const timespec& t) noexcept {
-  return static_cast<std::int64_t>(t.tv_sec) * 1'000'000'000 + t.tv_nsec;
-}
-
 }  // namespace
 
 const ToolSpec& ListTool::spec() const noexcept { return kSpec; }
@@ -89,8 +85,12 @@ std::expected<ToolOutput, ToolError> ListTool::run(const ToolArgs& args) {
     // root, which no result of this tool may do.
     if (::fstatat(::dirfd(d), de->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0) {
       const int e = errno;
+      // Copy the entry name first: `name` views dirent storage that closedir
+      // frees. Caught as a use-after-free by ASan the first time a test
+      // actually reached this branch.
+      const std::string entry{name};
       ::closedir(d);
-      return refuse(name, IoError{.code = e});
+      return refuse(entry, IoError{.code = e});
     }
     entries.push_back({std::string{name}, st});
     errno = 0;
@@ -106,17 +106,18 @@ std::expected<ToolOutput, ToolError> ListTool::run(const ToolArgs& args) {
   for (const Entry& e : entries) {
     const std::filesystem::path entry_rel =
         (dir.relative() / e.name).lexically_normal();
+    const IdentityTuple t = tuple_from(e.st);
     if (S_ISREG(e.st.st_mode)) {
-      observed_.record_present(entry_rel, tuple_from(e.st));
+      observed_.record_present(entry_rel, t);
     }
     out.rows.push_back({{
         {"path", entry_rel.string()},
         {"type", std::string{type_of(e.st.st_mode)}},
-        {"dev", static_cast<std::uint64_t>(e.st.st_dev)},
-        {"ino", static_cast<std::uint64_t>(e.st.st_ino)},
-        {"size", static_cast<std::uint64_t>(e.st.st_size)},
-        {"mtime_ns", to_ns(e.st.st_mtim)},
-        {"ctime_ns", to_ns(e.st.st_ctim)},
+        {"dev", t.dev},
+        {"ino", t.ino},
+        {"size", t.size},
+        {"mtime_ns", t.mtime_ns},
+        {"ctime_ns", t.ctime_ns},
     }});
   }
   return out;

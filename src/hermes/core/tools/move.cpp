@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <utility>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -60,6 +61,9 @@ std::expected<std::string, IoError> hash_fd(int fd) {
 /// probe is harmless -- this is guidance, and the eventual move re-checks
 /// with RENAME_NOREPLACE either way.
 std::string suggest_free_name(const SandboxPath& to) {
+  // The sandbox root itself as a destination has no sibling namespace to
+  // probe -- its parent is outside the root, which no probe should touch.
+  if (to.relative().empty() || to.relative() == ".") return {};
   const std::string stem = to.path().stem().string();
   const std::string ext = to.path().extension().string();
   for (int n = 1; n < 100; ++n) {
@@ -82,6 +86,11 @@ std::expected<ToolOutput, ToolError> MoveTool::run(const ToolArgs& args) {
   const SandboxPath& from = *args.path("from");
   const SandboxPath& to = *args.path("to");
 
+  if (from == to) {
+    return refuse(from.relative().string() +
+                  ": source and destination are the same file");
+  }
+
   auto source = open_regular(from);
   if (!source) {
     return refuse(from.relative().string() + ": " + to_string(source.error()));
@@ -102,6 +111,19 @@ std::expected<ToolOutput, ToolError> MoveTool::run(const ToolArgs& args) {
                   RENAME_NOREPLACE) != 0) {
     const int e = errno;
     if (e == EEXIST) {
+      // A directory collider gets different guidance: the model almost
+      // certainly meant "into", and a "(1)" sibling of a directory is never
+      // what it wants.
+      struct ::stat st {};
+      if (::fstatat(AT_FDCWD, to.path().c_str(), &st, AT_SYMLINK_NOFOLLOW) == 0 &&
+          S_ISDIR(st.st_mode)) {
+        const std::string inside =
+            (to.relative() / from.path().filename()).lexically_normal().string();
+        return refuse(to.relative().string() +
+                      ": destination is a directory -- name the file inside "
+                      "it, e.g. '" +
+                      inside + "'");
+      }
       std::string why = to.relative().string() +
                         ": destination exists -- refusing to replace it";
       if (const std::string free_name = suggest_free_name(to); !free_name.empty()) {
@@ -111,8 +133,22 @@ std::expected<ToolOutput, ToolError> MoveTool::run(const ToolArgs& args) {
       }
       return refuse(std::move(why));
     }
+    if (e == EINVAL || e == ENOSYS) {
+      // NFS < 4.2, some FUSE filesystems, pre-3.15 kernels: the flagged
+      // rename is unsupported. Saying "Invalid argument" would blame the
+      // caller for the substrate -- D11's probe will report this class up
+      // front; until then the refusal names the real condition.
+      return refuse(to.relative().string() +
+                    ": this filesystem cannot refuse-to-replace atomically; "
+                    "move is disabled on it rather than made unsafe");
+    }
     return refuse(to.relative().string() + ": " + to_string(IoError{.code = e}));
   }
+
+  // The rename happened: the source's name is gone no matter what the
+  // verification below concludes, so that observation records first, on
+  // every branch.
+  observed_.record_absent(from.relative());
 
   // R3, the destination end: hash what actually landed under the new name.
   auto dest = open_regular(to);
@@ -122,12 +158,11 @@ std::expected<ToolOutput, ToolError> MoveTool::run(const ToolArgs& args) {
   }
   auto dest_hash = hash_fd(dest->fd.get());
   if (!dest_hash) {
+    observed_.record_present(to.relative(), tuple_from(dest->meta));
     return refuse(to.relative().string() + ": moved, but verification failed: " +
                   to_string(dest_hash.error()));
   }
 
-  // The rename happened; the observations are true regardless of the verdict.
-  observed_.record_absent(from.relative());
   observed_.record_present(to.relative(), tuple_from(dest->meta));
 
   if (*dest_hash != *source_hash) {

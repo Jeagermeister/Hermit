@@ -1,5 +1,7 @@
 #include <hermes/core/observed.h>
 
+#include <sys/stat.h>
+
 namespace hermes {
 
 IdentityTuple tuple_from(const struct ::stat& st) noexcept {

@@ -1,13 +1,16 @@
 #include <hermes/core/tools/edit.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstdio>
 #include <string>
-#include <utility>
+#include <string_view>
 
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <hermes/core/fsio.h>
 #include <hermes/core/sha256.h>
 
 namespace hermes {

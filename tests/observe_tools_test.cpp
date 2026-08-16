@@ -13,8 +13,8 @@
 #include <variant>
 #include <vector>
 
-#include <hermes/core/sha256.h>
 #include <hermes/core/observed.h>
+#include <hermes/core/sha256.h>
 #include <hermes/core/tool.h>
 
 namespace fs = std::filesystem;

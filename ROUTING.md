@@ -164,13 +164,14 @@ argument §6 already makes for keeping per-tool verification despite that limit.
 Observed state is per-session and in memory: a path is **unseen**, **absent**, or **present at
 tuple T**. A successful `read`, `list` or mutation records presence; a miss records absence.
 Nothing is persisted, which is the correct semantics under bounded sessions — a fresh session
-has observed nothing and must read before it may edit.
+has observed nothing and must observe (read, or list) before it may edit; the one-currency
+design above is exactly what makes a listing count.
 
 | Intent | Observed | Decision |
 |---|---|---|
 | `write` | unseen or absent | create-if-absent |
 | `write` | present at `T` | replace only if the tuple still matches `T` |
-| `edit` | unseen | refuse — the file must be read first |
+| `edit` | unseen | refuse — the file must be observed first (a read, or a listing) |
 | `edit` | absent | refuse — not found |
 | `edit` | present at `T` | compare against `T`, refuse on mismatch |
 
@@ -183,9 +184,10 @@ instead, so a file created *after* the check is still preserved and still reject
 ### The mutating trio — semantics settled 2026-08-16
 
 **`edit` requires `old` to occur exactly once.** Zero is "not found"; two or more is
-"ambiguous, N occurrences, give more context". Replace-first would silently guess which
-occurrence was meant — the adjacent success §3 forbids — and replace-all lets one confused call
-rewrite a whole file. Both refusals tell the model what to do next.
+"ambiguous, give more context" — deliberately uncounted, because two is already ambiguous and an
+exact total buys nothing. Replace-first would silently guess which occurrence was meant — the
+adjacent success §3 forbids — and replace-all lets one confused call rewrite a whole file. Both
+refusals tell the model what to do next.
 
 **`move` never replaces an existing destination, structurally.** `renameat2(RENAME_NOREPLACE)`,
 so the silent-destruction shape (`05_copy`) cannot be expressed. The refusal carries the
@@ -204,23 +206,38 @@ worth not loading. Regular files only: hashing is the verification, and a direct
 content hash.
 
 **Backups live outside the sandbox root** in a supervisor-provided directory (configuration,
-§9), one generation per mutation, nothing ever overwritten. Outside, for two reasons: the model
-must never be able to list, read, edit or move its own undo data; and the sandbox's `list` and
-`find` stay free of archive noise. Backup paths are host-absolute and never appear in a
-model-facing row — `SandboxPath::relative` exists so the host layout does not leak, and the
-archive is part of the host layout.
+§9), one generation per *overwriting* mutation, nothing ever overwritten. A create and a `move`
+take no generation, and that is correct rather than an omission: neither destroys bytes —
+create cannot replace (the `link()` refusal is atomic) and a move's undo is moving it back, R3
+having proved the content survived. A reused directory continues numbering after the
+generations already in it; order generations numerically, not lexicographically. Outside the
+root, for two reasons: the model must never be able to list, read, edit or move its own undo
+data; and the sandbox's `list` and `find` stay free of archive noise. Backup paths are
+host-absolute and never appear in a model-facing row — `SandboxPath::relative` exists so the
+host layout does not leak, and the archive is part of the host layout.
 
 **Mechanics, recorded so they are not re-derived:** create publishes by `link()`-no-replace (a
 file created after the check is preserved and rejected — the honest create the table demands);
-replace goes through an exclusive temp beside the target and an atomic `rename`; every mutation
-reads back and compares before succeeding (R5) and the read-back's stat becomes the recorded
+replace goes through an exclusive temp beside the target and an atomic `rename`; every
+*overwriting* mutation reads back and compares before succeeding (R5), while `move` verifies by
+hash at both ends instead (R3, its own row), and the post-mutation stat becomes the recorded
 observation. A failed staleness check records nothing — a recorded fresh tuple would let a
-retry pass the guard without re-reading content. Missing parent directories are created by
-`write` and `move` (the surface has no mkdir tool; parents are means to the one whole job, not
-judgment). A replace preserves the file's mode; a create honors the umask over 0666. `edit`
-shares `read`'s cap — the file must be loaded to be edited. Every successful mutation returns
-the new content hash and the fresh identity tuple, in `list`'s currency, so the result is
-immediately usable as the next expected value.
+retry pass the guard without re-reading content. `read` commits its presence observations only
+when the whole call succeeds: a refused call delivered no bytes, and presence recorded from it
+would let a later write pass the guard on content the model never received. Absence records
+immediately, from the misses that prove it — an ENOENT read, a guarded mutation finding its
+observed file vanished; other failures prove nothing about existence and record nothing.
+Missing parent directories are created by `write` and `move` (the surface has no mkdir tool;
+parents are means to the one whole job, not judgment). A replace preserves the file's
+*permission bits* and deliberately drops setuid/setgid/sticky — carrying privilege onto
+model-chosen content is nobody's intent; a create honors the umask over 0666. `edit` shares
+`read`'s cap — the file must be loaded to be edited. Every successful mutation returns the new
+content hash and the fresh identity tuple, in `list`'s currency, so the result is immediately
+usable as the next expected value. Durability is deliberately unclaimed: no fsync — R5 verifies
+content and R4 keeps the old bytes recoverable, and a crash-durability guarantee would be a
+DECISIONS.md entry, not a flag. Publication — parent creation, `link`, `rename` — is path-based
+until §12 step 4 widens the funnel to it; the interior-component window that leaves open, and
+why D10 does not backstop it, is recorded there.
 
 ### `shell` — kept, and it is a special case
 
@@ -565,6 +582,17 @@ Ordered. Steps 1–4 are Phase 2 and 2.5 as already written; only the tool list 
      D6's accepted race either way; the funnel exists so clearing this gate swaps one function
      body instead of rewriting eight tools' I/O — and so the widened parse-to-use window PR #6
      introduced (arguments resolve before the tool runs) is closed at the same single site.
+
+     **Scope widened 2026-08-16, out of PR #9's review: the gate must also cover
+     *publication*.** The mutating tools create parent directories, `link()` and `rename()` by
+     resolved path, and those calls follow *interior* symlinks — a window wider in kind than
+     the final-component open D6 accepted, and one D10 does not backstop, because Landlock
+     confines only the shell child while these writes run in the unconfined parent. A
+     pre-planted interior link is caught at resolve time; only a concurrent swap in the
+     resolve-to-publish window — the same actor class as D6's race, outside the stated threat
+     model — can exploit it. Clearing this gate therefore means converting publication to
+     `mkdirat`/`linkat`/`renameat2` under the same walked root descriptor, not just swapping
+     `open_in_root`'s body. Until then the window is accepted *and named*, here.
 5. **`mcp.cpp`** in `app`. Callable from here on.
 6. **Tier 1** (`triage`, `summarize`) in `supervisor`, once model selection is settled.
 

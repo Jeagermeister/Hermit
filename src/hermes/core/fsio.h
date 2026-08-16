@@ -10,7 +10,9 @@
 
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <sys/stat.h>
@@ -57,11 +59,13 @@ struct IoError {
     Kernel,      // errno in `code`
     NotRegular,  // directory, device, socket, FIFO -- never "content"
     TooLarge,    // over the read cap; `size` and `cap` are set
+    Refused,     // a precondition of ours, not the kernel's; `note` says which
   };
   Kind kind = Kind::Kernel;
   int code = 0;
   std::uint64_t size = 0;
   std::uint64_t cap = 0;
+  std::string_view note{};  // Refused only; must reference a string literal
 };
 
 [[nodiscard]] std::string to_string(const IoError& e);
@@ -118,6 +122,11 @@ struct FileContent {
 /// Returns the temp's absolute path; the caller publishes or unlinks it. A
 /// crash in between leaves a ".hermes-tmp." orphan beside the target, which
 /// is visible, greppable, and harmless.
+///
+/// Durability posture, deliberate: no fsync anywhere on this path. R5's
+/// read-back verifies content, R4 keeps the old bytes recoverable, and
+/// crash-durability of the new bytes is a claim this codebase has not made;
+/// if it ever does, that is a decision for DECISIONS.md, not a flag here.
 [[nodiscard]] std::expected<std::filesystem::path, IoError> write_temp_beside(
     const SandboxPath& target, std::string_view bytes, ::mode_t mode);
 
