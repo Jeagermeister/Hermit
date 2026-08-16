@@ -12,6 +12,7 @@
 #include <variant>
 #include <vector>
 
+#include <hermes/core/observed.h>
 #include <hermes/core/tool.h>
 #include <hermes/core/tools/hash.h>
 #include <hermes/core/tools/read.h>
@@ -95,6 +96,7 @@ class SearchToolsTest : public ::testing::Test {
 
   fs::path tmp_;
   std::unique_ptr<Sandbox> box_;
+  hermes::ObservedState state_;
 };
 
 // --- grep --------------------------------------------------------------------
@@ -179,7 +181,7 @@ TEST_F(SearchToolsTest, GrepRefusesAFileOverItsCap) {
 // --- read cap (same mechanism, guidance included) ----------------------------
 
 TEST_F(SearchToolsTest, ReadRefusesOverCapWithSizeCapAndGuidance) {
-  ReadTool read{10};
+  ReadTool read{state_, 10};
   auto out = call(read, {{"paths", std::vector<std::string>{"notes.txt"}}});
   ASSERT_FALSE(out.has_value()) << "never a truncated read";
   const std::string& reason = out.error().reason;
@@ -191,7 +193,7 @@ TEST_F(SearchToolsTest, ReadRefusesOverCapWithSizeCapAndGuidance) {
 
 TEST_F(SearchToolsTest, ReadAtExactlyTheCapSucceeds) {
   write_file(tmp_ / "root" / "ten.txt", "0123456789");
-  ReadTool read{10};
+  ReadTool read{state_, 10};
   auto out = call(read, {{"paths", std::vector<std::string>{"ten.txt"}}});
   ASSERT_TRUE(out.has_value()) << out.error().reason;
   EXPECT_EQ(*text(out->rows[0], "content"), "0123456789");
@@ -288,7 +290,7 @@ TEST_F(SearchToolsTest, FindRefusesAFileStart) {
 
 TEST_F(SearchToolsTest, AllFiveObserveToolsShareOneRegistry) {
   hermes::ToolRegistry registry;
-  ASSERT_TRUE(registry.add(std::make_unique<ReadTool>()).has_value());
+  ASSERT_TRUE(registry.add(std::make_unique<ReadTool>(state_)).has_value());
   ASSERT_TRUE(registry.add(std::make_unique<HashTool>()).has_value());
   ASSERT_TRUE(registry.add(std::make_unique<FindTool>()).has_value());
   ASSERT_TRUE(registry.add(std::make_unique<GrepTool>()).has_value());

@@ -13,23 +13,27 @@
 #include <cstdint>
 
 #include <hermes/core/fsio.h>
+#include <hermes/core/observed.h>
 #include <hermes/core/tool.h>
 
 namespace hermes {
 
 class ReadTool final : public Tool {
  public:
-  /// The cap is configuration (ROUTING.md section 9); the composition layer
-  /// passes the configured value once one exists. The default stands in
-  /// until then.
-  explicit ReadTool(std::uint64_t max_file_bytes = kDefaultMaxReadBytes) noexcept
-      : max_file_bytes_(max_file_bytes) {}
+  /// A successful read records presence at the file's tuple; an ENOENT miss
+  /// records absence (ROUTING.md section 4's observed-state rules). The cap
+  /// is configuration (section 9); the composition layer passes the
+  /// configured value once one exists.
+  explicit ReadTool(ObservedState& observed,
+                    std::uint64_t max_file_bytes = kDefaultMaxReadBytes) noexcept
+      : observed_(observed), max_file_bytes_(max_file_bytes) {}
 
   [[nodiscard]] const ToolSpec& spec() const noexcept override;
 
  private:
   [[nodiscard]] std::expected<ToolOutput, ToolError> run(const ToolArgs& args) override;
 
+  ObservedState& observed_;
   std::uint64_t max_file_bytes_;
 };
 

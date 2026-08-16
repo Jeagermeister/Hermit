@@ -14,6 +14,7 @@ add_executable(hermes_tests
   sha256_test.cpp
   observe_tools_test.cpp
   search_tools_test.cpp
+  mutate_tools_test.cpp
   ollama_client_test.cpp
   preflight_test.cpp
   config_test.cpp

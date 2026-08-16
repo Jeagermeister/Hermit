@@ -483,14 +483,18 @@ These are hard to reverse and benefit from being argued out before code exists:
 ## Phase 2 — Core loop and minimal tools
 
 - [ ] Agent loop: history, tool dispatch, bounded turns
-- [ ] `read`, `write`, `list` — enough to prove the loop end to end
-- [ ] `edit` — hardest to get right; patch application is where harnesses usually fail
-- [ ] **Read-back after every write (R5)** — attaches here, to `write` and `edit`: any write
-      whose content must match exactly is read back and compared before the turn succeeds.
-      Cheap insurance regardless of whether the contamination is the tool's or the model's,
-      which is exactly why the requirement outlived the correction to its evidence.
-- [ ] `move`, ~~`search`~~ — `search` was split into `find` and `grep` when the tool surface
-      was settled; [ROUTING.md](./ROUTING.md) §4 is the decided list and this bullet defers to it
+- [ ] `read`, `write`, `list` — **the tools exist as of 2026-08-16** ([ROUTING.md](./ROUTING.md)
+      §12 step 3); the "prove the loop end to end" half of this bullet stays open with the
+      agent-loop bullet above, which is why the box is not ticked
+- [x] ~~`edit`~~ — done 2026-08-16, with the exactly-once occurrence rule and the
+      observed-state gate recorded in [ROUTING.md](./ROUTING.md) §4; "hardest to get right"
+      held up, which is why its semantics were argued before its code
+- [x] ~~**Read-back after every write (R5)**~~ — implemented 2026-08-16 exactly as written:
+      `write` and `edit` read back and byte-compare before the turn succeeds, and the
+      read-back's stat becomes the recorded observation.
+- [x] ~~`move`, `search`~~ — `move` done 2026-08-16 (`RENAME_NOREPLACE`, R3 both ends);
+      `search` was split into `find` and `grep` when the tool surface was settled and both
+      exist; [ROUTING.md](./ROUTING.md) §4 is the decided list
 - [ ] **Do not foreclose the second backend ([D9](./DECISIONS.md)).** vLLM is decided in
       principle and **deferred** — Kitchen's default runtime is Ollama, so nothing is blocked
       today. The Phase 2 obligation is only to avoid adding new per-request assumptions to
