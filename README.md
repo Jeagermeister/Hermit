@@ -8,6 +8,7 @@
 | [SCOPE.md](./SCOPE.md) | what gets built, read, or ignored — and why |
 | [ROADMAP.md](./ROADMAP.md) | sequencing, and what must be settled before code |
 | [ROUTING.md](./ROUTING.md) | the tool surface: three tiers, the eight tools, who may call what |
+| [FAQ.md](./FAQ.md) | the questions an evaluator asks first — shell, Python, "why not wait for better models" — each with what it concedes |
 | [DECISIONS.md](./DECISIONS.md) | the hard-to-reverse choices, and what would overturn each |
 | [parity.tsv](./parity.tsv) | machine-readable scope ledger; `tools/parity` reports drift |
 | [bench/fsops/](./bench/fsops/) | the evidence: 259 runs of local models doing filesystem work |
