@@ -133,7 +133,8 @@ FetchContent_MakeAvailable(nlohmann_json httplib)
 # client is a separate target for that reason, and it is the only one that links
 # httplib -- if core ever needs it, the layering has been broken.
 add_library(hermes_core
-  src/hermes/core/sandbox.cpp)
+  src/hermes/core/sandbox.cpp
+  src/hermes/core/tool.cpp)
 
 target_include_directories(hermes_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hermes_core
@@ -155,25 +156,37 @@ add_library(hermes::ollama ALIAS hermes_ollama)
 # transport and below the frontends. It links hermes_ollama for the request and reply
 # types but opens no socket itself -- every policy decision in it is meant to be
 # testable without a daemon.
+#
+# hermes_core is the first of the two edges ROUTING.md section 7 recorded missing.
+# In-tree the gap was masked -- every target shares one include dir and the final
+# binaries link all four archives, so a Tier 1 tool here would have compiled by
+# accident. The edge turns that accident into a declared dependency; an out-of-tree
+# consumer of hermes::supervisor alone is who it would actually have broken.
 add_library(hermes_supervisor
   src/hermes/supervisor/session.cpp)
 
 target_include_directories(hermes_supervisor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hermes_supervisor
   PRIVATE hermes_warnings
-  PUBLIC  hermes_ollama hermes_sanitizers)
+  PUBLIC  hermes_core hermes_ollama hermes_sanitizers)
 add_library(hermes::supervisor ALIAS hermes_supervisor)
 
 # The frontend layer of D7's table. It names a model and a base URL, so it cannot be
 # core; it is a library rather than code inside main() because the CLI and the eventual
 # MCP-over-stdio server are supposed to compose themselves from the same settings.
+#
+# hermes_supervisor is the second of ROUTING.md section 7's missing edges: registry
+# composition happens in this layer, and before it no library target saw all four --
+# only the two final binaries did -- so composition code here would have leaned on
+# the binaries' link lines rather than a declared dependency.
 add_library(hermes_app
   src/hermes/app/config.cpp)
 
 target_include_directories(hermes_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hermes_app
   PRIVATE hermes_warnings
-  PUBLIC  hermes_core hermes_ollama hermes_sanitizers nlohmann_json::nlohmann_json)
+  PUBLIC  hermes_core hermes_ollama hermes_sanitizers hermes_supervisor
+          nlohmann_json::nlohmann_json)
 add_library(hermes::app ALIAS hermes_app)
 
 # --- the binary --------------------------------------------------------------

@@ -82,6 +82,15 @@ template-heavy diagnostics for no additional safety.
 **What would overturn it.** A toolchain with working static reflection; the descriptor lists
 would then be deletable, and D4 collapses into the simpler full-generation design.
 
+**Implementation note (2026-08-16).** `tool.h` landed the descriptor half as declared, with one
+divergence recorded here so it is a decision rather than drift: arguments arrive in a shared
+name-keyed `ToolArgs` rather than a per-tool `Args` struct, so a mistyped field name inside a
+tool body is a null at runtime — caught by that tool's first test, and by `Tool::invoke`'s
+spec-identity check when the mismatch is cross-tool — where the literal `Args`-struct shape
+would have made it a compile error. The descriptor list remains the single declaration, and the
+R1 property (a Path argument exists only as a `SandboxPath`) is unaffected. Per-tool structs
+remain what static reflection would enable.
+
 ## D5 — Constrained decoding: on, from the start
 
 Tool arguments are schema-constrained at decode time via Ollama's `format` parameter.
