@@ -611,7 +611,10 @@ Independent of the above, and cheap:
      single-task diagnostic only.
    - `gemma-e4b` still has no data and is now unblocked — the tag is present locally.
 
-   This is what turns the model-selection question in step 6 into a measurement.
+   This is what turns the model-selection question in step 6 into a measurement. The re-run
+   also doubles as the baseline arm of `bench/delta`'s reliability experiment — same tasks,
+   same model, collected once, used twice; design in
+   [bench/delta/DESIGN.md](./bench/delta/DESIGN.md).
 
 8. **The substrate probe** ([D11](./DECISIONS.md#d11--the-substrate-is-probed-not-assumed)) —
    independent of every step above and needs no link edge, because it touches no model and no

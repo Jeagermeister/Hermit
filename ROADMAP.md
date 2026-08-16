@@ -527,6 +527,13 @@ model calling this as a tool.
       [SCOPE.md](./SCOPE.md) § Platforms carries the Windows scope decision.
 - [ ] **MCP server over stdio.** No listener, no port, no auth. Thin: transport only, over the
       same core the CLI drives.
+- [ ] **`bench/delta` — the before/after measurement.** Design settled in
+      [bench/delta/DESIGN.md](./bench/delta/DESIGN.md) before any run exists; runs blocked on
+      the loop and `mcp.cpp` above, and deliberately their first real workout. Two experiments,
+      separated: **economics** (delegation vs direct, needs no local model — Tier 0 is
+      inference-free, so it runs where developer machines have no GPU) and **reliability**
+      (local, tests R7's ~67%→~96% arithmetic as a measurement, self-contained for extraction
+      to a public repo). Paired deltas, pre-registered overturn conditions, no leaderboards.
 
 ## Phase 3 — The supervisor (the actual product)
 
