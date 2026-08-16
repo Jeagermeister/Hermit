@@ -19,11 +19,7 @@ constexpr std::array<std::uint32_t, 64> kK{
     0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
     0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
-struct State {
-  std::array<std::uint32_t, 8> h;
-};
-
-void process_block(State& s, const unsigned char* p) {
+void process_block(std::array<std::uint32_t, 8>& state, const unsigned char* p) {
   std::uint32_t w[64];
   for (int i = 0; i < 16; ++i) {
     w[i] = (std::uint32_t{p[4 * i]} << 24) | (std::uint32_t{p[4 * i + 1]} << 16) |
@@ -37,8 +33,8 @@ void process_block(State& s, const unsigned char* p) {
     w[i] = w[i - 16] + s0 + w[i - 7] + s1;
   }
 
-  std::uint32_t a = s.h[0], b = s.h[1], c = s.h[2], d = s.h[3];
-  std::uint32_t e = s.h[4], f = s.h[5], g = s.h[6], h = s.h[7];
+  std::uint32_t a = state[0], b = state[1], c = state[2], d = state[3];
+  std::uint32_t e = state[4], f = state[5], g = state[6], h = state[7];
   for (int i = 0; i < 64; ++i) {
     const std::uint32_t big_s1 = std::rotr(e, 6) ^ std::rotr(e, 11) ^ std::rotr(e, 25);
     const std::uint32_t ch = (e & f) ^ (~e & g);
@@ -55,57 +51,73 @@ void process_block(State& s, const unsigned char* p) {
     b = a;
     a = t1 + t2;
   }
-  s.h[0] += a;
-  s.h[1] += b;
-  s.h[2] += c;
-  s.h[3] += d;
-  s.h[4] += e;
-  s.h[5] += f;
-  s.h[6] += g;
-  s.h[7] += h;
+  state[0] += a;
+  state[1] += b;
+  state[2] += c;
+  state[3] += d;
+  state[4] += e;
+  state[5] += f;
+  state[6] += g;
+  state[7] += h;
 }
 
 }  // namespace
 
-std::array<std::uint8_t, 32> sha256(std::string_view bytes) {
-  State s{{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f,
-           0x9b05688c, 0x1f83d9ab, 0x5be0cd19}};
+void Sha256::update(std::string_view bytes) {
+  total_ += bytes.size();
+  const auto* p = reinterpret_cast<const unsigned char*>(bytes.data());
+  std::size_t n = bytes.size();
 
-  const auto* data = reinterpret_cast<const unsigned char*>(bytes.data());
-  const std::size_t n = bytes.size();
-  const std::size_t full_blocks = n / 64;
-  for (std::size_t i = 0; i < full_blocks; ++i) {
-    process_block(s, data + 64 * i);
+  if (buffered_ > 0) {
+    const std::size_t take = std::min(n, sizeof(buf_) - buffered_);
+    std::memcpy(buf_ + buffered_, p, take);
+    buffered_ += take;
+    p += take;
+    n -= take;
+    if (buffered_ == sizeof(buf_)) {
+      process_block(h_, buf_);
+      buffered_ = 0;
+    }
   }
+  while (n >= sizeof(buf_)) {
+    process_block(h_, p);
+    p += sizeof(buf_);
+    n -= sizeof(buf_);
+  }
+  if (n > 0) {
+    std::memcpy(buf_, p, n);
+    buffered_ = n;
+  }
+}
 
-  // Padding: 0x80, zeros, then the message length in bits as 8 big-endian
-  // bytes -- one trailing block, or two when fewer than 9 bytes remain free.
-  unsigned char tail[128] = {};
-  const std::size_t rem = n - full_blocks * 64;
-  if (rem > 0) std::memcpy(tail, data + full_blocks * 64, rem);
-  tail[rem] = 0x80;
-  const std::size_t tail_len = (rem < 56) ? 64 : 128;
-  const std::uint64_t bit_len = static_cast<std::uint64_t>(n) * 8;
+std::array<std::uint8_t, 32> Sha256::finish() {
+  // Padding: 0x80, zeros to 56 mod 64, then the message length in bits as 8
+  // big-endian bytes. bit_len is captured first; update() counting the
+  // padding into total_ afterwards is harmless, the value is never read again.
+  const std::uint64_t bit_len = total_ * 8;
+
+  unsigned char pad[64] = {0x80};
+  const std::size_t pad_len = (buffered_ < 56) ? (56 - buffered_) : (120 - buffered_);
+  update({reinterpret_cast<const char*>(pad), pad_len});
+
+  unsigned char len_be[8];
   for (int i = 0; i < 8; ++i) {
-    tail[tail_len - 1 - static_cast<std::size_t>(i)] =
-        static_cast<unsigned char>(bit_len >> (8 * i));
+    len_be[7 - i] = static_cast<unsigned char>(bit_len >> (8 * i));
   }
-  process_block(s, tail);
-  if (tail_len == 128) process_block(s, tail + 64);
+  update({reinterpret_cast<const char*>(len_be), 8});
 
   std::array<std::uint8_t, 32> digest{};
   for (std::size_t i = 0; i < 8; ++i) {
-    digest[4 * i] = static_cast<std::uint8_t>(s.h[i] >> 24);
-    digest[4 * i + 1] = static_cast<std::uint8_t>(s.h[i] >> 16);
-    digest[4 * i + 2] = static_cast<std::uint8_t>(s.h[i] >> 8);
-    digest[4 * i + 3] = static_cast<std::uint8_t>(s.h[i]);
+    digest[4 * i] = static_cast<std::uint8_t>(h_[i] >> 24);
+    digest[4 * i + 1] = static_cast<std::uint8_t>(h_[i] >> 16);
+    digest[4 * i + 2] = static_cast<std::uint8_t>(h_[i] >> 8);
+    digest[4 * i + 3] = static_cast<std::uint8_t>(h_[i]);
   }
   return digest;
 }
 
-std::string sha256_hex(std::string_view bytes) {
+std::string to_hex(const std::array<std::uint8_t, 32>& digest) {
   static constexpr char kHex[] = "0123456789abcdef";
-  const auto digest = sha256(bytes);
   std::string out;
   out.reserve(64);
   for (const std::uint8_t byte : digest) {
@@ -114,5 +126,13 @@ std::string sha256_hex(std::string_view bytes) {
   }
   return out;
 }
+
+std::array<std::uint8_t, 32> sha256(std::string_view bytes) {
+  Sha256 h;
+  h.update(bytes);
+  return h.finish();
+}
+
+std::string sha256_hex(std::string_view bytes) { return to_hex(sha256(bytes)); }
 
 }  // namespace hermes

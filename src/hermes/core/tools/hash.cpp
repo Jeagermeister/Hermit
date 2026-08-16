@@ -1,6 +1,9 @@
 #include <hermes/core/tools/hash.h>
 
 #include <array>
+#include <cerrno>
+
+#include <unistd.h>
 
 #include <hermes/core/fsio.h>
 #include <hermes/core/sha256.h>
@@ -25,16 +28,28 @@ const ToolSpec& HashTool::spec() const noexcept { return kSpec; }
 std::expected<ToolOutput, ToolError> HashTool::run(const ToolArgs& args) {
   ToolOutput out;
   for (const SandboxPath& p : args.paths("paths")) {
-    // Whole-file read rather than streaming: the same code path `read` trusts,
-    // and file sizes here are bounded by the sandbox's working-set reality
-    // rather than the tool. Revisit alongside any read size cap.
-    auto file = read_file(p);
-    if (!file) {
+    // Streamed, deliberately uncapped: verification is exactly the job that
+    // must not degrade with size, and constant memory makes the cap
+    // unnecessary here. `read` is the tool that pays for returning bodies.
+    auto opened = open_regular(p);
+    if (!opened) {
       return std::unexpected{ToolError{
-          "hash: " + p.relative().string() + ": " + to_string(file.error())}};
+          "hash: " + p.relative().string() + ": " + to_string(opened.error())}};
+    }
+    Sha256 digest;
+    char buf[65536];
+    for (;;) {
+      ssize_t n = ::read(opened->fd.get(), buf, sizeof buf);
+      if (n < 0) {
+        if (errno == EINTR) continue;
+        return std::unexpected{ToolError{"hash: " + p.relative().string() + ": " +
+                                         to_string(IoError{.code = errno})}};
+      }
+      if (n == 0) break;
+      digest.update({buf, static_cast<std::size_t>(n)});
     }
     out.rows.push_back({{{"path", p.relative().string()},
-                         {"hash", sha256_hex(file->bytes)}}});
+                         {"hash", to_hex(digest.finish())}}});
   }
   return out;
 }

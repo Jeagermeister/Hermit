@@ -8,9 +8,9 @@
 // O_NOFOLLOW forced on the final component -- free, and it already refuses the
 // final-component swap, the cheapest slice of the race D6 accepts today.
 
+#include <cstdint>
 #include <expected>
 #include <string>
-#include <string_view>
 #include <utility>
 
 #include <sys/stat.h>
@@ -47,14 +47,30 @@ class Fd {
   int fd_ = -1;
 };
 
-/// An I/O refusal, reported as data. `code` is errno when the kernel refused;
-/// `note` is set instead when the refusal is ours ("not a regular file").
+/// An I/O refusal, reported as data. Kernel refusals carry errno; the two
+/// refusals that are ours carry what a caller needs to phrase guidance --
+/// which is the point of the cap (settled 2026-08-16): the refusal is a
+/// graceful redirection, never a truncated read, because a partial answer is
+/// the adjacent-success ROUTING.md section 3 forbids.
 struct IoError {
+  enum class Kind {
+    Kernel,      // errno in `code`
+    NotRegular,  // directory, device, socket, FIFO -- never "content"
+    TooLarge,    // over the read cap; `size` and `cap` are set
+  };
+  Kind kind = Kind::Kernel;
   int code = 0;
-  std::string_view note{};
+  std::uint64_t size = 0;
+  std::uint64_t cap = 0;
 };
 
 [[nodiscard]] std::string to_string(const IoError& e);
+
+/// The read cap's stand-in default. The cap is *configuration* (ROUTING.md
+/// section 9): when a composition layer exists it passes the configured value
+/// into each tool's constructor; nothing reads this constant at run time
+/// except those constructors' defaults.
+inline constexpr std::uint64_t kDefaultMaxReadBytes = 16u * 1024 * 1024;
 
 /// Open `path`. O_NOFOLLOW and O_CLOEXEC are OR'd in unconditionally: the
 /// resolved path had its symlinks expanded at resolve time, so a symlink in
@@ -62,16 +78,28 @@ struct IoError {
 /// refused (ELOOP), never followed.
 [[nodiscard]] std::expected<Fd, IoError> open_in_root(const SandboxPath& path, int flags);
 
-/// A regular file's exact bytes plus the stat taken from the open fd -- the
-/// same object the bytes came from, even if the name was retargeted since.
+/// A regular file, open, with the stat taken from that fd -- the same object
+/// even if the name has since been retargeted.
+struct OpenedFile {
+  Fd fd;
+  struct ::stat meta {};
+};
+
+/// Open a regular file for reading, refusing anything else -- a directory,
+/// device, socket or FIFO is never "content" (section 3: no answer is a valid
+/// answer, and a blocking open on a planted FIFO is no answer; O_NONBLOCK
+/// makes that a refusal rather than a hang).
+[[nodiscard]] std::expected<OpenedFile, IoError> open_regular(const SandboxPath& path);
+
 struct FileContent {
   std::string bytes;
   struct ::stat meta {};
 };
 
-/// Read one regular file completely. Refuses anything else -- a directory,
-/// device, socket or FIFO is never "content" (ROUTING.md section 3: no answer
-/// is a valid answer, and a blocking open on a planted FIFO is no answer).
-[[nodiscard]] std::expected<FileContent, IoError> read_file(const SandboxPath& path);
+/// Read one regular file completely, refusing files over `max_bytes` -- both
+/// up front from the stat and again during the read, because st_size is a
+/// claim about the past and the file can grow underneath the loop.
+[[nodiscard]] std::expected<FileContent, IoError> read_file(
+    const SandboxPath& path, std::uint64_t max_bytes = kDefaultMaxReadBytes);
 
 }  // namespace hermes

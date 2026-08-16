@@ -14,8 +14,16 @@ void Fd::reset() noexcept {
 }
 
 std::string to_string(const IoError& e) {
-  if (!e.note.empty()) return std::string{e.note};
-  return std::system_category().message(e.code);
+  switch (e.kind) {
+    case IoError::Kind::Kernel:
+      return std::system_category().message(e.code);
+    case IoError::Kind::NotRegular:
+      return "not a regular file";
+    case IoError::Kind::TooLarge:
+      return "file is " + std::to_string(e.size) + " bytes, over the " +
+             std::to_string(e.cap) + "-byte read cap";
+  }
+  return "unknown I/O error";
 }
 
 std::expected<Fd, IoError> open_in_root(const SandboxPath& path, int flags) {
@@ -24,35 +32,54 @@ std::expected<Fd, IoError> open_in_root(const SandboxPath& path, int flags) {
   return Fd{fd};
 }
 
-std::expected<FileContent, IoError> read_file(const SandboxPath& path) {
-  // O_NONBLOCK so an open on a planted FIFO returns instead of blocking until
-  // a writer appears; it has no effect on regular files, and the S_ISREG check
-  // below refuses the FIFO once it is safely open.
+std::expected<OpenedFile, IoError> open_regular(const SandboxPath& path) {
   auto fd = open_in_root(path, O_RDONLY | O_NONBLOCK);
   if (!fd) return std::unexpected{fd.error()};
 
-  FileContent out;
-  if (::fstat(fd->get(), &out.meta) != 0) {
+  OpenedFile out;
+  out.fd = std::move(*fd);
+  if (::fstat(out.fd.get(), &out.meta) != 0) {
     return std::unexpected{IoError{.code = errno}};
   }
   if (!S_ISREG(out.meta.st_mode)) {
-    return std::unexpected{IoError{.note = "not a regular file"}};
+    return std::unexpected{IoError{.kind = IoError::Kind::NotRegular}};
+  }
+  return out;
+}
+
+std::expected<FileContent, IoError> read_file(const SandboxPath& path,
+                                              std::uint64_t max_bytes) {
+  auto opened = open_regular(path);
+  if (!opened) return std::unexpected{opened.error()};
+
+  const auto claimed = static_cast<std::uint64_t>(opened->meta.st_size);
+  if (claimed > max_bytes) {
+    return std::unexpected{IoError{
+        .kind = IoError::Kind::TooLarge, .size = claimed, .cap = max_bytes}};
   }
 
+  FileContent out;
+  out.meta = opened->meta;
   // st_size is a reserve hint, not a bound: the file can grow or shrink
-  // between the fstat and the reads. EOF decides, not the hint.
-  if (out.meta.st_size > 0) {
-    out.bytes.reserve(static_cast<std::size_t>(out.meta.st_size));
+  // between the fstat and the reads. EOF decides -- and the cap is enforced
+  // again below for exactly that reason.
+  if (opened->meta.st_size > 0) {
+    out.bytes.reserve(static_cast<std::size_t>(opened->meta.st_size));
   }
   char buf[65536];
   for (;;) {
-    ssize_t n = ::read(fd->get(), buf, sizeof buf);
+    ssize_t n = ::read(opened->fd.get(), buf, sizeof buf);
     if (n < 0) {
       if (errno == EINTR) continue;
       return std::unexpected{IoError{.code = errno}};
     }
     if (n == 0) break;
     out.bytes.append(buf, static_cast<std::size_t>(n));
+    if (out.bytes.size() > max_bytes) {
+      return std::unexpected{IoError{.kind = IoError::Kind::TooLarge,
+                                     .size = out.bytes.size(),
+                                     .cap = max_bytes}};
+    }
   }
   return out;
 }

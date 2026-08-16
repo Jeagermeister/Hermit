@@ -117,6 +117,34 @@ The consequence worth having is that `list` and the staleness guard share one cu
 observation from listing a directory is directly usable as the expected value on a later `edit`.
 Under the hash design those were two incompatible units.
 
+### `find` and `grep` semantics, and the read cap — settled 2026-08-16
+
+**`grep` matches literal byte substrings, line-granular.** Not regex, deliberately: models emit
+literal fragments, a literal miss is a visible zero-match rather than a silent regex surprise,
+and nothing is interpolated. One row per matching line — path, 1-based line, the line's exact
+bytes as sibling fields, per the table above. An empty pattern is refused rather than matched
+vacuously (§3), and a pattern containing `\n` can never match — visible in the zero-row result,
+not special-cased. If fsops evidence later shows models emitting regular expressions at this
+tool, the upgrade path is ERE behind the same argument, recorded here first.
+
+**`find` matches `fnmatch(3)` globs against entry *names*,** case-sensitive, dotfiles matchable
+by `*`, walking depth-first in sorted order from an explicit start directory. Symlinks are never
+followed — neither for recursion nor matching — so no result can name a file outside the root
+and cycles cannot occur.
+
+> ⚠️ **Marked for revisit** (2026-08-16, at the maintainer's request): the fnmatch dialect is a
+> starting point chosen for POSIX definition and zero dependency, not a measured endpoint.
+> Path-globs (`src/**/*.c`) and case-folding are the two plausible future asks; either lands
+> here first, then in code.
+
+**`read` and `grep` refuse oversized files, and the refusal is guidance.** The cap is
+*configuration* (§9) with a 16 MiB stand-in default, passed through each tool's constructor and
+wired to the config layer when a composition layer exists. The refusal names the file, its size
+and the cap, and points at `hash` and `list` — the tools that answer at any size — never a
+truncated read: a partial answer is the adjacent-success §3 forbids. `hash` is deliberately
+uncapped and streams at constant memory, because verification is exactly the job that must not
+degrade with size.
+
 ### `edit` fails closed on a stale target
 
 `edit` is checked against the identity tuple **this session last observed** for its target —

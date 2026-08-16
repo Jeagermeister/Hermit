@@ -10,13 +10,36 @@
 // changes the hash -- not resistance to an adversary constructing collisions.
 // If the requirement ever becomes adversarial, revisit this decision, not the
 // constant tables.
+//
+// Streaming interface so `hash` verifies a file of any size at constant
+// memory -- the read cap deliberately does not apply to hashing, because
+// verification is exactly the job that must not degrade with size.
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
 
 namespace hermes {
+
+class Sha256 {
+ public:
+  void update(std::string_view bytes);
+
+  /// Finalise and return the digest. Call once; the object is spent after.
+  [[nodiscard]] std::array<std::uint8_t, 32> finish();
+
+ private:
+  std::array<std::uint32_t, 8> h_{0x6a09e667, 0xbb67ae85, 0x3c6ef372,
+                                  0xa54ff53a, 0x510e527f, 0x9b05688c,
+                                  0x1f83d9ab, 0x5be0cd19};
+  unsigned char buf_[64] = {};
+  std::size_t buffered_ = 0;
+  std::uint64_t total_ = 0;
+};
+
+[[nodiscard]] std::string to_hex(const std::array<std::uint8_t, 32>& digest);
 
 [[nodiscard]] std::array<std::uint8_t, 32> sha256(std::string_view bytes);
 

@@ -146,6 +146,8 @@ add_library(hermes_core
   src/hermes/core/sandbox.cpp
   src/hermes/core/sha256.cpp
   src/hermes/core/tool.cpp
+  src/hermes/core/tools/find.cpp
+  src/hermes/core/tools/grep.cpp
   src/hermes/core/tools/hash.cpp
   src/hermes/core/tools/list.cpp
   src/hermes/core/tools/read.cpp)

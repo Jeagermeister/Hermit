@@ -4,7 +4,6 @@
 #include <string>
 #include <utility>
 
-#include <hermes/core/fsio.h>
 #include <hermes/core/sha256.h>
 
 namespace hermes {
@@ -29,10 +28,16 @@ const ToolSpec& ReadTool::spec() const noexcept { return kSpec; }
 std::expected<ToolOutput, ToolError> ReadTool::run(const ToolArgs& args) {
   ToolOutput out;
   for (const SandboxPath& p : args.paths("paths")) {
-    auto file = read_file(p);
+    auto file = read_file(p, max_file_bytes_);
     if (!file) {
-      return std::unexpected{ToolError{
-          "read: " + p.relative().string() + ": " + to_string(file.error())}};
+      std::string reason =
+          "read: " + p.relative().string() + ": " + to_string(file.error());
+      if (file.error().kind == IoError::Kind::TooLarge) {
+        // The graceful half of the refusal: say what still works at this
+        // size, so the model's next call can be a useful one.
+        reason += "; hash can verify it and list can identify it at any size";
+      }
+      return std::unexpected{ToolError{std::move(reason)}};
     }
     std::string hash = sha256_hex(file->bytes);
     out.rows.push_back({{{"path", p.relative().string()},
