@@ -66,7 +66,7 @@ makes R5's read-back compare against the wrong intent, and the guarantee is holl
 | `read` | Return exact bytes of one or more files | Returns content hash alongside |
 | `list` | Directory entries: type, size, identity tuple | `dev:ino:size:mtime:ctime` per entry |
 | `find` | Paths matching a name/glob pattern | — |
-| `grep` | Content matches as `path:line:text` | — |
+| `grep` | Content matches: path, line, text as sibling fields per match | — |
 | `hash` | Content hashes for a path set | *is* the verification (R3) |
 | `write` | Write, read back, compare | R5; R4 backup |
 | `edit` | Exact `old` → `new`, read back, compare | R5; R4 backup; fails closed on a stale identity tuple |
@@ -75,6 +75,13 @@ makes R5's read-back compare against the wrong intent, and the guarantee is holl
 `find` and `grep` are a deliberate split of the roadmap's single `search` — name matching and
 content matching have different inputs and different failure modes. `hash` is new to the roadmap
 and earns its place by making R3 and R6 cheap enough to run after every turn.
+
+`grep`'s row originally read `path:line:text` and was revised 2026-08-16: the colon-joined form
+is §5's decoration shape by another name — metadata interleaved with content, the exact pattern
+`5|2026-08-12 shipped` proved a model will copy back into a file — and it is ambiguous besides,
+since a POSIX path may contain colons and text always does. Sibling fields are also what the
+implemented result shape already returns, so the fix was a table cell, not code. A *human*
+frontend remains free to render matches grep-style; that is presentation, not the tool result.
 
 **Each call is one complete job.** "Low-level" here means *dumb* — no judgment, no interpretation,
 no guessing what was meant — not *granular*. `move` moves the file, hashes it, confirms it
