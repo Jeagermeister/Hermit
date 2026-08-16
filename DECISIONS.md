@@ -142,6 +142,14 @@ makes that a gate on shipping the programmatic frontend. Hardlinks to outside fi
 inside the root are also accepted; no path-based check can catch that. Paths are bounded at
 `PATH_MAX`, since resolution allocates roughly 60x the input.
 
+**Partially answered by [D10](#d10--kernel-confinement-for-shell-landlock-vendored-one-writable-root),
+2026-08-15.** Kernel confinement makes the TOCTOU window non-exploitable *as an escape* — the
+open is denied whatever was swapped in — and blocks the creation of an escaping hardlink. It
+does neither of the things this section is actually about. **A swap that redirects to a
+different file inside the root is permitted**, which is this decision's own worked example
+above: right filename, wrong directory. So `O_NOFOLLOW` is not made optional by D10; the two
+mechanisms cover disjoint failure modes.
+
 **What would overturn it.** Untrusted input, which promotes the TOCTOU race and the hardlink
 gap from documented to blocking.
 
@@ -220,6 +228,20 @@ API. Not an attacker with shell access, but no longer a confused 3B model either
 the programmatic frontend, not optional cleanup.** Roughly a day's work. The hardlink gap cannot
 be closed by path checking at all and needs a separate answer (device/inode comparison against
 the root, or accepting it explicitly).
+
+**Restated as two conditions, 2026-08-15.** [D10](#d10--kernel-confinement-for-shell-landlock-vendored-one-writable-root)
+supplies containment but not correctness, so the gate is both of the following and neither
+alone:
+
+| Condition | Mechanism | What it establishes |
+|---|---|---|
+| Containment | Landlock ruleset, forked child, one writable root | Nothing outside the root is reachable, race or no race |
+| In-root correctness | `openat(O_NOFOLLOW)` component-walking | The path that was resolved is the path that is opened |
+
+The temptation is to read the first as satisfying the gate, because "an escape is no longer
+possible" sounds like the whole of it. It is not: prompt-injection-influenced input that
+redirects a write from one in-root file to another is the failure this section describes, and
+kernel confinement does not see it. **Both, or the frontend does not ship.**
 
 **HTTP client: cpp-httplib, pinned.** Under this decision the client only ever talks to a
 loopback backend (Ollama, and from [D9](#d9--two-local-backends-ollama-and-vllm) vLLM): no
@@ -387,12 +409,18 @@ behind**. `hermes::ollama::Client` has no virtual functions, is constructed by a
 `open()` returning a concrete type, and `hermes_supervisor`, `hermes_app` and the binary all
 link `hermes_ollama` directly (`CMakeLists.txt:164,176,181`). So the work is: introduce the
 abstraction, lift the shared request/reply types out of `namespace hermes::ollama`, and
-re-plumb three CMake targets. `src/hermes/ollama/` and the `ollama.*` config namespace
+re-plumb **four** CMake targets. `src/hermes/ollama/` and the `ollama.*` config namespace
 (`config.cpp:284,701`) become misnomers; D7's own layering amendment, which is built on
 `src/hermes/ollama/` being *the* transport singular, becomes approximate and needs revisiting
 with it. The wire mapping itself is known and small: `format` → `guided_json`, `thinking` →
 `reasoning_content` (`--reasoning-parser`), tool calls → `--enable-auto-tool-choice
 --tool-call-parser`.
+
+> **Corrected 2026-08-15 — the target count was three.** It counted only the top-level
+> `CMakeLists.txt`. `tests/CMakeLists.txt:18` links `hermes_ollama` as well, and the test target
+> has to move with the others or the suite builds against the old shape. Recorded rather than
+> silently amended, because the undercount came from citing three line numbers in one file and
+> then trusting the citation instead of the question.
 
 **Two gates, both to be settled before the second client is written.**
 
@@ -446,6 +474,99 @@ and it is a decision about Kitchen, not about this repo.
 this — multimodal `mmproj` loading and current llama.cpp operators — which would make the
 second backend redundant rather than merely unused. Or the two-backend interface proving to
 cost more in the core than the reachable-model gain is worth, measured rather than assumed.
+
+## D10 — Kernel confinement for shell: Landlock, vendored, one writable root
+
+**Decided 2026-08-15.** The shell tool runs under a Landlock ruleset installed in a forked
+child immediately before `execvp`; the parent stays unrestricted. The mechanism is vendored
+from `landlock-run` (BSD-3-Clause, ~300 lines of C11 over the raw kernel UAPI) rather than
+shipped as a helper binary, so [D3](#d3--dependencies-fetchcontent-pinned)'s single-artifact
+property survives.
+
+**What forced it.** [ROUTING.md](./ROUTING.md) §4 records that `shell` is "the one tool that
+cannot be R1-correct by construction": every other tool takes a `SandboxPath`, which only
+`Sandbox::resolve` can build, while a shell command is an opaque string with no path argument
+to resolve. That is true of *path-based* containment and false of *kernel* containment.
+Landlock is an allow-list evaluated by the kernel at open time, and the ruleset is inherited
+across `execve`, so the command and every process it spawns are confined.
+
+Verified on Kitchen (`cachyos-kitchen-pc-x8664`, RTX PRO 5000), kernel 7.1.8: ABI 9, `landlock`
+active in `/sys/kernel/security/lsm`, a `setsid --fork` grandchild confined, and `no_new_privs`
+propagating to grandchildren.
+
+**Exactly one writable directory: the sandbox root.** `LANDLOCK_ACCESS_FS_REFER` is the opt-in
+that *permits* reparenting across rule hierarchies — not, as it first appears, the mechanism
+that forbids it — and the launcher grants it with every `--rw`. Two writable directory roots
+therefore let a confined shell hardlink or rename between them, which was measured rather than
+inferred. With one root there is nothing to pair with. Two consequences, both load-bearing:
+
+- **Temp space lives inside the root.** A `--rw /tmp` rebuilds the pair, and a `rename` out of
+  the verified tree reads to R3's hash-diff as a *deletion* — a state change the model can make
+  that verification then misreads.
+- **R4's backups are never granted to the child.** R4 is a supervisor concern: ROUTING.md §6
+  puts snapshot, hash-diff and poll at the per-turn layer, which is the unrestricted parent. So
+  backups need no grant, no broker and no read-only path, and may live wherever is convenient
+  including outside the root. This answers what ROUTING.md §11 recorded as undesigned.
+
+`--rw /dev/null` is safe despite the one-root rule, because the launcher narrows non-directory
+grants to file-compatible bits and `REFER` is not among them. It looks like an exception and is
+not — worth a comment at the vendoring site, since the next reader will ask.
+
+**What this does not close.** Stated at length because the mechanism's own documentation invites
+the opposite reading.
+
+- **In-root redirection.** Landlock catches escapes *out of* the root.
+  [D6](#d6--the-sandbox-is-a-capability-type-and-resolution-is-posix-order)'s worked example —
+  `link -> a/b`, `link/../deep.txt` resolving to `root/deep.txt`, "right filename, wrong
+  directory" — is entirely inside the root and is permitted. So were both destructive `05_copy`
+  incidents. `openat(O_NOFOLLOW)` remains required; D7's gate is now stated as two conditions.
+- **Pre-existing hardlinks.** Creation is blocked by the one-root rule. A link planted inside
+  the root before the sandbox starts remains reachable by its in-root path, and writable
+  through it.
+- **Egress, and it is not small.** Only `handled_access_fs` is set. `handled_access_net` and
+  `scoped` are zero, and `FS_RESOLVE_UNIX` (ABI 9) sits outside the launcher's `MAX_ABI 5`
+  mask. A confined process reached the public internet with DNS and TLS working, and can talk
+  to pathname unix sockets. **Accepted while `shell` stays off the MCP surface** — see
+  ROUTING.md §8. If that changes, the net bits are governed first.
+- **"Everything else is denied" is false.** Landlock governs only what it hooks. `chmod`,
+  `chown`, `utimes`, `stat` and `access` are not hooked: a confined process changed both the
+  mode and the mtime of a file it held no grant on. This is why the observed-state guard in
+  ROUTING.md §4 keys on `ctime`, which cannot be set directly, rather than on `mtime` alone.
+
+**"Fully enforced" is a claim about the binary, not the kernel.** The launcher reports it
+whenever `abi >= MAX_ABI`, which on an ABI-9 kernel is unconditional while four ABI levels go
+ungoverned. Where the tool surface gates on enforcement it gates on our own probe and our own
+vocabulary, never on that string.
+
+**The probe attempts a denied write.** Upstream's probe runs `true` and checks for exit 0,
+which establishes that the profile was *accepted* — not that a forbidden access is *refused*.
+Ours attempts a write outside the grant and requires `EACCES`. This is the same argument R9's
+preflight already makes about asking the daemon rather than inferring from a version.
+
+**Cost, measured rather than assumed.** Setup is 5 fixed syscalls plus 4 per granted path.
+Steady state is +250–390 ns per `open()`, roughly 40–55%. That is real and here it is
+structurally irrelevant: only the shell child is confined, while R3's hash-diff, R4's snapshot
+and R6's polls all run in the unrestricted parent.
+
+**Why not restrict the supervisor itself.** Proposed, and rejected on measurement — recorded
+because it is the intuitive design and will be proposed again. `landlock_restrict_self`
+restricts the **calling thread**, not the process: with `flags = 0`, threads that already exist
+stay entirely unconfined. [D1](#d1--concurrency-blocking-and-single-threaded) describes the
+agent loop, not the process, and a threaded resolver inside the HTTP client is enough to leave
+the hole open. `LANDLOCK_RESTRICT_SELF_TSYNC` fixes it and needs ABI 8, which a `MAX_ABI 5`
+build never requests. Restriction is also monotonic, permanent and capped at 16 layers, so a
+single startup grant would have to be the union of everything any tool might ever need —
+strictly weaker confinement than a per-command grant, bought for sub-microsecond savings per
+spawn.
+
+**Attribution.** `landlock-run` is BSD-3-Clause while its parent repository is MIT. The
+copyright notice, the conditions and the non-endorsement clause travel with the vendored code,
+in the manner the README already requires for anything closely transliterated.
+
+**What would overturn it.** A confinement mechanism that also governs in-root redirection,
+which would collapse this and D7's `O_NOFOLLOW` condition into a single condition. Or a port to
+a platform with no Landlock equivalent, which makes the mechanism per-platform and forces the
+tool surface to gate on the probe result rather than on presence.
 
 ---
 

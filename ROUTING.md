@@ -64,12 +64,12 @@ makes R5's read-back compare against the wrong intent, and the guarantee is holl
 | Tool | The one whole job | Verification |
 |---|---|---|
 | `read` | Return exact bytes of one or more files | Returns content hash alongside |
-| `list` | Directory entries: type, size, hash | Hash per entry |
+| `list` | Directory entries: type, size, identity tuple | `dev:ino:size:mtime:ctime` per entry |
 | `find` | Paths matching a name/glob pattern | — |
 | `grep` | Content matches as `path:line:text` | — |
 | `hash` | Content hashes for a path set | *is* the verification (R3) |
 | `write` | Write, read back, compare | R5; R4 backup |
-| `edit` | Exact `old` → `new`, read back, compare | R5; R4 backup |
+| `edit` | Exact `old` → `new`, read back, compare | R5; R4 backup; fails closed on a stale identity tuple |
 | `move` | Hash source, move, verify destination | R3 both ends |
 
 `find` and `grep` are a deliberate split of the roadmap's single `search` — name matching and
@@ -82,6 +82,41 @@ arrived, and reports; it does not expose `open`/`link`/`unlink` for the caller t
 tool call is a round trip and a chance to go wrong, and
 [SWEEP2](./bench/fsops/SWEEP2.md) shows these models failing on multi-step composition, not on
 individual operations.
+
+### `list` returns identity, not content
+
+An earlier draft had `list` return a content hash per entry. That is a full read of every child
+on every listing, which makes `list` the expensive call and takes back exactly what `hash` was
+added to provide. §5's rule does not extend to it, and the reason is mechanical: `read` already
+holds the bytes, so hashing them is free; `list` does not.
+
+**The two are different questions and want different answers.**
+
+| Question | Answer | Serves |
+|---|---|---|
+| Is this the same file, in the state I last saw? | `dev:ino:size:mtime:ctime` | the staleness guard, at O(1) per entry |
+| Did the content change the way I intended? | content hash | R3 |
+
+Identity is also the *stronger* answer to the first question. `dev:ino` catches a file that was
+unlinked and recreated, or a symlink retargeted to a different file — replacement with
+byte-identical content, which a hash cannot see at all. `ctime` catches a metadata-only change
+between observation and write, and matters specifically because
+[D10](./DECISIONS.md#d10--kernel-confinement-for-shell-landlock-vendored-one-writable-root)
+records that a *confined* process can still call `utimes`: `mtime` is forgeable, `ctime` is not
+settable directly.
+
+The consequence worth having is that `list` and the staleness guard share one currency, so an
+observation from listing a directory is directly usable as the expected value on a later `edit`.
+Under the hash design those were two incompatible units.
+
+### `edit` fails closed on a stale target
+
+`edit` takes the identity tuple the caller last observed and refuses when it no longer matches.
+This is a **second layer**, not a replacement for anything in §6: it is a per-tool control and
+covers only the tools the model chose to use, which is exactly the limit §6 names. It earns its
+place by converting one specific silent failure — a write to a file the model never read, or
+read before something else changed it — into a loud one at the point it happens, which is the
+argument §6 already makes for keeping per-tool verification despite that limit.
 
 ### `shell` — kept, and it is a special case
 
@@ -213,12 +248,35 @@ Both frontends drive the same core; they need not expose the same subset.
 prints as a marked line, the same treatment a raised `max_num_ctx` clamp or a waived tools gate
 already gets.
 
-The reason is §4's, not a guess about who is calling. D7 notes that a programmatic frontend
-changes the threat model — paths derived from a document someone pasted into a chat are
-prompt-injection-influenced input reaching a filesystem API. Every other tool contains that by
-type. Shell cannot, because there is no path in a command string to resolve. Handing an
-arbitrary caller an unsandboxable string executor is the blast-radius expansion D7 exists to
-prevent.
+**The original reason no longer holds, and is replaced rather than quietly kept.** This section
+argued that every other tool is contained by type while shell cannot be, there being no path in
+a command string to resolve — so exposing it was handing an arbitrary caller an unsandboxable
+string executor.
+[D10](./DECISIONS.md#d10--kernel-confinement-for-shell-landlock-vendored-one-writable-root)
+falsifies the premise: shell *is* contained, by the kernel rather than by the type system. The
+default does not change. The argument for it does, and resting on a dead premise would be worse
+than having no argument.
+
+**Two reasons survive, and they are enough.**
+
+*Egress is ungoverned.* D10 records that only `handled_access_fs` is set: a confined process
+still reaches the network and pathname unix sockets. D7's threat model for a programmatic
+frontend is prompt-injection-influenced input, and injection plus unrestricted egress is
+exfiltration. Containment bounds what shell can *touch*; it does nothing about what shell can
+*send*. **If shell is ever put on this surface by default, the net bits are governed first** —
+that ordering is the decision, not a preference.
+
+*Depth, not redundancy.* Filesystem containment for shell is one mechanism with one failure
+mode. Every other tool has two independent ones — `SandboxPath` by construction *and* the same
+kernel ruleset. Keeping shell off the default surface preserves that asymmetry deliberately
+rather than by accident.
+
+**Where exposure is gated, gate on the probe, never on the platform.** Enabling `shell` on this
+surface requires our own confinement probe — the one that attempts a denied write and requires
+`EACCES`, per D10 — to report full enforcement. This keeps §9 intact on a machine that has no
+Landlock backend at all: the difference becomes *data* the probe reports, not a second build or
+a stripped tool surface. A platform check would also silently pass on a Linux kernel with
+Landlock compiled out, which the functional probe catches.
 
 **This is deliberately not a judgment about the caller.** Whether a caller already has a shell is
 a property of *its harness*, not of the model behind it — Claude Code has one, a bare MCP client
@@ -276,11 +334,20 @@ Nothing inside Hermes gains a thread. The join is `hash` — deterministic, and 
 Not in the roadmap's tool list, and this project exists partly because a tournament run erased
 `tally.py`. It is added only when **both** hold:
 
-1. **Undo exists and works.** R4 says "undo is a first-class operation, not a debugging aid," and
-   there is currently no design for where backups live, how long they are kept, or how undo is
-   invoked. Every other mutating tool overwrites content a snapshot holds; `delete` is the only
-   one whose failure is irreversible if that story is missing. **This is the load-bearing
-   condition** — model confidence without working undo only means being wrong less often.
+1. **Undo exists and works.** R4 says "undo is a first-class operation, not a debugging aid."
+   **Where** backups live is settled as of 2026-08-15 and the answer came from an unexpected
+   direction:
+   [D10](./DECISIONS.md#d10--kernel-confinement-for-shell-landlock-vendored-one-writable-root)
+   permits exactly one writable directory grant, so a backup store outside the sandbox would need
+   a second one — and two writable roots let a confined shell rename or hardlink between them.
+   The resolution is that **backups are never granted to the child at all**: R4 is a per-turn
+   supervisor concern under §6, and the supervisor is the unrestricted parent. Backups may
+   therefore live anywhere convenient, including outside the root, because the confined process
+   cannot address them.
+   **Retention and how undo is invoked remain undesigned, and they are what still blocks this.**
+   Every other mutating tool overwrites content a snapshot holds; `delete` is the only one whose
+   failure is irreversible if that story is missing. **This is the load-bearing condition** —
+   model confidence without working undo only means being wrong less often.
 2. **A retested `06_selective_delete` holds for the model being built against** — on the current
    harness, with more than 3 repeats and a `--deterministic` pass. SWEEP2 §4
    demonstrates that per-cell numbers at n=3 are not capability: the control moved 3/3 → 0/3 on
@@ -311,10 +378,17 @@ Ordered. Steps 1–4 are Phase 2 and 2.5 as already written; only the tool list 
    everything below, because they decide which target `tool.h` can live in.
 2. **`tool.h`** — the D4 base class and JSON-free descriptors. Everything inherits it.
 3. **The eight Tier 0 tools** in `core`, with tests.
-4. **Close the TOCTOU race** — `openat(O_NOFOLLOW)`, one component at a time — and answer the
-   hardlink gap (device/inode comparison against the root, or accept it explicitly and record
-   why). ⚠️ **This is a gate**, per D7: a programmatic frontend is exactly the caller D6's
-   threat model did not cover.
+4. **Clear D7's gate, which is two conditions and not one.**
+   ⚠️ Both are required before the programmatic frontend ships; a programmatic caller is exactly
+   the one D6's threat model did not cover.
+   - **Kernel confinement** — vendor D10's Landlock routine, `fork` → restrict → `exec`, one
+     writable directory. Probe by attempting a denied write and requiring `EACCES`, not by
+     running a command that succeeds. This also disposes of the hardlink gap's *creation* half;
+     a link planted before the sandbox starts is still reachable, and that is now recorded
+     rather than open.
+   - **`openat(O_NOFOLLOW)` component-walking** — the in-root correctness half, which
+     confinement does not supply. A swap that redirects to a different file *inside* the root is
+     permitted by the kernel and is D6's own worked example.
 5. **`mcp.cpp`** in `app`. Callable from here on.
 6. **Tier 1** (`triage`, `summarize`) in `supervisor`, once model selection is settled.
 
