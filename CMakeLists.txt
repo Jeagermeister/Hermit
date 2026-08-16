@@ -142,8 +142,13 @@ FetchContent_MakeAvailable(nlohmann_json httplib)
 # client is a separate target for that reason, and it is the only one that links
 # httplib -- if core ever needs it, the layering has been broken.
 add_library(hermes_core
+  src/hermes/core/fsio.cpp
   src/hermes/core/sandbox.cpp
-  src/hermes/core/tool.cpp)
+  src/hermes/core/sha256.cpp
+  src/hermes/core/tool.cpp
+  src/hermes/core/tools/hash.cpp
+  src/hermes/core/tools/list.cpp
+  src/hermes/core/tools/read.cpp)
 
 target_include_directories(hermes_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hermes_core
