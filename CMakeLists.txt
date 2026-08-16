@@ -116,10 +116,19 @@ FetchContent_Declare(nlohmann_json
 # Loopback Ollama only, per D7: no TLS, no auth, no proxies. OpenSSL support stays
 # off deliberately -- linking it would add a dependency purely to encrypt traffic to
 # 127.0.0.1, and would put certificate handling in a codebase that has no use for it.
+#
+# Every *_IF_AVAILABLE toggle is forced off, and the reason is D3, not just D7:
+# "if available" makes the binary depend on what the build machine happens to have
+# installed, which is exactly the machine-difference D3 pins dependencies to remove.
+# This list went stale once already -- httplib grew a zstd toggle and libzstd
+# silently joined every link line on the machine that had it installed. When bumping
+# the httplib pin, grep its CMakeLists for new *_IF_AVAILABLE toggles and force them
+# off here.
 set(HTTPLIB_REQUIRE_OPENSSL OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_BROTLI_IF_AVAILABLE  OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_ZLIB_IF_AVAILABLE    OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_ZSTD_IF_AVAILABLE    OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(httplib
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
   GIT_TAG        v0.53.0
