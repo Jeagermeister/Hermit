@@ -230,16 +230,17 @@ neither `hermes_ollama` nor anything that could reach it, so a Tier 0 tool that 
 model would fail to link. This is the same property `SandboxPath` gives R1: structural, and still
 true at tool #37.
 
-### Two link edges are missing and must be added first
+### Two link edges were missing, and were added first
 
-Verified against `CMakeLists.txt` on 2026-08-15:
+Verified missing against `CMakeLists.txt` on 2026-08-15; **both added 2026-08-16**:
 
-1. **`hermes_supervisor` does not link `hermes_core`.** A Tier 1 tool placed there today could not
-   construct a `SandboxPath` — it would be R1-unsafe by construction, the exact inverse of the
-   property this codebase is built on. The edge is required before `triage` or `summarize` exists.
-2. **`hermes_app` does not link `hermes_supervisor`.** Only the executable links all four targets,
-   so registry composition cannot happen in `app` as the frontend layer needs. The edge is
-   required before `mcp.cpp` exists.
+1. **`hermes_supervisor` did not link `hermes_core`.** A Tier 1 tool placed there could not
+   have constructed a `SandboxPath` — it would have been R1-unsafe by construction, the exact
+   inverse of the property this codebase is built on. The edge was required before `triage` or
+   `summarize` exists.
+2. **`hermes_app` did not link `hermes_supervisor`.** Only the executable linked all four
+   targets, so registry composition could not happen in `app` as the frontend layer needs. The
+   edge was required before `mcp.cpp` exists.
 
 ### Tool descriptors stay JSON-free in `core`
 
@@ -444,9 +445,13 @@ in this codebase**.
 
 Ordered. Steps 1–4 are Phase 2 and 2.5 as already written; only the tool list is new.
 
-1. **Add the two link edges** (§7) — `supervisor → core`, `app → supervisor`. Prerequisite for
-   everything below, because they decide which target `tool.h` can live in.
-2. **`tool.h`** — the D4 base class and JSON-free descriptors. Everything inherits it.
+1. ~~**Add the two link edges**~~ (§7) — `supervisor → core`, `app → supervisor`. Prerequisite
+   for everything below, because they decide which target `tool.h` can live in. **Done
+   2026-08-16.**
+2. ~~**`tool.h`**~~ — the D4 base class and JSON-free descriptors. Everything inherits it.
+   **Done 2026-08-16**, in `core` beside the sandbox: the spec/argument/result types are pure
+   data with no JSON, per §7, and `parse_args` is the one place a `Path` argument becomes a
+   `SandboxPath`.
 3. **The eight Tier 0 tools** in `core`, with tests.
 4. **Clear D7's gate, which is two conditions and not one.**
    ⚠️ Both are required before the programmatic frontend ships; a programmatic caller is exactly
