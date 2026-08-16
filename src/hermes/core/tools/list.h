@@ -11,16 +11,26 @@
 // not a failure. A vanished or unstattable entry refuses the whole call --
 // silently skipping it would be the adjacent-success section 3 forbids.
 
+#include <hermes/core/observed.h>
 #include <hermes/core/tool.h>
 
 namespace hermes {
 
 class ListTool final : public Tool {
  public:
+  /// A successful listing records presence for its regular-file entries --
+  /// section 4's one-currency property: an observation from `list` is
+  /// directly usable as the expected value on a later `edit`. Only regular
+  /// files: directories are not edit targets, and a symlink entry's tuple
+  /// describes the link, not the file a resolved path would name.
+  explicit ListTool(ObservedState& observed) noexcept : observed_(observed) {}
+
   [[nodiscard]] const ToolSpec& spec() const noexcept override;
 
  private:
   [[nodiscard]] std::expected<ToolOutput, ToolError> run(const ToolArgs& args) override;
+
+  ObservedState& observed_;
 };
 
 }  // namespace hermes

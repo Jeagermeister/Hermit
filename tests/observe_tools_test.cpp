@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <hermes/core/sha256.h>
+#include <hermes/core/observed.h>
 #include <hermes/core/tool.h>
 
 namespace fs = std::filesystem;
@@ -106,12 +107,13 @@ class ObserveToolsTest : public ::testing::Test {
 
   fs::path tmp_;
   std::unique_ptr<Sandbox> box_;
+  hermes::ObservedState state_;
 };
 
 // --- read --------------------------------------------------------------------
 
 TEST_F(ObserveToolsTest, ReadReturnsExactBytesAndHashPerFile) {
-  ReadTool read;
+  ReadTool read{state_};
   auto out = call(read, {{"paths", std::vector<std::string>{"a.txt", "blob.bin"}}});
   ASSERT_TRUE(out.has_value()) << out.error().reason;
   ASSERT_EQ(out->rows.size(), 2u);
@@ -133,7 +135,7 @@ TEST_F(ObserveToolsTest, ReadReturnsExactBytesAndHashPerFile) {
 }
 
 TEST_F(ObserveToolsTest, ReadContentCarriesNoDecoration) {
-  ReadTool read;
+  ReadTool read{state_};
   auto out = call(read, {{"paths", std::vector<std::string>{"a.txt"}}});
   ASSERT_TRUE(out.has_value());
   const std::string& content = *text(out->rows[0], "content");
@@ -143,14 +145,14 @@ TEST_F(ObserveToolsTest, ReadContentCarriesNoDecoration) {
 }
 
 TEST_F(ObserveToolsTest, ReadFailsClosedNamingTheFileThatFailed) {
-  ReadTool read;
+  ReadTool read{state_};
   auto out = call(read, {{"paths", std::vector<std::string>{"a.txt", "nope.txt"}}});
   ASSERT_FALSE(out.has_value()) << "one whole job: no partial answer";
   EXPECT_NE(out.error().reason.find("nope.txt"), std::string::npos);
 }
 
 TEST_F(ObserveToolsTest, ReadRefusesADirectoryTarget) {
-  ReadTool read;
+  ReadTool read{state_};
   auto out = call(read, {{"paths", std::vector<std::string>{"sub"}}});
   ASSERT_FALSE(out.has_value());
   EXPECT_NE(out.error().reason.find("not a regular file"), std::string::npos);
@@ -159,7 +161,7 @@ TEST_F(ObserveToolsTest, ReadRefusesADirectoryTarget) {
 TEST_F(ObserveToolsTest, ReadThroughASymlinkReadsTheResolvedTarget) {
   // resolve() expands symlinks (D6, POSIX order), so "link" names sub/c.txt
   // and the row reports the resolved relative path -- the file actually read.
-  ReadTool read;
+  ReadTool read{state_};
   auto out = call(read, {{"paths", std::vector<std::string>{"link"}}});
   ASSERT_TRUE(out.has_value()) << out.error().reason;
   EXPECT_EQ(*text(out->rows[0], "path"), "sub/c.txt");
@@ -183,7 +185,7 @@ TEST_F(ObserveToolsTest, HashReturnsHashesWithoutContent) {
 }
 
 TEST_F(ObserveToolsTest, HashAgreesWithReadsHash) {
-  ReadTool read;
+  ReadTool read{state_};
   HashTool hash;
   auto r = call(read, {{"paths", std::vector<std::string>{"sub/c.txt"}}});
   auto h = call(hash, {{"paths", std::vector<std::string>{"sub/c.txt"}}});
@@ -202,7 +204,7 @@ TEST_F(ObserveToolsTest, HashFailsClosedOnAMissingFile) {
 // --- list --------------------------------------------------------------------
 
 TEST_F(ObserveToolsTest, ListReturnsSortedEntriesWithIdentityTuple) {
-  ListTool list;
+  ListTool list{state_};
   auto out = call(list, {{"path", std::string{"."}}});
   ASSERT_TRUE(out.has_value()) << out.error().reason;
 
@@ -233,7 +235,7 @@ TEST_F(ObserveToolsTest, ListReturnsSortedEntriesWithIdentityTuple) {
 }
 
 TEST_F(ObserveToolsTest, ListOfASubdirectoryPrefixesTheRelativePath) {
-  ListTool list;
+  ListTool list{state_};
   auto out = call(list, {{"path", std::string{"sub"}}});
   ASSERT_TRUE(out.has_value()) << out.error().reason;
   ASSERT_EQ(out->rows.size(), 1u);
@@ -242,21 +244,21 @@ TEST_F(ObserveToolsTest, ListOfASubdirectoryPrefixesTheRelativePath) {
 }
 
 TEST_F(ObserveToolsTest, ListOfAnEmptyDirectoryIsZeroRowsNotAFailure) {
-  ListTool list;
+  ListTool list{state_};
   auto out = call(list, {{"path", std::string{"empty"}}});
   ASSERT_TRUE(out.has_value()) << "zero entries is the correct answer";
   EXPECT_TRUE(out->rows.empty());
 }
 
 TEST_F(ObserveToolsTest, ListRefusesAFileTarget) {
-  ListTool list;
+  ListTool list{state_};
   auto out = call(list, {{"path", std::string{"a.txt"}}});
   ASSERT_FALSE(out.has_value());
   EXPECT_NE(out.error().reason.find("a.txt"), std::string::npos);
 }
 
 TEST_F(ObserveToolsTest, ListIdentityTupleIsStableAcrossCalls) {
-  ListTool list;
+  ListTool list{state_};
   auto first = call(list, {{"path", std::string{"."}}});
   auto second = call(list, {{"path", std::string{"."}}});
   ASSERT_TRUE(first.has_value() && second.has_value());
@@ -270,9 +272,9 @@ TEST_F(ObserveToolsTest, ListIdentityTupleIsStableAcrossCalls) {
 
 TEST_F(ObserveToolsTest, AllThreeComposeIntoARegistry) {
   ToolRegistry registry;
-  ASSERT_TRUE(registry.add(std::make_unique<ReadTool>()).has_value());
+  ASSERT_TRUE(registry.add(std::make_unique<ReadTool>(state_)).has_value());
   ASSERT_TRUE(registry.add(std::make_unique<HashTool>()).has_value());
-  ASSERT_TRUE(registry.add(std::make_unique<ListTool>()).has_value());
+  ASSERT_TRUE(registry.add(std::make_unique<ListTool>(state_)).has_value());
 
   Tool* read = registry.find("read");
   ASSERT_NE(read, nullptr);

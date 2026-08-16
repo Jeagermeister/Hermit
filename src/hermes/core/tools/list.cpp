@@ -104,8 +104,13 @@ std::expected<ToolOutput, ToolError> ListTool::run(const ToolArgs& args) {
   ToolOutput out;
   out.rows.reserve(entries.size());
   for (const Entry& e : entries) {
+    const std::filesystem::path entry_rel =
+        (dir.relative() / e.name).lexically_normal();
+    if (S_ISREG(e.st.st_mode)) {
+      observed_.record_present(entry_rel, tuple_from(e.st));
+    }
     out.rows.push_back({{
-        {"path", (dir.relative() / e.name).lexically_normal().string()},
+        {"path", entry_rel.string()},
         {"type", std::string{type_of(e.st.st_mode)}},
         {"dev", static_cast<std::uint64_t>(e.st.st_dev)},
         {"ino", static_cast<std::uint64_t>(e.st.st_ino)},

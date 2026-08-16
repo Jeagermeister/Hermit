@@ -102,4 +102,23 @@ struct FileContent {
 [[nodiscard]] std::expected<FileContent, IoError> read_file(
     const SandboxPath& path, std::uint64_t max_bytes = kDefaultMaxReadBytes);
 
+/// Read the remainder of an already-open regular file, same cap semantics as
+/// read_file. For callers that need the open fd for more than one thing --
+/// the staleness guard stats it, R4 streams a backup from it, then the edit
+/// reads it -- one open, one object, no re-resolution between steps.
+[[nodiscard]] std::expected<std::string, IoError> read_all(const OpenedFile& file,
+                                                           std::uint64_t max_bytes);
+
+/// Write every byte or say why not. EINTR is retried; a short write continues.
+[[nodiscard]] std::expected<void, IoError> write_all(int fd, std::string_view bytes);
+
+/// Create an exclusive temp file in `target`'s directory -- same directory so
+/// the later link()/rename() publication is same-filesystem and atomic --
+/// fill it with `bytes`, and set `mode` exactly (fchmod, not umask-masked).
+/// Returns the temp's absolute path; the caller publishes or unlinks it. A
+/// crash in between leaves a ".hermes-tmp." orphan beside the target, which
+/// is visible, greppable, and harmless.
+[[nodiscard]] std::expected<std::filesystem::path, IoError> write_temp_beside(
+    const SandboxPath& target, std::string_view bytes, ::mode_t mode);
+
 }  // namespace hermes

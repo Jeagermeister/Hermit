@@ -1,6 +1,7 @@
 #include <hermes/core/tools/read.h>
 
 #include <array>
+#include <cerrno>
 #include <string>
 #include <utility>
 
@@ -30,6 +31,10 @@ std::expected<ToolOutput, ToolError> ReadTool::run(const ToolArgs& args) {
   for (const SandboxPath& p : args.paths("paths")) {
     auto file = read_file(p, max_file_bytes_);
     if (!file) {
+      if (file.error().kind == IoError::Kind::Kernel &&
+          file.error().code == ENOENT) {
+        observed_.record_absent(p.relative());  // a miss records absence (§4)
+      }
       std::string reason =
           "read: " + p.relative().string() + ": " + to_string(file.error());
       if (file.error().kind == IoError::Kind::TooLarge) {
@@ -39,6 +44,7 @@ std::expected<ToolOutput, ToolError> ReadTool::run(const ToolArgs& args) {
       }
       return std::unexpected{ToolError{std::move(reason)}};
     }
+    observed_.record_present(p.relative(), tuple_from(file->meta));
     std::string hash = sha256_hex(file->bytes);
     out.rows.push_back({{{"path", p.relative().string()},
                          {"content", std::move(file->bytes)},

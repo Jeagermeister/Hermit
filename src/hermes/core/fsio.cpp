@@ -1,9 +1,12 @@
 #include <hermes/core/fsio.h>
 
 #include <cerrno>
+#include <cstdio>
+#include <random>
 #include <system_error>
 
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace hermes {
@@ -47,41 +50,103 @@ std::expected<OpenedFile, IoError> open_regular(const SandboxPath& path) {
   return out;
 }
 
-std::expected<FileContent, IoError> read_file(const SandboxPath& path,
-                                              std::uint64_t max_bytes) {
-  auto opened = open_regular(path);
-  if (!opened) return std::unexpected{opened.error()};
-
-  const auto claimed = static_cast<std::uint64_t>(opened->meta.st_size);
+std::expected<std::string, IoError> read_all(const OpenedFile& file,
+                                             std::uint64_t max_bytes) {
+  const auto claimed = static_cast<std::uint64_t>(file.meta.st_size);
   if (claimed > max_bytes) {
     return std::unexpected{IoError{
         .kind = IoError::Kind::TooLarge, .size = claimed, .cap = max_bytes}};
   }
 
-  FileContent out;
-  out.meta = opened->meta;
+  std::string bytes;
   // st_size is a reserve hint, not a bound: the file can grow or shrink
   // between the fstat and the reads. EOF decides -- and the cap is enforced
   // again below for exactly that reason.
-  if (opened->meta.st_size > 0) {
-    out.bytes.reserve(static_cast<std::size_t>(opened->meta.st_size));
+  if (file.meta.st_size > 0) {
+    bytes.reserve(static_cast<std::size_t>(file.meta.st_size));
   }
   char buf[65536];
   for (;;) {
-    ssize_t n = ::read(opened->fd.get(), buf, sizeof buf);
+    ssize_t n = ::read(file.fd.get(), buf, sizeof buf);
     if (n < 0) {
       if (errno == EINTR) continue;
       return std::unexpected{IoError{.code = errno}};
     }
     if (n == 0) break;
-    out.bytes.append(buf, static_cast<std::size_t>(n));
-    if (out.bytes.size() > max_bytes) {
-      return std::unexpected{IoError{.kind = IoError::Kind::TooLarge,
-                                     .size = out.bytes.size(),
-                                     .cap = max_bytes}};
+    bytes.append(buf, static_cast<std::size_t>(n));
+    if (bytes.size() > max_bytes) {
+      return std::unexpected{IoError{
+          .kind = IoError::Kind::TooLarge, .size = bytes.size(), .cap = max_bytes}};
     }
   }
+  return bytes;
+}
+
+std::expected<FileContent, IoError> read_file(const SandboxPath& path,
+                                              std::uint64_t max_bytes) {
+  auto opened = open_regular(path);
+  if (!opened) return std::unexpected{opened.error()};
+
+  auto bytes = read_all(*opened, max_bytes);
+  if (!bytes) return std::unexpected{bytes.error()};
+
+  FileContent out;
+  out.meta = opened->meta;
+  out.bytes = std::move(*bytes);
   return out;
+}
+
+std::expected<void, IoError> write_all(int fd, std::string_view bytes) {
+  std::size_t written = 0;
+  while (written < bytes.size()) {
+    const ssize_t n = ::write(fd, bytes.data() + written, bytes.size() - written);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      return std::unexpected{IoError{.code = errno}};
+    }
+    written += static_cast<std::size_t>(n);
+  }
+  return {};
+}
+
+std::expected<std::filesystem::path, IoError> write_temp_beside(
+    const SandboxPath& target, std::string_view bytes, ::mode_t mode) {
+  static std::random_device entropy;
+
+  const std::filesystem::path parent = target.path().parent_path();
+  const std::string base = "." + target.path().filename().string() + ".hermes-tmp.";
+
+  for (int attempt = 0; attempt < 32; ++attempt) {
+    std::string suffix;
+    for (int i = 0; i < 2; ++i) {
+      char hex[16];
+      const auto r = static_cast<unsigned long>(entropy());
+      std::snprintf(hex, sizeof hex, "%08lx", r);
+      suffix += hex;
+    }
+    const std::filesystem::path candidate = parent / (base + suffix);
+
+    const int fd = ::open(candidate.c_str(),
+                          O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (fd < 0) {
+      if (errno == EEXIST) continue;
+      return std::unexpected{IoError{.code = errno}};
+    }
+    Fd owned{fd};
+    if (auto written = write_all(owned.get(), bytes); !written) {
+      ::unlink(candidate.c_str());
+      return std::unexpected{written.error()};
+    }
+    // fchmod, not the open() mode: open's mode is masked by umask, and the
+    // replace path needs the original file's mode preserved exactly.
+    if (::fchmod(owned.get(), mode) != 0) {
+      const int e = errno;
+      ::unlink(candidate.c_str());
+      return std::unexpected{IoError{.code = e}};
+    }
+    return candidate;
+  }
+  return std::unexpected{IoError{.code = EEXIST}};
 }
 
 }  // namespace hermes

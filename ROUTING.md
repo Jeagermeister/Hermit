@@ -180,6 +180,48 @@ read, which is the `05_copy` shape SCOPE.md records. Implemented as a plain exis
 is a race; the reference implementation this came from publishes by hard-link-no-replace
 instead, so a file created *after* the check is still preserved and still rejected.
 
+### The mutating trio — semantics settled 2026-08-16
+
+**`edit` requires `old` to occur exactly once.** Zero is "not found"; two or more is
+"ambiguous, N occurrences, give more context". Replace-first would silently guess which
+occurrence was meant — the adjacent success §3 forbids — and replace-all lets one confused call
+rewrite a whole file. Both refusals tell the model what to do next.
+
+**`move` never replaces an existing destination, structurally.** `renameat2(RENAME_NOREPLACE)`,
+so the silent-destruction shape (`05_copy`) cannot be expressed. The refusal carries the
+file-manager affordance *as a suggestion*: it names the first free `name (N)`-style destination,
+and the caller moves there explicitly if a renamed copy is what it wants. Considered and
+rejected: performing that rename automatically — the destination a caller names must be the
+destination it gets, or every later reference to the name it asked for is wrong. Replacing a
+destination's *content* is still expressible, deliberately as two observed steps: read it, then
+write it.
+
+**`move` is ungated by observed state.** The table above gates `write` and `edit` — the calls
+that destroy bytes. A move preserves content byte-for-byte and R3 proves it did (hash before,
+hash after, compare); only the name is at risk, and undo is moving it back. Gating would force
+full-body reads just to rename, which the read cap makes hostile for exactly the files most
+worth not loading. Regular files only: hashing is the verification, and a directory has no
+content hash.
+
+**Backups live outside the sandbox root** in a supervisor-provided directory (configuration,
+§9), one generation per mutation, nothing ever overwritten. Outside, for two reasons: the model
+must never be able to list, read, edit or move its own undo data; and the sandbox's `list` and
+`find` stay free of archive noise. Backup paths are host-absolute and never appear in a
+model-facing row — `SandboxPath::relative` exists so the host layout does not leak, and the
+archive is part of the host layout.
+
+**Mechanics, recorded so they are not re-derived:** create publishes by `link()`-no-replace (a
+file created after the check is preserved and rejected — the honest create the table demands);
+replace goes through an exclusive temp beside the target and an atomic `rename`; every mutation
+reads back and compares before succeeding (R5) and the read-back's stat becomes the recorded
+observation. A failed staleness check records nothing — a recorded fresh tuple would let a
+retry pass the guard without re-reading content. Missing parent directories are created by
+`write` and `move` (the surface has no mkdir tool; parents are means to the one whole job, not
+judgment). A replace preserves the file's mode; a create honors the umask over 0666. `edit`
+shares `read`'s cap — the file must be loaded to be edited. Every successful mutation returns
+the new content hash and the fresh identity tuple, in `list`'s currency, so the result is
+immediately usable as the next expected value.
+
 ### `shell` — kept, and it is a special case
 
 The instinct is to drop shell and expose structured file tools only.
@@ -498,7 +540,11 @@ Ordered. Steps 1–4 are Phase 2 and 2.5 as already written; only the tool list 
    **Done 2026-08-16**, in `core` beside the sandbox: the spec/argument/result types are pure
    data with no JSON, per §7, and `parse_args` is the one place a `Path` argument becomes a
    `SandboxPath`.
-3. **The eight Tier 0 tools** in `core`, with tests.
+3. ~~**The eight Tier 0 tools**~~ in `core`, with tests. **Done 2026-08-16**: the observe
+   surface (`read`, `hash`, `list`, `find`, `grep`) and the mutating trio (`write`, `edit`,
+   `move`), with `ObservedState` carrying §4's staleness table, the backup store outside the
+   root, and the settled semantics recorded in §4. `shell` is deliberately not among them —
+   it waits on D7's gate (step 4), per §8.
 4. **Clear D7's gate, which is two conditions and not one.**
    ⚠️ Both are required before the programmatic frontend ships; a programmatic caller is exactly
    the one D6's threat model did not cover.
