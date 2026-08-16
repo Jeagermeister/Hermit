@@ -67,7 +67,7 @@ makes R5's read-back compare against the wrong intent, and the guarantee is holl
 | `read` | Return exact bytes of one or more files | Returns content hash alongside |
 | `list` | Directory entries: type, size, identity tuple | `dev:ino:size:mtime:ctime` per entry |
 | `find` | Paths matching a name/glob pattern | — |
-| `grep` | Content matches as `path:line:text` | — |
+| `grep` | Content matches: path, line, text as sibling fields per match | — |
 | `hash` | Content hashes for a path set | *is* the verification (R3) |
 | `write` | Write, read back, compare | R5; R4 backup |
 | `edit` | Exact `old` → `new`, read back, compare | R5; R4 backup; fails closed on a stale identity tuple |
@@ -76,6 +76,13 @@ makes R5's read-back compare against the wrong intent, and the guarantee is holl
 `find` and `grep` are a deliberate split of the roadmap's single `search` — name matching and
 content matching have different inputs and different failure modes. `hash` is new to the roadmap
 and earns its place by making R3 and R6 cheap enough to run after every turn.
+
+`grep`'s row originally read `path:line:text` and was revised 2026-08-16: the colon-joined form
+is §5's decoration shape by another name — metadata interleaved with content, the exact pattern
+`5|2026-08-12 shipped` proved a model will copy back into a file — and it is ambiguous besides,
+since a POSIX path may contain colons and text always does. Sibling fields are also what the
+implemented result shape already returns, so the fix was a table cell, not code. A *human*
+frontend remains free to render matches grep-style; that is presentation, not the tool result.
 
 **Each call is one complete job.** "Low-level" here means *dumb* — no judgment, no interpretation,
 no guessing what was meant — not *granular*. `move` moves the file, hashes it, confirms it
@@ -112,7 +119,14 @@ Under the hash design those were two incompatible units.
 
 ### `edit` fails closed on a stale target
 
-`edit` takes the identity tuple the caller last observed and refuses when it no longer matches.
+`edit` is checked against the identity tuple **this session last observed** for its target —
+session state, never an argument — and refuses when the tuple no longer matches. It has to be
+session state: a caller-supplied tuple could not express *unseen*, so it would let a fresh
+session hand in a tuple for a file it never read, which "nothing is persisted" below exists to
+forbid. (Settled 2026-08-16, resolving a reading of the earlier wording under which the tuple
+arrived as an argument; the table below was always written for the session-state reading, and
+it is what keeps `String`/`Path`/`PathList` sufficient as the argument types for every settled
+tool.)
 This is a **second layer**, not a replacement for anything in §6: it is a per-tool control and
 covers only the tools the model chose to use, which is exactly the limit §6 names. It earns its
 place by converting one specific silent failure — a write to a file the model never read, or
@@ -468,6 +482,15 @@ Ordered. Steps 1–4 are Phase 2 and 2.5 as already written; only the tool list 
    - **`openat(O_NOFOLLOW)` component-walking** — the in-root correctness half, which
      confinement does not supply. A swap that redirects to a different file *inside* the root is
      permitted by the kernel and is D6's own worked example.
+
+     **Settled 2026-08-16, out of PR #6's review: allow the semantics, funnel the spelling.**
+     Tools never spell `open()` themselves. One core primitive beside `Sandbox` carries every
+     open from the first tool onward — plain `open` with `O_NOFOLLOW` on the final component
+     until this step lands (free now, and it already catches a final-component swap), the
+     component walk plus a post-open identity check after. Direct opens today would sit inside
+     D6's accepted race either way; the funnel exists so clearing this gate swaps one function
+     body instead of rewriting eight tools' I/O — and so the widened parse-to-use window PR #6
+     introduced (arguments resolve before the tool runs) is closed at the same single site.
 5. **`mcp.cpp`** in `app`. Callable from here on.
 6. **Tier 1** (`triage`, `summarize`) in `supervisor`, once model selection is settled.
 

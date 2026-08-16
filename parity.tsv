@@ -8,8 +8,13 @@
 #
 # ported_from = upstream RELEASE TAG this was implemented against ("-" = nothing yet).
 #
+# This ledger tracks PORTING PARITY only: what upstream code was consumed, and at which
+# tag. Native progress -- work designed here rather than ported, like core/tool.h against
+# tool_executor's job -- is recorded in ROUTING.md section 12 and ROADMAP.md, never here.
+# A NOT_PORTED row therefore says nothing about whether a native equivalent exists.
+#
 # status:
-#   NOT_STARTED  - in scope, no implementation yet
+#   NOT_PORTED   - in scope, nothing consumed from upstream yet
 #   PORTED       - implemented against the recorded tag
 #   STALE        - computed, never written by hand (upstream moved past the recorded tag)
 #   REFERENCE    - read for ideas, deliberately not ported; drift is worth knowing, not fixing
@@ -19,19 +24,19 @@
 # ~2 releases. Tags are the review unit; drill to commits only when actually implementing.
 #
 # subsystem	upstream_path	ported_from	status
-conversation_loop	agent/conversation_loop.py	-	NOT_STARTED
-chat_completion	agent/chat_completion_helpers.py	-	NOT_STARTED
-model_metadata	agent/model_metadata.py	-	NOT_STARTED
-agent_init	agent/agent_init.py	-	NOT_STARTED
-tool_executor	agent/tool_executor.py	-	NOT_STARTED
-prompt_builder	agent/prompt_builder.py	-	NOT_STARTED
-error_classifier	agent/error_classifier.py	-	NOT_STARTED
-deadline	agent/deadline.py	-	NOT_STARTED
-file_operations	tools/file_operations.py	-	NOT_STARTED
-file_tools	tools/file_tools.py	-	NOT_STARTED
-terminal_tool	tools/terminal_tool.py	-	NOT_STARTED
-process_registry	tools/process_registry.py	-	NOT_STARTED
-providers	providers/	-	NOT_STARTED
+conversation_loop	agent/conversation_loop.py	-	NOT_PORTED
+chat_completion	agent/chat_completion_helpers.py	-	NOT_PORTED
+model_metadata	agent/model_metadata.py	-	NOT_PORTED
+agent_init	agent/agent_init.py	-	NOT_PORTED
+tool_executor	agent/tool_executor.py	-	NOT_PORTED
+prompt_builder	agent/prompt_builder.py	-	NOT_PORTED
+error_classifier	agent/error_classifier.py	-	NOT_PORTED
+deadline	agent/deadline.py	-	NOT_PORTED
+file_operations	tools/file_operations.py	-	NOT_PORTED
+file_tools	tools/file_tools.py	-	NOT_PORTED
+terminal_tool	tools/terminal_tool.py	-	NOT_PORTED
+process_registry	tools/process_registry.py	-	NOT_PORTED
+providers	providers/	-	NOT_PORTED
 context_compressor	agent/context_compressor.py	-	REFERENCE
 conv_compression	agent/conversation_compression.py	-	REFERENCE
 auxiliary_client	agent/auxiliary_client.py	-	OUT_OF_SCOPE

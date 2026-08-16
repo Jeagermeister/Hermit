@@ -51,7 +51,12 @@ class Sandbox;
 /// cannot be forgotten, because there is no other way to name a file.
 class SandboxPath {
  public:
-  /// Absolute, normalised, symlinks resolved. Safe to hand to the OS.
+  /// Absolute, normalised, symlinks resolved -- as of the moment resolve() ran.
+  /// Hand it to the OS through core's one open primitive (it arrives with the
+  /// first tool; ROUTING.md section 12 step 4 later swaps its body for the
+  /// openat(O_NOFOLLOW) component walk). Spelling ::open on this string
+  /// directly re-inherits D6's resolve-to-open race at every call site
+  /// instead of the one the gate will close.
   [[nodiscard]] const std::filesystem::path& path() const noexcept { return abs_; }
 
   /// Path relative to the sandbox root -- for logs and model-facing messages, so
