@@ -170,8 +170,11 @@ trace per turn and per call, and a summary that says which bound stopped it. Thr
 two: `--max-turns`, `--budget` wall-clock (R8), and a per-turn cap on how many calls one reply may
 make — the third is a runaway guard rather than a knob, and calls past it are refused rather than
 dropped, because a dropped call reads to the model as still outstanding. It prints, in so many
-words, that a clean stop is not evidence the work is correct — R6 is not satisfied yet, and a
-command that implied otherwise would be the more useful lie.
+words, what it did and did not check. After every turn it takes a hash diff of the whole tree and
+prints what actually moved, owing nothing to the model's reply (R6's observation half, `--no-verify`
+to skip it). What it still does not do is decide whether those were the *right* changes: that needs
+a post-condition a free-text instruction does not carry, so a clean stop plus an accurate changeset
+is evidence, not a verdict -- and a command that implied otherwise would be the more useful lie.
 
 ```bash
 hermes-cpp agent --root ~/scratch --model qwen35-agent --max-turns 8 \

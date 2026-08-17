@@ -139,12 +139,19 @@ std::expected<TreeSnapshot, VerifyError> TreeVerifier::snapshot(
     Pending current = std::move(stack.back());
     stack.pop_back();
 
-    // fdopendir takes ownership of the descriptor; closedir releases it.
-    DIR* dir = ::fdopendir(current.fd.release());
+    // fdopendir takes ownership of the descriptor *on success*; closedir releases it.
+    // On failure it takes nothing, so the released fd is ours to close -- otherwise every
+    // failed snapshot leaks one, and a caller that retries leaks monotonically.
+    const int dir_fd = current.fd.release();
+    DIR* dir = ::fdopendir(dir_fd);
     if (dir == nullptr) {
+      // errno first: `.path`'s string() allocates, and allocation may set errno even when
+      // it succeeds, which would report the wrong reason for the refusal.
+      const int failure = errno;
+      ::close(dir_fd);
       return std::unexpected(VerifyError{.kind = VerifyErrorKind::DirectoryUnreadable,
                                          .path = current.relative.string(),
-                                         .code = errno});
+                                         .code = failure});
     }
     struct DirGuard {
       DIR* d;
@@ -163,7 +170,11 @@ std::expected<TreeSnapshot, VerifyError> TreeVerifier::snapshot(
                                          .path = current.relative.string(),
                                          .code = errno});
     }
-    // Sorted so the walk order, and therefore any report derived from it, is stable.
+    // Sorted for a deterministic *walk*, not for a deterministic report -- `out` is a
+    // std::map, so path ordering in a Changeset comes from the container and would hold
+    // with no sort at all. What this buys is that two runs over the same tree fail on the
+    // same entry and hit any bound in the same order, which is what makes a refusal
+    // reproducible. Cheap beside the stat and hash it precedes.
     std::ranges::sort(names);
 
     for (const std::string& name : names) {

@@ -84,9 +84,15 @@ namespace hermes::supervisor {
 struct FileState {
   IdentityTuple tuple{};
 
-  /// SHA-256 of the content, hex. Empty for a directory or symlink, and empty for a
-  /// regular file that could not be read -- see `readable`, which distinguishes "no hash
-  /// because there is nothing to hash" from "no hash because we were refused".
+  /// SHA-256 of the content, hex. Empty for anything that is not a regular file -- a
+  /// directory, a symlink, and also a FIFO, socket or device, none of which are opened --
+  /// and empty for a regular file that could not be read; `readable` distinguishes "no
+  /// hash because there is nothing to hash" from "no hash because we were refused".
+  ///
+  /// Known gap, recorded rather than hidden: `FileState` carries no `is_regular`, so
+  /// `diff` cannot see a regular file becoming a FIFO (reported `Modified`, hash to
+  /// nothing) or a FIFO becoming a socket (reported `TouchedOnly`, and so not
+  /// substantive). Both surface; one is mislabelled and one is under-weighted.
   std::string sha256{};
 
   bool is_dir = false;
@@ -109,8 +115,10 @@ enum class ChangeKind {
   Created,
   Deleted,
 
-  /// Content differs. The only kind that means bytes moved, and the only one R3 would
-  /// accept as evidence of a mutation.
+  /// Content differs, with a hash on both sides proving it -- the only kind that says so
+  /// about a path that existed before *and* after, and the only one R3 would accept as
+  /// evidence of an in-place mutation. `Created` and `Deleted` move bytes too; see
+  /// `Changeset::substantive`, which counts all three plus `TypeChanged`.
   Modified,
 
   /// The identity tuple moved but the content did not: a touch, a chmod, a rewrite of

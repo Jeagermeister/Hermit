@@ -259,6 +259,35 @@ TEST_F(SandboxTest, EmbeddedNulIsRejected) {
   EXPECT_EQ(p.error(), PathError::EmbeddedNul);
 }
 
+TEST_F(SandboxTest, ANewlineInAPathIsRejectedBecauseReportsAreLineOriented) {
+  // The kernel accepts a newline in a filename. The supervisor's changeset report is
+  // newline-delimited, so a model that can name a file could otherwise write lines an
+  // operator reads as findings -- `created notes.txt` followed by a fabricated
+  // `touched  config.ini`. Refused at resolve time, which covers every reader at once
+  // rather than escaping it at each one. Found by review 2026-08-17.
+  auto p = box_->resolve("notes.txt\ntouched  config.ini");
+  ASSERT_FALSE(p.has_value());
+  EXPECT_EQ(p.error(), PathError::ControlCharacter);
+}
+
+TEST_F(SandboxTest, OtherControlCharactersAreRejectedToo) {
+  for (const std::string_view raw : {"a\tb.txt", "a\rb.txt", "a\x1b[31m.txt", "a\x7f.txt"}) {
+    auto p = box_->resolve(raw);
+    ASSERT_FALSE(p.has_value()) << raw;
+    EXPECT_EQ(p.error(), PathError::ControlCharacter) << raw;
+  }
+}
+
+TEST_F(SandboxTest, OrdinaryAwkwardNamesAreStillAccepted) {
+  // The check is control characters only. Spaces, quotes, newline-adjacent punctuation and
+  // non-ASCII are all legal names a person may genuinely have, and refusing them would be
+  // the adjacent-success section 3 forbids -- a refusal that reads as a bug.
+  for (const std::string_view raw : {"a file.txt", "quote'd.txt", "\"quoted\".txt", "n.txt"}) {
+    auto p = box_->resolve(raw);
+    EXPECT_TRUE(p.has_value()) << raw << ": " << (p ? "" : to_string(p.error()));
+  }
+}
+
 TEST_F(SandboxTest, TildeIsNotExpanded) {
   // "~" names a literal directory. Inferring a home directory would reintroduce
   // exactly the implicit root R1 forbids.

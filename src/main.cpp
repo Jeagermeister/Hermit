@@ -72,7 +72,8 @@ int usage(std::ostream& to = std::cerr) {
       "  --max-turns N          turn bound for one run (default 12)\n"
       "  --budget N             wall-clock seconds for one run, checked between turns (R8)\n"
       "  --backups DIR          where undo data goes; must be outside --root (R4)\n"
-      "  --no-verify            skip the per-turn hash diff of the tree (R6); on by default\n"
+      "  --no-verify            skip the per-turn hash diff of the tree (R6); verification\n"
+      "                         is on by default\n"
       "\n"
       "environment: HERMES_CONFIG (absolute), HERMES_SANDBOX_ROOT (absolute), HERMES_MODEL,\n"
       "             HERMES_OLLAMA_URL, HERMES_MAX_NUM_CTX\n";
@@ -421,8 +422,17 @@ int agent_command(std::span<const std::string_view> args) {
     constexpr char kSep = std::filesystem::path::preferred_separator;
     std::string root = box->root().lexically_normal().string();
     while (root.size() > 1 && root.back() == kSep) root.pop_back();
+    // weakly_canonical, not absolute: Sandbox::open canonicalises the root, expanding
+    // every symlink, and sandbox.cpp says outright that "the two must be expressed in the
+    // same terms or containment comparisons silently fail open". absolute() resolves no
+    // symlinks, so `--root ~/work --backups ~/work/undo` with ~/work a symlink compared a
+    // canonical root against an unexpanded store, called the store outside, and put the
+    // undo data inside the sandbox where the model can list, read, edit and move it --
+    // R4 defeated by the check meant to enforce it. Demonstrated 2026-08-17.
+    // weakly_canonical tolerates a store that does not exist yet, which is the normal
+    // case: BackupStore creates it lazily on the first mutation.
     const std::string store =
-        std::filesystem::absolute(*backup_dir).lexically_normal().string();
+        std::filesystem::weakly_canonical(*backup_dir).lexically_normal().string();
 
     // `--root /` needs its own arm, and getting it wrong is worse than it looks: the strip
     // loop leaves root as "/", so the general test degrades to `starts_with("//")`, which
@@ -567,13 +577,26 @@ int agent_command(std::span<const std::string_view> args) {
   // model announcing success over an untouched tree is contradicted by it. What does not
   // exist is the judgment half -- deciding whether those are the *right* changes needs a
   // post-condition, and a free-text instruction does not carry one (see verify.h).
+  //
+  // Every sentence below is gated on `verify`, and that gate is the whole point. With
+  // --no-verify, `net_changes` is empty because nothing was ever looked at -- so an
+  // ungated "nothing moved" would report a successful run as the exact R6 failure this
+  // command exists to detect, asserting a measurement that was never taken. Found by
+  // review 2026-08-17; D13 argues at length that a run which cannot be verified must not
+  // look like one that was, and this is that same rule at the CLI rather than in the loop.
   if (outcome.ran_to_completion()) {
-    std::cout << "\nnote: the model stopped asking for tools, and the changes above are what\n"
-                 "      the filesystem shows. Whether they are the *correct* changes is not\n"
-                 "      decided here -- that needs a post-condition this command was not given.\n";
-    if (outcome.net_changes.substantive() == 0) {
-      std::cout << "      Nothing moved. For a read-only instruction that is right; for one\n"
-                   "      that asked for work, it is the failure R6 was written about.\n";
+    if (!verify) {
+      std::cout << "\nnote: the model stopped asking for tools. Nothing about the tree was\n"
+                   "      checked -- --no-verify was given, so this run is unverified and\n"
+                   "      a clean stop is not evidence that anything happened.\n";
+    } else {
+      std::cout << "\nnote: the model stopped asking for tools, and the changes above are what\n"
+                   "      the filesystem shows. Whether they are the *correct* changes is not\n"
+                   "      decided here -- that needs a post-condition this command was not given.\n";
+      if (outcome.net_changes.substantive() == 0) {
+        std::cout << "      Nothing moved. For a read-only instruction that is right; for one\n"
+                     "      that asked for work, it is the failure R6 was written about.\n";
+      }
     }
   }
   return outcome.ran_to_completion() ? 0 : 1;

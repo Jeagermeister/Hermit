@@ -560,6 +560,24 @@ model calling this as a tool.
       it did puts the reply back on the critical path, and the failure being defended against is
       confident wrongness in fluent English, not a detectable grammar. Hashes carry forward
       across snapshots, so a turn costs the walk plus the bytes that actually moved.
+- [ ] **Verifier gaps found by review 2026-08-17**, recorded so they are gates rather than
+      surprises. None is reachable through the current eight-tool surface; each becomes
+      reachable with `shell`, a hostile filesystem layout, or an operator mistake.
+      - The identity tuple does not detect a write made through a held `MAP_SHARED` mapping
+        (demonstrated; see [D13](./DECISIONS.md)'s amendment). Gates the `shell` tool.
+      - The walk crosses mount points — no `st_dev` check, no `RESOLVE_NO_XDEV` — so a bind
+        mount or a mounted share under `--root` is read, contradicting verify.h's "never opens
+        anything outside the root". Lands with D7's `openat2` gate.
+      - `hash_regular` has no byte cap and no deadline, while `read`/`grep`/`edit` are capped at
+        16 MiB. Hermes' SHA-256 is a portable software implementation (~60 MB/s, roughly 70x
+        slower than a hardware-accelerated `sha256sum`), so a large tree's baseline runs outside
+        the R8 bound entirely — the budget is only checked between turns.
+      - The walk opens every sibling directory of a level before descending, so fd use is
+        O(siblings), not O(depth). At the common 1024 soft limit that is ~1020 directories.
+      - `FileState` carries no `is_regular`, so regular↔FIFO/socket/device transitions are
+        reported as `Modified` or `TouchedOnly` rather than `TypeChanged`.
+      - A content change hidden behind a `chmod 000` reports as `ReadabilityChanged`, which
+        `substantive()` does not count.
 - [ ] **State verification — the judgment half.** Deciding whether the changes are the *right*
       ones needs a post-condition, and a free-text instruction does not carry one. A live run
       shows the gap exactly: asked to create `report.md` containing a summary, `llama3.2-3b`

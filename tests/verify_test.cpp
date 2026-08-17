@@ -243,8 +243,15 @@ TEST_F(VerifyFixture, TheSecondWalkHashesOnlyWhatMoved) {
   const auto after = verifier_->snapshot(&*before);
   ASSERT_TRUE(after.has_value());
 
-  EXPECT_LT(verifier_->last_hashed_bytes(), baseline_bytes)
-      << "the unchanged file was re-hashed";
+  // The baseline is pinned so the arithmetic below is checkable by eye: 11 bytes of
+  // notes.txt plus 6 of data/counts.txt.
+  EXPECT_EQ(baseline_bytes, 17u);
+  // There used to be an EXPECT_LT(last_hashed_bytes, baseline_bytes) here with the message
+  // "the unchanged file was re-hashed". It was decoration: a *full* re-hash of the second
+  // walk costs 8 + 6 = 14, which is already less than 17, so the assertion passed under
+  // precisely the regression its own message named (found by mutation testing 2026-08-17).
+  // An inequality cannot express this whenever the changed file shrank; only the exact
+  // count can, so the exact count is the whole test.
   EXPECT_EQ(verifier_->last_hashed_bytes(), 8u) << "exactly the bytes of CHANGED\\n";
   EXPECT_EQ(verifier_->last_entries_walked(), before->size()) << "every entry is still stat'd";
 }
@@ -260,6 +267,48 @@ TEST_F(VerifyFixture, ACarriedForwardHashIsTheSameHashAFullWalkWouldProduce) {
   ASSERT_TRUE(incremental.has_value());
   ASSERT_TRUE(cold.has_value());
   EXPECT_EQ(*incremental, *cold);
+}
+
+TEST_F(VerifyFixture, TheStreamingHashCoversEveryByteNotJustTheFirstBuffer) {
+  // hash_regular reads in 64 KiB chunks. Every other file in this fixture is a few dozen
+  // bytes, so that loop never iterated twice anywhere in the suite -- a mutation
+  // truncating it to a single chunk survived all 468 tests (mutation testing 2026-08-17).
+  // R3's promise is content, so a file larger than the buffer, differing only past it, is
+  // the only thing that pins it.
+  std::string big(200u * 1024, 'a');
+  write("big.bin", big);
+  const auto before = verifier_->snapshot();
+  ASSERT_TRUE(before.has_value()) << before.error().message();
+
+  big.back() = 'b';  // one byte at offset 204799 -- three buffers past the first read
+  write("big.bin", big);
+  const auto after = verifier_->snapshot(&*before);
+  ASSERT_TRUE(after.has_value()) << after.error().message();
+
+  const Changeset set = diff(*before, *after);
+  ASSERT_EQ(set.changes.size(), 1u) << set.render();
+  EXPECT_EQ(set.changes[0].path, "big.bin");
+  EXPECT_EQ(set.changes[0].kind, ChangeKind::Modified)
+      << "a byte past the first 64 KiB buffer still has to move the hash";
+  EXPECT_EQ(set.substantive(), 1u);
+}
+
+TEST_F(VerifyFixture, ALargeUnchangedFileIsNotReReadWhenASmallOneMoves) {
+  // The incremental claim stated so that a regression to full re-hashing cannot hide in
+  // the arithmetic: the tree is now dominated by one 200 KiB file that does not change,
+  // so re-reading it would be off by four orders of magnitude rather than by three bytes.
+  write("big.bin", std::string(200u * 1024, 'a'));
+  const auto before = verifier_->snapshot();
+  ASSERT_TRUE(before.has_value()) << before.error().message();
+  EXPECT_EQ(verifier_->last_hashed_bytes(), 200u * 1024 + 17u);
+
+  write("notes.txt", "CHANGED\n");
+  const auto after = verifier_->snapshot(&*before);
+  ASSERT_TRUE(after.has_value()) << after.error().message();
+
+  EXPECT_EQ(verifier_->last_hashed_bytes(), 8u)
+      << "the 200 KiB file was re-read; carrying hashes forward is what makes a walk cheap";
+  EXPECT_EQ(verifier_->last_entries_walked(), before->size()) << "every entry is still stat'd";
 }
 
 TEST_F(VerifyFixture, SeesAMutationNoToolReportedAndNoModelMentioned) {
