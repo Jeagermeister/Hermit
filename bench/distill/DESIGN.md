@@ -112,22 +112,29 @@ Read it as a dependency graph, not a schedule. Only `fsops re-run` is startable 
 
 ## 4. What the corpus would cost
 
-Stated because nobody estimates this before agreeing to it. Figures are arithmetic from measured
-medians, not measurements — the same standing [ROUTING.md](../../ROUTING.md)'s note on numbers
-carries.
+Stated because nobody estimates this before agreeing to it. These are **arithmetic from one
+measured median, not measurements** — the same caution [ROUTING.md](../../ROUTING.md)'s closing
+note attaches to its own token figures applies here, and more so, since a single median stands in
+for a distribution the sweeps showed to be wide.
 
-| quantity | value | source |
+| quantity | value | where it comes from |
 |---|---|---|
 | task shapes today | 12 | [tasks.py](../fsops/tasks.py) |
-| instances needed | ~1,000 | below the floor where curation reliably beats random |
-| samples per instance | 10 | rejection sampling at a ~75% pass rate |
+| instances needed | ~1,000 | yields ~7,500 verified examples at the row below — the 1k–10k band where a corpus is worth curating |
+| samples per instance | 10 | rejection sampling against a ~75% pass rate |
 | runs | 10,000 | product of the two |
-| median run | 64.6s | SWEEP2, qwen3.5:9b |
-| **GPU time** | **~180 hours** | ~7.5 days continuous |
+| median run | 64.6s | [SWEEP2](../fsops/SWEEP2.md), qwen3.5:9b, sweep 1 |
+| **GPU time** | **~180 hours** | 10,000 × 64.6s ≈ 7.5 days continuous |
 
-Two consequences. **The parameterizer is not optional** — twelve tasks at k=10 yields roughly 90
-verified trajectories, which trains nothing. And **180 GPU-hours is the floor**, before failed
-runs, before the held-out split, before a second pass against a different base.
+Two consequences. **The parameterizer is not optional** — twelve shapes at k=10 yields roughly 90
+verified trajectories, which trains nothing. And **180 GPU-hours is a floor, not an estimate**:
+failed samples are already inside the 10,000, but timeouts needing re-runs are not, nor is the
+held-out split's own sampling, nor a second pass against a different base.
+
+One caveat on the median itself. SWEEP2's `median run` column mixes statistics — three sweep-2
+rows report means. 64.6s is a genuine median because it comes from sweep 1, but it is the
+*valid-only* median: the raw figure across all 36 runs is 64.8s, and for slower models the gap is
+much wider. Re-derive from the deterministic re-run before anyone budgets against this number.
 
 ---
 
