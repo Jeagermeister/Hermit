@@ -387,8 +387,8 @@ ConfigResult<void> overlay_env(Config& config, const EnvLookup& lookup) {
 }  // namespace
 
 ConfigResult<void> apply_env(Config& config, const EnvLookup& lookup) {
-  // Commit or nothing, as `apply_json` is. `HERMES_SANDBOX_ROOT=/srv` with a broken
-  // `HERMES_MODEL` used to return an error *and* leave the root applied -- a caller
+  // Commit or nothing, as `apply_json` is: `HERMES_SANDBOX_ROOT=/srv` with a broken
+  // `HERMES_MODEL` must not return an error while leaving the root applied -- a caller
   // that reported the failure and carried on would be carrying a root it was just
   // told not to trust.
   Config staged = config;
@@ -627,9 +627,9 @@ ConfigResult<void> validate(const Config& config, const Requirements& required) 
   // is what keeps sandbox file contents on this machine.
   //
   // Only for commands that will actually dial it, though. A URL nothing opens cannot
-  // carry anything off the machine, and checking it unconditionally meant an
-  // `HERMES_OLLAMA_URL` exported for an unrelated tool broke `resolve` -- which has no
-  // network at all -- and stopped `config` printing the very value that was wrong.
+  // carry anything off the machine, so checking it unconditionally would break `resolve`
+  // -- which has no network at all -- over an `HERMES_OLLAMA_URL` exported for an
+  // unrelated tool, and would stop `config` printing the very value that is wrong.
   // `render()` marks it instead, so it is still impossible to miss.
   if (required.ollama) {
     if (const auto ok = ollama::validate_base_url(config.client.base_url); !ok) {
@@ -746,10 +746,10 @@ namespace {
 /// libstdc++ then throws `std::ios_base::failure` out of `basic_filebuf::underflow` on
 /// the first read -- from inside the streambuf, where the stream's exception mask does
 /// not gate it. `istreambuf_iterator` propagates it, `main` has no handler, and
-/// `hermes-cpp config --config /etc` aborts with a core dump. Found in review and
-/// reproduced: pointing at a config *directory* instead of the file inside it is an
-/// ordinary slip, and losing the process over it contradicts the rule this file states
-/// about malformed input being a message to print.
+/// `hermes-cpp config --config /etc` aborts with a core dump. Pointing at a config
+/// *directory* instead of the file inside it is an ordinary slip, and losing the
+/// process over it contradicts the rule this file states about malformed input being
+/// a message to print.
 ///
 /// So: require a regular file up front, and keep the try/catch anyway. The check gives
 /// the better message; the catch is what makes "no exception escapes" true rather than
@@ -805,10 +805,9 @@ ConfigResult<std::optional<std::string>> select_config_file(std::span<const std:
       return std::unexpected(
           ConfigProblem{ConfigError::BadValue, "HERMES_CONFIG is set but empty"});
     }
-    // Absolute, for the same reason HERMES_SANDBOX_ROOT must be, and this was missed
-    // when the variable was first routed through here. A relative value resolved
-    // against the working directory makes *which file is read* depend on where the
-    // binary was launched -- and that file may then set its own relative
+    // Absolute, for the same reason HERMES_SANDBOX_ROOT must be. A relative value
+    // resolved against the working directory makes *which file is read* depend on
+    // where the binary was launched -- and that file may then set its own relative
     // `sandbox_root`, anchored to whichever directory happened to win. An inferred
     // root, arriving by a longer route, from the one source with no honest anchor.
     if (!std::filesystem::path{*from_env}.is_absolute()) {

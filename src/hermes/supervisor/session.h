@@ -163,11 +163,9 @@ using SessionResult = std::expected<T, SessionProblem>;
 
 /// Characters per token assumed before any measurement has been taken.
 ///
-/// Below **every** figure in the table above, base64 at 1.36 included. An earlier value
-/// of 2.0 was chosen as "below realistic agent traffic" and described as near the
-/// worst case, which it was not: it under-counted a base64-dense blob by up to 47%, and
-/// the header above says plainly that under-counting is the direction that ends in a
-/// discard. A comment claiming cover it did not provide is worse than the gap.
+/// Below **every** figure in the table above, base64 at 1.36 included -- a "conservative"
+/// figure not checked against the worst measured case is worse than no comment at all:
+/// unverified, it can still under-count by up to 47%.
 ///
 /// The reason this is affordable now is attribution. When every turn was estimated, a
 /// figure this pessimistic would have inflated the whole conversation and dropped turns

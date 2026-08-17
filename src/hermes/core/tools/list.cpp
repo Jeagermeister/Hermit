@@ -86,8 +86,7 @@ std::expected<ToolOutput, ToolError> ListTool::run(const ToolArgs& args) {
     if (::fstatat(::dirfd(d), de->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0) {
       const int e = errno;
       // Copy the entry name first: `name` views dirent storage that closedir
-      // frees. Caught as a use-after-free by ASan the first time a test
-      // actually reached this branch.
+      // frees, so referencing it after close() would be a use-after-free.
       const std::string entry{name};
       ::closedir(d);
       return refuse(entry, IoError{.code = e});

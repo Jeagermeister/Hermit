@@ -26,7 +26,7 @@ constexpr int kMaxSymlinkHops = 40;
 
 // The kernel would reject anything longer anyway, and the bound matters more than it
 // looks: resolution is **quadratic in the number of components**, not linear in the
-// input as an earlier version of this comment claimed.
+// input.
 //
 // `out = out / component` re-splits the whole accumulated path into libstdc++'s
 // component vector on every append, so the cost is ~63 bytes per component squared.
@@ -153,13 +153,9 @@ std::expected<std::filesystem::path, PathError> Sandbox::walk(const fs::path& in
     const auto link_status = fs::symlink_status(next, ec);
     if (ec) {
       // "Not there" and "I could not find out what is there" are different answers and
-      // must not be merged. Only the first is safe to treat as a plain name.
-      //
-      // Merging them is a fail-open: on EACCES this returned a path with an *unexpanded
-      // symlink* still in it, and contains() -- which assumes a fully resolved path --
-      // then accepted it. A link inside an unreadable directory pointing out of the root
-      // yielded a SandboxPath reporting "sub/esc/secret.txt" that read a file outside.
-      // A model can produce that state itself: chmod 000 on a directory it owns.
+      // must not be merged: merging them is a fail-open that let a symlink inside an
+      // unreadable directory escape the root (D6) -- only the first is safe to treat as
+      // a plain name.
       const bool absent = (ec == std::errc::no_such_file_or_directory ||
                            ec == std::errc::not_a_directory);
       if (!absent) {

@@ -11,20 +11,10 @@
 // pimpl in client.cpp. That also keeps D7's layering honest by construction: nothing
 // outside this target can reach the HTTP client even by accident.
 //
-// Native Ollama endpoints throughout -- /api/tags, /api/show, /api/chat.
-//
-// The OpenAI-compatible /v1/chat/completions was used first and was dropped on
-// 2026-08-13. It cannot set `num_ctx`, which made every model's context window a
-// property of its Modelfile and of the Ollama server's own default -- and that
-// default turned out to be unreportable through any API and to have changed between
-// releases, which is what falsified R9's original "unpinned means 4096" evidence.
-// Setting the context per request replaces an unknowable with a stated value.
-//
-// Two smaller gains came with it: tool-call arguments arrive as a structured object
-// rather than a JSON string needing a second parse, and `format` takes a schema
-// directly instead of the OpenAI json_schema wrapper. The first was measured against
-// the daemon directly -- this client does not send or parse tool calls yet; that is
-// Phase 2.
+// Native Ollama endpoints throughout (`/api/tags`, `/api/show`, `/api/chat`), not the
+// OpenAI-compatible one -- the latter cannot set `num_ctx`, which leaves the context
+// window an unknowable property of the server. Full reasoning and the driver-deadlock
+// incident that makes the cost concrete: DECISIONS.md D8.
 //
 // The cost is real and is handled in ChatRequest::num_ctx -- being able to set the
 // context means being able to set it past what the GPU can hold, which Ollama will

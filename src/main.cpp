@@ -82,13 +82,13 @@ int usage(std::ostream& to = std::cerr) {
 
 /// A whole non-negative number, or nothing.
 ///
-/// `std::strtoull` is the wrong tool and was the bug: it *negates and wraps*, so `-1`
-/// parses cleanly as UINT64_MAX, and it reports overflow only through `errno`, which is
-/// easy to forget to read. `--max-turns -1` therefore became a bound of 2^64-1 -- no bound
-/// at all -- and `--budget -1` wrapped back to a negative `long`, making the loop's first
+/// `std::strtoull` is the wrong tool: it *negates and wraps*, so `-1` parses cleanly as
+/// UINT64_MAX, and it reports overflow only through `errno`, which is easy to forget to
+/// read. `--max-turns -1` would silently become a bound of 2^64-1 -- no bound at all --
+/// and `--budget -1` would wrap back to a negative `long`, making the loop's first
 /// wall-clock check fire immediately and report a spent budget after zero seconds. Both
-/// silently turned a bound into its opposite, which is the failure direction this project
-/// keeps refusing.
+/// turn a bound into its opposite, which is the failure direction this project keeps
+/// refusing.
 ///
 /// `from_chars` has none of those properties: the unsigned grammar has no sign, so `-1` is
 /// `invalid_argument`; overflow is `result_out_of_range`; and requiring `ptr == end` is
@@ -313,7 +313,6 @@ int session_command(std::span<const std::string_view> args) {
   return 0;
 }
 
-// Everything that is in force, and where each value came from.
 // Phase 2 --- the loop, end to end: one instruction, the eight Tier 0 tools, a real
 // model. This is the first subcommand where all four layers run at once.
 int agent_command(std::span<const std::string_view> args) {
@@ -425,10 +424,10 @@ int agent_command(std::span<const std::string_view> args) {
     // weakly_canonical, not absolute: Sandbox::open canonicalises the root, expanding
     // every symlink, and sandbox.cpp says outright that "the two must be expressed in the
     // same terms or containment comparisons silently fail open". absolute() resolves no
-    // symlinks, so `--root ~/work --backups ~/work/undo` with ~/work a symlink compared a
-    // canonical root against an unexpanded store, called the store outside, and put the
-    // undo data inside the sandbox where the model can list, read, edit and move it --
-    // R4 defeated by the check meant to enforce it. Demonstrated 2026-08-17.
+    // symlinks, so `--root ~/work --backups ~/work/undo` with ~/work a symlink would
+    // compare a canonical root against an unexpanded store, call the store outside, and
+    // put the undo data inside the sandbox where the model can list, read, edit and move
+    // it -- R4 defeated by the check meant to enforce it.
     // weakly_canonical tolerates a store that does not exist yet, which is the normal
     // case: BackupStore creates it lazily on the first mutation.
     const std::string store =
@@ -567,8 +566,8 @@ int agent_command(std::span<const std::string_view> args) {
         std::cout << "  " << line << '\n';
         line.clear();
       }
-      // "moved bytes" was wrong even before chmod joined the count -- substantive() has
-      // always counted changes, not bytes, and now one of the kinds it counts moves none.
+      // substantive() counts changes, not bytes -- PermissionsChanged is one of the kinds
+      // it counts, and a chmod moves none.
       std::cout << "  (" << outcome.net_changes.substantive() << " of "
                 << outcome.net_changes.changes.size() << " are substantive)\n";
     }
@@ -583,9 +582,9 @@ int agent_command(std::span<const std::string_view> args) {
   // Every sentence below is gated on `verify`, and that gate is the whole point. With
   // --no-verify, `net_changes` is empty because nothing was ever looked at -- so an
   // ungated "nothing moved" would report a successful run as the exact R6 failure this
-  // command exists to detect, asserting a measurement that was never taken. Found by
-  // review 2026-08-17; D13 argues at length that a run which cannot be verified must not
-  // look like one that was, and this is that same rule at the CLI rather than in the loop.
+  // command exists to detect, asserting a measurement that was never taken. Same rule as
+  // D13 (a run that cannot be verified must not look like one that was), applied here at
+  // the CLI rather than in the loop.
   if (outcome.ran_to_completion()) {
     if (!verify) {
       std::cout << "\nnote: the model stopped asking for tools. Nothing about the tree was\n"
@@ -604,6 +603,7 @@ int agent_command(std::span<const std::string_view> args) {
   return outcome.ran_to_completion() ? 0 : 1;
 }
 
+// Everything that is in force, and where each value came from.
 int config_command(std::span<const std::string_view> args) {
   std::vector<std::string_view> extra;
   // Nothing is required, and nothing is dialled: printing the defaults is a legitimate

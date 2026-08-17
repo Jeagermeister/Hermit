@@ -30,31 +30,15 @@
 
 namespace hermes::ollama {
 
-/// ⚠ **The context gate asks about the architecture, not the Modelfile pin.** This is
-/// the second correction to R9, and it follows from [D8](../../../DECISIONS.md).
-///
-/// The original gate read `num_ctx` out of the Modelfile, on the stated evidence that
-/// "Ollama's default `num_ctx` is 4096" so every model needed a pinned variant. Two
-/// measurements on Ollama 0.32.9 (`kitchen-desktop`, 2026-08-13) undid that:
-///
-///  1. An *unpinned* model does not run at 4096. It loads far above that, by a rule
-///     the API does not expose: `qwen3.6:27b-q8_0` came up at 262144, matching its
-///     architecture, but `nemotron-3.5-lightning:30b` reports an architecture of
-///     1048576 and loaded at 262144 -- capped well below it. So "it loads at its
-///     architectural context" is *also* wrong; there is a server-side ceiling whose
-///     value is not reported anywhere. This makes the context strictly less knowable,
-///     not more, which is why the conclusion is "undetermined" rather than a number.
-///     Controlled against `/api/ps` merely echoing the architecture: a variant pinned
-///     to 131072 under a 262144 architecture reports 131072 there, so the field is
-///     the allocated context.
-///  2. Since D8 the client sets `options.num_ctx` on every request, and that value
-///     **overrides the Modelfile pin upward**. Measured directly: a model pinned to
-///     8192, asked for 32768, loaded at 32768.
-///
-/// So the pin does not determine anything this client cares about -- it is overridden
-/// before it can apply. What cannot be overridden is the architecture: no per-request
-/// setting makes a model hold more context than it was built for. That is the ceiling
-/// worth gating on, and it is reported directly by `/api/show`.
+/// ⚠ **The context gate asks about the architecture, not the Modelfile pin.** The pin
+/// decides nothing this client cares about: since D8 the client sets `options.num_ctx`
+/// on every request, which overrides a Modelfile pin upward, and an unpinned model has
+/// no knowable default either -- it loads above 4096 by a rule the API does not expose,
+/// and not reliably at its full architecture either: `nemotron-3.5-lightning:30b` reports
+/// a 1048576 architecture and loaded unpinned at 262144, well below it (DECISIONS.md D8).
+/// Unpinned is therefore *less* knowable, not more. What no per-request setting can
+/// exceed is the architecture itself, so that is the ceiling worth gating on, and
+/// `/api/show` reports it directly.
 ///
 /// The pin is still *shown*, because it is useful for diagnosing a model that behaves
 /// oddly. It simply no longer decides anything.

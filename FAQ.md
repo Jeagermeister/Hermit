@@ -13,18 +13,12 @@ argument, it is a pitch.
 
 ## "Why not just let the model run shell or PowerShell commands?"
 
-**We do keep shell**, and removing it was considered and rejected on measured grounds:
-`qwen3.5:4b` performed every filesystem operation through the terminal tool and never
-touched a file tool, while `llama3.2:3b` used the structured tools. Tool preference varies
-by model and is not under our control ([SCOPE.md](./SCOPE.md),
-[ROUTING.md](./ROUTING.md) §4).
-
-**The intuition that shell is the dangerous half is backwards, and that is measured, not
-reasoned.** Both destructive incidents in the evidence base — the ones that overwrote a
-config file with invented content — came through *file tools*, not shell. So did every
-escape into the repository root. Which is why *which tool* is the wrong lever, and why
-verification belongs at the filesystem layer, applied every turn regardless of what the
-model reached for ([ROUTING.md](./ROUTING.md) §6).
+**We do keep shell**, and removing it was considered and rejected on measured grounds: tool
+preference varies by model and is not under our control, and neither destructive incident in
+the evidence base came through shell — both came through file tools, and so did every escape
+into the repository root. The intuition that shell is the dangerous half is backwards, and
+that is measured, not reasoned. Full argument, with the numbers:
+[SCOPE.md](./SCOPE.md) § "Why terminal survives."
 
 What shell alone cannot give you:
 
