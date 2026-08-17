@@ -600,13 +600,20 @@ Upstream is ~870k lines of non-test Python. A wholesale port is not the goal and
   Hermes 4 70B. Whether a supervisor architecture is still the right answer when the model is
   6× larger is an open question, not a settled one: the bounded-session finding came from
   watching *small* models drift.
-  **One concrete criterion arrived 2026-08-17**, where this question previously had only
-  size and speed: on the two stock Meta llama3.x instruct templates the tool definitions
-  are not rendered once a tool result is the last message, so the model is not told its
-  tools exist on the turn it must decide whether to call one. Two of seven models tested,
-  and template-specific rather than architectural — `hermes3-8b` is llama3.1 underneath
-  and is unaffected. Table and the three candidate responses are in
-  [DECISIONS.md](./DECISIONS.md) under "Still open".
+  **Two concrete criteria arrived 2026-08-17**, where this question previously had only size
+  and speed — and both are properties of a model's *chat template*, which no model card
+  reports and `ollama show` does not summarise:
+  1. **Do the tool definitions survive a tool result?** On the two stock Meta llama3.x
+     instruct templates they do not, so the model is not told its tools exist on the turn it
+     must decide whether to call one. Template-specific, not architectural: `hermes3-8b` is
+     llama3.1 underneath and is unaffected.
+  2. **Does the caller's system prompt survive offering tools?** On `hermes3-8b` it does not
+     — the template substitutes its own function-calling preamble — so the instructions this
+     project relies on never reach that model at all.
+
+  Both are in [DECISIONS.md](./DECISIONS.md) under "Still open", with mechanisms read out of
+  the templates. Together they argue that model selection needs a *template probe*, not just
+  R9's two card-readable gates.
 - **Whether to train a worker model at all.** Design recorded in
   [bench/distill/DESIGN.md](./bench/distill/DESIGN.md) — gated, not scheduled, and deliberately
   filed here rather than as a Phase item. The blocking issue is measurement order, not

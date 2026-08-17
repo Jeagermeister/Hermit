@@ -54,13 +54,28 @@
 // here, because model selection is where the decision belongs and one copy of a table is
 // this project's whole position on drift.
 //
-// What matters at this layer is the failure it produces, which was seen before it was
-// explained: on `llama3.2-3b` a run's second turn sent a *smaller* prompt than its first
-// while history had grown, and the model answered with a tool call written as prose in
-// `content` -- a Python-style list inside a string, verbatim the failure R2 was written
-// about. A loop cannot detect this from a reply, and cannot work around it without
-// fabricating a user turn (see below), so it is a model-selection constraint that the loop
-// merely suffers.
+// The mechanism is in the template, not inferred: llama3.x renders its `{{ range $.Tools }}`
+// block only inside `{{- if and $.Tools $last }}` under `{{- if eq .Role "user" }}`, so a
+// conversation ending in a `tool` result renders it nowhere.
+//
+// What it costs is narrower than one run suggested. Tool calling does not collapse; the model
+// works from memory of a schema it can no longer see, which degrades on tools it has not just
+// used -- measured, `llama3.2-3b` called `write` with `paths` (borrowed from `read`) where the
+// declaration says `path`. Once, in a live run, it degraded all the way to prose. A loop cannot
+// detect either from a reply, and cannot fix it without fabricating a user turn (see below), so
+// it is a model-selection constraint the loop merely suffers.
+//
+// --- And one that silences the system prompt entirely --------------------------
+//
+// `hermes3-8b`'s template writes its own function-calling preamble *instead of* the caller's
+// system prompt -- `{{- if .Tools }} ... {{- else if .System }}` -- so whenever tools are
+// offered, nothing the caller put in the system turn reaches the model. Demonstrated with a
+// planted codeword: stated verbatim with no tools, denied outright with tools.
+//
+// The system prompt `app` sends exists to counter two measured failure modes ("read a file
+// before describing it"; "stop calling tools only when the work is actually finished"). On that
+// model it is not in the prompt at all, so no observed behaviour may be credited to it. Both
+// hazards are recorded in DECISIONS.md under "Still open".
 //
 // Note what it means for D5: `format` could not have fixed that call either. It was not a
 // constrained generation gone wrong -- it was prose, on a turn where the model had not been

@@ -755,11 +755,27 @@ constraining `format` measurably degrades tool-call quality on the models actual
 called that a real risk worth measuring on the fsops harness rather than assuming either way.
 Measured: 100% → 0% on four of the seven models in that harness.
 
-**What survives of D5, and it is not a consolation prize.** `format` works exactly as documented
-when no tools are offered — the same run confirmed a clean schema-constrained reply on every model
-probed. So D5 is *retargeted*, not overturned: `format` is the mechanism for a structured **reply**,
-which is what Tier 1's `triage` and `summarize` will want, and it has no business on the
-tool-argument path.
+**What survives of D5, and it is not a consolation prize.** `format` works as documented when no
+tools are offered. So D5 is *retargeted*, not overturned: `format` is the mechanism for a
+structured **reply**, which is what Tier 1's `triage` and `summarize` will want, and it has no
+business on the tool-argument path.
+
+> **Independently re-measured 2026-08-17.** A second pass, designing its own probes, reproduced
+> the table above cell for cell: 7 of 7 correct with `tools` alone, the same two `CORRUPT ARGS`
+> models, the same two `NO CALL` models, and qwen's byte-identical `eval_count` between the two
+> conditions. Two things it corrected, both mine:
+>
+> - **"a clean reply on every model" was too strong.** `gemma4-e4b` returned *empty* content and
+>   no calls, 3 of 3 reproductions, when a tool-flavoured system prompt is paired with **no**
+>   tools offered: it spends its whole budget in `thinking` and hits EOS before emitting the
+>   schema. With a neutral system prompt it answers correctly. So the retargeting holds, but it
+>   is prompt-sensitive on at least one model rather than universal, and a Tier 1 caller must not
+>   assume otherwise.
+> - **The unrelated-schema mechanism does not reproduce.** This entry described `llama3.2-3b`
+>   returning a `write` call whose arguments were the alien object *with the real call buried in a
+>   string* — which is what one run showed. The re-measurement got no call at all, and no trace of
+>   `write` anywhere in the output. Both observations are real; the *breakage* is robust and the
+>   *shape* of it is not, so nothing should be built on the shape.
 
 **What replaces it there.** R2's intent — arguments that are structurally valid — is met by two
 things that do not fight the model:
@@ -868,7 +884,22 @@ whether to call another tool. It is a property of the **template, not the archit
 `hermes3-8b` is llama3.1 underneath and keeps its definitions, because Nous ships its own
 template.
 
-**The failure it produces was seen before it was explained.** A live `hermes-cpp agent`
+**The mechanism, read out of the template rather than inferred from token counts** (added
+2026-08-17, and it is what turns this from a measurement into an explanation). In llama3.2's
+and llama3.1's Go templates the `{{ range $.Tools }}` block sits inside
+`{{- if and $.Tools $last }}`, itself nested under `{{- if eq .Role "user" }}`. It therefore
+renders only for a message that is **both** role `user` **and** the last message. A
+conversation ending in a `tool` result satisfies neither, for any message, so the block
+renders nowhere. Confirmed directly with `ollama show --template`. By contrast hermes3 gates
+its tools block on `{{- if .Tools }}` alone, granite4 builds one system message unconditionally,
+and qwen3.5 and gemma4 do the same in Jinja — none of them consult the last message's role.
+
+**On the absolute numbers:** they are setup-dependent — a re-measurement with a differently
+worded tool got +275/+275 where this table has +267/+267, and +139 where this has +133. What
+reproduced *exactly* were the two figures that matter, `llama3.2-3b` at **+31** and
+`llama3.1-8b` at **+42** when a tool result is last. Read the pattern, not the digits.
+
+**The failure it produces was seen before it was explained** — once. A live `hermes-cpp agent`
 run on `llama3.2-3b` sent an 832-token prompt on turn 1 and a **160**-token prompt on turn
 2 — smaller, while history had grown — and the model answered with a tool call written as
 prose: `{"name": "read", "parameters": {"paths": "['colors.txt', 'count.txt']"}}`. A
@@ -876,6 +907,19 @@ Python-style list inside a string, which is verbatim the failure R2 was written 
 672-token drop is consistent with eight tool definitions going missing, which is what was
 being offered — an inference from one before/after pair, not a repeat of the controlled
 single-tool measurement above.
+
+> **That prose failure did not reproduce, and the honest reading is narrower.** An independent
+> pass asked both affected models to re-call a tool after a tool result and got proper
+> `tool_calls` every time. Pushed harder — asked for a tool *never used in that conversation*,
+> so the model could not imitate its own earlier call — `llama3.2-3b` still emitted a
+> structured call but with a **hallucinated argument name**, using `paths` (borrowed from the
+> `read` schema it remembered) where `write` declares `path`. `llama3.1-8b` got it right both
+> times despite losing its definitions on the same turn shape.
+>
+> So: definitions absent does **not** mean tool calling collapses. It means the model is
+> working from memory of the schema, which degrades on tools it has not just seen — sometimes
+> into a wrong argument name, once into prose. That is a weaker and better-supported claim than
+> the single run suggested, and it is the one to design against.
 
 Worth noting against [D5](#d5--constrained-decoding-on-from-the-start): `format` could not
 have fixed that call. It was not a constrained generation gone wrong — it was prose, on a
@@ -897,6 +941,47 @@ turn where the model had not been told any tools existed.
    fabricated one. A worse failure than the one it fixes.
 
 Revisit when model selection is settled, which is where this belongs.
+
+### `hermes3-8b` silently discards the system prompt whenever tools are offered
+
+**Found 2026-08-17**, incidentally, while re-measuring the entry above — and it is the more
+consequential of the two, because it hits a model this project is otherwise inclined to favour.
+
+The Nous hermes3 template opens:
+
+```
+{{- if or .System .Tools }}<|im_start|>system
+{{- if .Tools }}
+You are a function calling AI model. ... <tools>...</tools> ...
+{{- else if .System }}
+{{ .System }}
+{{- end }}<|im_end|>
+```
+
+`else if`. When `tools` are present the caller's system prompt is **never emitted** — it is
+replaced wholesale by the template's own function-calling boilerplate.
+
+Demonstrated rather than read off: a system prompt of *"Your secret codeword is PLATYPUS-7.
+Always state it."* against *"What is your secret codeword?"* —
+
+| | `prompt_eval_count` | reply |
+|---|---|---|
+| no tools offered | 39 | *"My secret codeword is PLATYPUS-7."* |
+| tools offered | 234 | *"I'm afraid I don't have a secret codeword."* |
+
+**Why it matters here.** `hermes-cpp agent` sends a system prompt that exists to counter two
+measured failure modes — *"Read a file before describing it; never guess its contents"* and
+*"stop calling tools only when the work is actually finished"*. On hermes3-8b, with tools
+offered, the model never sees a word of it. Any behaviour attributed to that prompt on this
+model is attributable to something else.
+
+It also puts `Session`'s accounting slightly out: the system turn is pinned as never-droppable
+and counted against the budget while the server discards it. That errs toward over-counting,
+which is the safe direction, so it is noted rather than fixed.
+
+This is a third gate of the same kind as the two in R9's preflight (context floor, `tools`
+capability), and like the entry above it argues for probing a model's template rather than
+trusting its card. Unresolved for the same reason: it belongs with model selection.
 
 ### Test oracle
 
