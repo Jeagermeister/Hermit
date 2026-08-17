@@ -11,11 +11,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -593,3 +595,289 @@ TEST(SessionTruncationPredicate, DoesNotWrapOnALargeMeasurement) {
 }
 
 }  // namespace
+
+// --- tool results in history (Phase 2) ---------------------------------------
+//
+// DECISIONS.md recorded this hazard under "Still open" before there were tool messages
+// to trigger it: the trim loop erased one turn at a time, so it could drop a result and
+// keep its call, or the reverse. The second is the damaging one -- a call that looks
+// outstanding gets re-issued, which is the repeat-call loop the supervisor exists to
+// break. These tests are what closes that entry.
+
+namespace {
+
+hermes::ollama::ChatReply reply_with_call(std::string name, std::uint64_t prompt_tokens) {
+  hermes::ollama::ChatReply reply;
+  reply.finish_reason = "stop";
+  reply.prompt_tokens = prompt_tokens;
+  reply.completion_tokens = 20;
+  hermes::ollama::ToolCall call;
+  call.id = "call_1";
+  call.name = std::move(name);
+  call.arguments = nlohmann::json{{"path", "a.txt"}};
+  reply.tool_calls.push_back(std::move(call));
+  return reply;
+}
+
+/// Roles in history, in order -- the shape assertions below are all about order.
+std::vector<std::string> roles_of(const Session& session) {
+  std::vector<std::string> roles;
+  for (const auto& turn : session.turns()) roles.push_back(turn.message.role);
+  return roles;
+}
+
+}  // namespace
+
+TEST(SessionToolHistory, AnAssistantTurnKeepsTheCallsItMade) {
+  // Without this the result that follows has no visible request, and the model is
+  // answering a question it cannot see.
+  auto session = Session::open(options_with(8192, 1024), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user("read a.txt");
+  ASSERT_TRUE(session->prepare().has_value());
+  ASSERT_TRUE(session->record(reply_with_call("read", 100)).has_value());
+
+  const auto& turns = session->turns();
+  ASSERT_FALSE(turns.empty());
+  const auto& assistant = turns.back();
+  EXPECT_EQ(assistant.message.role, "assistant");
+  ASSERT_EQ(assistant.message.tool_calls.size(), 1u);
+  EXPECT_EQ(assistant.message.tool_calls[0].name, "read");
+  EXPECT_EQ(assistant.message.tool_calls[0].arguments["path"], "a.txt");
+}
+
+TEST(SessionToolHistory, AToolResultLandsAsAToolRoleCarryingItsName) {
+  auto session = Session::open(options_with(8192, 1024), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user("read a.txt");
+  ASSERT_TRUE(session->prepare().has_value());
+  ASSERT_TRUE(session->record(reply_with_call("read", 100)).has_value());
+  session->add_tool_result("read", R"([{"path":"a.txt","content":"aaaa"}])");
+
+  EXPECT_EQ(roles_of(*session),
+            (std::vector<std::string>{"system", "user", "assistant", "tool"}));
+  EXPECT_EQ(session->turns().back().message.tool_name, "read");
+}
+
+namespace {
+
+/// How many turns carry each shape, so a test can refuse to pass vacuously.
+struct Shape {
+  std::size_t tool_results = 0;
+  std::size_t calls_bearing = 0;
+};
+
+Shape shape_of(const Session& session) {
+  Shape shape;
+  for (const auto& turn : session.turns()) {
+    if (turn.message.role == "tool") ++shape.tool_results;
+    if (!turn.message.tool_calls.empty()) ++shape.calls_bearing;
+  }
+  return shape;
+}
+
+/// Two complete exchanges plus a fresh instruction, sized so the trim gives up the FIRST
+/// call-and-results group while the second survives.
+///
+/// The surviving group is the entire point, and the reason this helper exists. An earlier
+/// version of both tests below built a single exchange and let the trim take all of it,
+/// leaving history as [system, user] -- so their invariant loops, each gated on finding a
+/// `tool` role, ran zero iterations and asserted nothing. Both passed while the grouping
+/// they were written to protect was disabled. The guards in the tests are what make that
+/// unrepeatable; this shape is what gives them something to check.
+///
+/// The growing `prompt_tokens` are deliberate: a constant figure re-anchors the whole
+/// history to it every turn, and one large against a tiny prompt drives chars_per_token to
+/// its floor. Either makes the trim never fire.
+void build_two_exchanges(Session& session) {
+  session.add_user("first instruction");
+  ASSERT_TRUE(session.prepare().has_value());
+  ASSERT_TRUE(session.record(reply_with_call("read", 300)).has_value());
+  session.add_tool_result("read", std::string(1200, 'x'));
+
+  session.add_user("second instruction");
+  ASSERT_TRUE(session.prepare().has_value());
+  ASSERT_TRUE(session.record(reply_with_call("read", 1800)).has_value());
+  session.add_tool_result("read", std::string(1200, 'y'));
+
+  session.add_user("third instruction");
+}
+
+}  // namespace
+
+TEST(SessionToolHistory, ATrimDropsACallAndItsResultsTogether) {
+  // The invariant: history never contains a `tool` turn whose call is absent, nor an
+  // assistant call with its results stripped.
+  auto session = Session::open(options_with(4096, 256), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  build_two_exchanges(*session);
+
+  const auto request = session->prepare();
+  ASSERT_TRUE(request.has_value()) << request.error().message();
+  ASSERT_GT(session->dropped(), 0u) << "nothing was trimmed, so nothing here is tested";
+
+  // The guard that makes this test mean something. Without it the assertions below sit
+  // behind a `continue` that a fully-trimmed history skips entirely, and the test passes
+  // while the grouping is broken -- which is exactly what it did before.
+  const auto shape = shape_of(*session);
+  ASSERT_GT(shape.tool_results, 0u)
+      << "no tool result survived the trim: the loop below would check nothing";
+
+  const auto roles = roles_of(*session);
+  for (std::size_t i = 0; i < roles.size(); ++i) {
+    if (roles[i] != "tool") continue;
+    // Walk back over any sibling results to the turn that must be the call.
+    std::size_t owner = i;
+    while (owner > 0 && roles[owner - 1] == "tool") --owner;
+    ASSERT_GT(owner, 0u) << "a tool result begins the history: its call was dropped";
+    EXPECT_EQ(roles[owner - 1], "assistant")
+        << "a tool result is not preceded by the assistant turn that called it";
+    EXPECT_FALSE(session->turns()[owner - 1].message.tool_calls.empty())
+        << "the preceding assistant turn carries no calls";
+  }
+}
+
+TEST(SessionToolHistory, TheGroupedDropNeverLeavesAnAssistantCallWithoutItsResults) {
+  auto session = Session::open(options_with(4096, 256), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  build_two_exchanges(*session);
+  ASSERT_TRUE(session->prepare().has_value());
+  ASSERT_GT(session->dropped(), 0u) << "nothing was trimmed, so nothing here is tested";
+
+  const auto shape = shape_of(*session);
+  ASSERT_GT(shape.calls_bearing, 0u)
+      << "no call-bearing turn survived the trim: the loop below would check nothing";
+
+  // Whatever survived, no assistant turn carrying calls may be the final turn with its
+  // results gone -- that is the half the model responds to by re-issuing the call.
+  const auto roles = roles_of(*session);
+  const auto& turns = session->turns();
+  for (std::size_t i = 0; i < turns.size(); ++i) {
+    if (turns[i].message.tool_calls.empty()) continue;
+    ASSERT_LT(i + 1, roles.size())
+        << "an assistant turn with calls is last: its results were dropped";
+    EXPECT_EQ(roles[i + 1], "tool")
+        << "an assistant turn with calls is not followed by its results";
+  }
+}
+
+TEST(SessionToolHistory, TheTrimCannotStopBetweenACallAndItsResult) {
+  // The test that actually distinguishes grouping from not, and the earlier attempts did
+  // not. Dropping from the front means erasing an assistant turn and then its result
+  // one-at-a-time usually lands on the same history as erasing them together -- so a
+  // mutation disabling grouping survived a suite that already had six tests around it.
+  //
+  // The distinguishing case is narrow: the trim must have room to stop *between* the call
+  // and its result, which needs the assistant turn to be the expensive one and the result
+  // to be cheap. Then:
+  //   grouped   -> both go, history is [system, user]
+  //   ungrouped -> only the assistant goes, leaving [system, tool, user] -- a result whose
+  //                request is gone, which is the orphan half of the hazard.
+  // Asserting the exact surviving sequence is what makes that observable; a loop gated on
+  // finding a `tool` role cannot see it, because in the correct case there is none.
+  auto session = Session::open(options_with(2048, 256), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  session->add_user("go");
+  ASSERT_TRUE(session->prepare().has_value());
+
+  // A large assistant turn that also made a call, and a cheap result after it.
+  auto reply = reply_with_call("read", 200);
+  reply.content = std::string(2200, 'a');
+  ASSERT_TRUE(session->record(reply).has_value());
+  session->add_tool_result("read", std::string(100, 'r'));
+
+  session->add_user("next");
+  const auto request = session->prepare();
+  ASSERT_TRUE(request.has_value()) << request.error().message();
+  ASSERT_GT(session->dropped(), 0u) << "nothing was trimmed, so nothing here is tested";
+
+  EXPECT_EQ(roles_of(*session), (std::vector<std::string>{"system", "user"}))
+      << "a result outlived the call that produced it";
+  for (const auto& turn : session->turns()) {
+    EXPECT_NE(turn.message.role, "tool") << "orphaned tool result left in history";
+  }
+}
+
+TEST(SessionToolHistory, DroppedCountsTurnsNotGroups) {
+  // Documented in prepare()'s header: a session that gave up one exchange of three
+  // messages reports three, so the number stays comparable with a tool-free session.
+  auto session = Session::open(options_with(700, 100), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  session->add_user("first instruction");
+  ASSERT_TRUE(session->prepare().has_value());
+  ASSERT_TRUE(session->record(reply_with_call("read", 60)).has_value());
+  session->add_tool_result("read", std::string(400, 'x'));
+  session->add_tool_result("read", std::string(400, 'y'));
+  session->add_user("second instruction");
+  ASSERT_TRUE(session->prepare().has_value());
+
+  // user + assistant + two results = at least the three of the tool group.
+  EXPECT_GE(session->dropped(), 3u);
+}
+
+TEST(SessionToolHistory, AnOversizedToolResultIsDroppedWithItsCallRatherThanRefused) {
+  // Worth pinning precisely, because the intuitive answer is wrong. `MessageTooLarge`
+  // cannot fire for a tool result: pin_latest_user pins only `system` and the latest
+  // `user`, so a result is *always* droppable, and the trim therefore gives up the whole
+  // group instead of refusing the prompt.
+  //
+  // That is coherent history -- no orphan either way -- but it is not a good outcome,
+  // and the reason is worth stating where it is visible: the model's call and its answer
+  // both vanish, so the model re-issues the same read, gets the same oversized result,
+  // and the session makes no progress until its turn bound stops it. Two facts explain
+  // how a result gets this big at all: `read`'s cap is a filesystem-safety limit (16 MB)
+  // with no relation to a context window, and nothing in `core` knows what window it is
+  // being read into.
+  //
+  // The loop is where that is handled -- it substitutes a refusal naming the size before
+  // a result this large ever reaches history (see loop.h). This test fixes the Session
+  // half of the contract so that change cannot silently regress it.
+  auto session = Session::open(options_with(700, 100), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user("read the big one");
+  ASSERT_TRUE(session->prepare().has_value());
+  ASSERT_TRUE(session->record(reply_with_call("read", 60)).has_value());
+  session->add_tool_result("read", std::string(100000, 'x'));
+
+  const auto request = session->prepare();
+  ASSERT_TRUE(request.has_value()) << request.error().message();
+  EXPECT_GE(session->dropped(), 2u);  // the assistant call and its result, together
+
+  const auto roles = roles_of(*session);
+  EXPECT_EQ(std::count(roles.begin(), roles.end(), "tool"), 0);
+  for (const auto& turn : session->turns()) EXPECT_TRUE(turn.message.tool_calls.empty());
+}
+
+TEST(SessionToolHistory, AddingAToolResultGivesUpAnOutstandingRequest) {
+  // Same guarantee add_user carries: anything appended between prepare() and record()
+  // would reorder the conversation, so record() refuses rather than checking against a
+  // history it no longer describes.
+  auto session = Session::open(options_with(8192, 1024), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user("read a.txt");
+  ASSERT_TRUE(session->prepare().has_value());
+  session->add_tool_result("read", "[]");
+
+  const auto recorded = session->record(reply_with_call("read", 100));
+  ASSERT_FALSE(recorded.has_value());
+  EXPECT_EQ(recorded.error().kind, hermes::supervisor::SessionError::NoRequestOutstanding);
+}
+
+TEST(SessionToolHistory, ThePreparedRequestCarriesToolMessagesThroughToTheWire) {
+  auto session = Session::open(options_with(8192, 1024), client_with(65536), "sys");
+  ASSERT_TRUE(session.has_value());
+  session->add_user("read a.txt");
+  ASSERT_TRUE(session->prepare().has_value());
+  ASSERT_TRUE(session->record(reply_with_call("read", 100)).has_value());
+  session->add_tool_result("read", R"([{"path":"a.txt"}])");
+
+  const auto request = session->prepare();
+  ASSERT_TRUE(request.has_value());
+  ASSERT_EQ(request->messages.size(), 4u);
+  EXPECT_EQ(request->messages[2].role, "assistant");
+  EXPECT_EQ(request->messages[2].tool_calls.size(), 1u);
+  EXPECT_EQ(request->messages[3].role, "tool");
+  EXPECT_EQ(request->messages[3].tool_name, "read");
+}

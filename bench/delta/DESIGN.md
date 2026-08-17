@@ -6,7 +6,7 @@ overturn conditions are recorded here first, in the same discipline
 retracted, and a headline delta that sat inside the noise floor got corrected. This
 document exists so neither happens again.
 
-**Status: design only. Runs are blocked on [ROUTING.md](../../ROUTING.md) §12 steps 4–5**
+**Status: design only. Runs are blocked on [ROUTING.md](../../ROUTING.md) §12 steps 5–6**
 (the agent loop and `mcp.cpp`) — which is deliberate: this suite is those steps' first
 real workout, and the proof gate for shipping them.
 
@@ -74,7 +74,7 @@ written before any run, graded from the filesystem with the same R3 machinery th
 is built on. Never from the transcript: "the file still exists" once passed while the
 content had been destroyed, and that lesson is load-bearing here.
 
-ROUTING.md §12 step 7's scheduled fsops re-run **is** E1's arm A — same tasks, same
+ROUTING.md §12 step 8's scheduled fsops re-run **is** E1's arm A — same tasks, same
 model, same machine, collected once, used twice.
 
 ## The guardrails, pre-registered

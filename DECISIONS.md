@@ -75,9 +75,16 @@ template-heavy diagnostics for no additional safety.
 - **R1 becomes structural.** Parsing an argument produces a `SandboxPath`, which only
   `Sandbox::resolve` can construct. A tool physically cannot name a file outside the root, so
   the check cannot be forgotten at tool #37.
-- **R2 drift becomes unrepresentable.** The schema sent to Ollama as `format` and the parser
-  that reads the reply come from one declaration. Hand-maintained, they disagree eventually —
-  a field added to one and not the other fails silently, which is the worst way to fail.
+- **R2 drift becomes unrepresentable.** The schema sent to Ollama and the parser that reads
+  the reply come from one declaration. Hand-maintained, they disagree eventually — a field
+  added to one and not the other fails silently, which is the worst way to fail.
+
+  > **Corrected 2026-08-17.** This said *"the schema sent to Ollama as `format`"*, which
+  > [D12](#d12--tool-calls-are-native-format-is-never-sent-alongside-tools) has since
+  > falsified: descriptors render into the **`tools`** array, and `format` is never sent
+  > beside it. The guarantee itself is unchanged and now has a second consumer rather than
+  > one — `supervisor/wire.cpp` renders the same descriptors to both the `tools` entry and
+  > the MCP definition. Only the destination was wrong.
 
 **What would overturn it.** A toolchain with working static reflection; the descriptor lists
 would then be deletable, and D4 collapses into the simpler full-generation design.
@@ -108,6 +115,19 @@ be sold as doing more than it does.
 *quality* on the models actually used — a real risk, since constrained decoding narrows the
 distribution the model samples from. Worth measuring on the fsops harness rather than assuming
 either way.
+
+> **⚠ Overturned in part, 2026-08-17, by the measurement this paragraph asked for. See
+> [D12](#d12--tool-calls-are-native-format-is-never-sent-alongside-tools).**
+>
+> It was measured on the fsops model set, and the degradation is not marginal: adding `format`
+> alongside `tools` takes four of seven models from a correct call to no usable call at all,
+> `llama3.2:3b` — the source of the evidence above — included.
+>
+> **What this decision got right** is that malformed tool arguments are a real failure class
+> worth a structural answer. **What it got wrong** is the mechanism: `format` is not how tool
+> arguments get constrained, because it is not composable with tool calling. D12 keeps the goal
+> and changes the means, and `format` keeps its job for structured *replies* with no tools
+> offered — Tier 1's shape — where it was re-measured working.
 
 ## D6 — The sandbox is a capability type, and resolution is POSIX-order
 
@@ -691,6 +711,91 @@ accepted in steady state.
 
 ---
 
+## D12 — Tool calls are native; `format` is never sent alongside `tools`
+
+**Decided 2026-08-17**, building Phase 2's agent loop, from measurement rather than reasoning.
+
+Tool calls go over Ollama's native `tools` array and come back in `message.tool_calls`. The
+`format` schema is **never** sent in the same request. On `ChatRequest` the two are a
+`std::variant`, so sending both is unrepresentable rather than merely discouraged.
+
+**Why, and this is the whole argument.** `format` and `tools` are not complementary. Measured on
+`cachyos-x8664` (RTX 5080 Laptop 16 GB), Ollama 0.32.9 — the same version every other figure in
+this file was taken on — temperature 0, two repeats each, one `write` tool offered against a
+`format` schema describing that very same call:
+
+| model | `tools` alone | `tools` + `format` |
+|---|---|---|
+| `qwen3.5-9b` | correct | correct — `format` ignored, `eval_count` identical |
+| `qwen3.5-4b` | correct | correct — `format` ignored, `eval_count` identical |
+| `gemma4-e4b` | correct | correct |
+| `llama3.2-3b` | correct | **corrupt arguments** |
+| `llama3.1-8b` | correct | **corrupt arguments** |
+| `hermes3-8b` | correct | **no call at all** |
+| `granite4-7b` | correct | **no call at all** |
+
+Seven of seven models emit a correct call with `tools` alone. **Four of seven break when `format`
+is added**, in two distinct ways:
+
+- **Corrupt arguments.** The model generates JSON conforming to the `format` schema, and Ollama's
+  template tool-parser then treats that whole object as the call's arguments — `{"tool": "write",
+  "path": "hello.txt", "content": "HERMES-OK"}`. Well-formed, dispatchable, and wrong. With a
+  schema *unrelated* to the tool the corruption is total: the arguments came back as
+  `{"quokka": 0, "verdict": "{\"name\":\"write\",\"parameters\":{...}"}` — the real call
+  buried inside a string.
+- **No call at all.** The schema-conforming JSON lands in `content` and `tool_calls` is empty.
+
+**The second failure is R2's own failure, reintroduced by R2's own mechanism.** R2 was written
+because `llama3.2:3b` *"emitted a whole tool call as plain prose that was never parsed as a call"*.
+That is precisely what `hermes3-8b` and `granite4-7b` do here when `format` is added. And the model
+whose misbehaviour supplied R2's evidence — `llama3.2:3b` — is itself one of the four that break.
+
+**So D5's stated overturn condition is met, by its own terms.** D5 asked for *"evidence that
+constraining `format` measurably degrades tool-call quality on the models actually used"*, and
+called that a real risk worth measuring on the fsops harness rather than assuming either way.
+Measured: 100% → 0% on four of the seven models in that harness.
+
+**What survives of D5, and it is not a consolation prize.** `format` works as documented when no
+tools are offered. So D5 is *retargeted*, not overturned: `format` is the mechanism for a
+structured **reply**, which is what Tier 1's `triage` and `summarize` will want, and it has no
+business on the tool-argument path.
+
+> **Independently re-measured 2026-08-17.** A second pass, designing its own probes, reproduced
+> the table above cell for cell: 7 of 7 correct with `tools` alone, the same two `CORRUPT ARGS`
+> models, the same two `NO CALL` models, and qwen's byte-identical `eval_count` between the two
+> conditions. Two things it corrected, both mine:
+>
+> - **"a clean reply on every model" was too strong.** `gemma4-e4b` returned *empty* content and
+>   no calls, 3 of 3 reproductions, when a tool-flavoured system prompt is paired with **no**
+>   tools offered: it spends its whole budget in `thinking` and hits EOS before emitting the
+>   schema. With a neutral system prompt it answers correctly. So the retargeting holds, but it
+>   is prompt-sensitive on at least one model rather than universal, and a Tier 1 caller must not
+>   assume otherwise.
+> - **The unrelated-schema mechanism does not reproduce.** This entry described `llama3.2-3b`
+>   returning a `write` call whose arguments were the alien object *with the real call buried in a
+>   string* — which is what one run showed. The re-measurement got no call at all, and no trace of
+>   `write` anywhere in the output. Both observations are real; the *breakage* is robust and the
+>   *shape* of it is not, so nothing should be built on the shape.
+
+**What replaces it there.** R2's intent — arguments that are structurally valid — is met by two
+things that do not fight the model:
+
+1. The model's own trained tool-call channel, which is what the 7-of-7 column measures.
+2. `parse_args` failing closed against the declaration, which is where the schema leakage above
+   is caught: `tool` is refused as an unknown argument, by name, in a message the model can act
+   on. There is a test asserting exactly that, so the D12 story stays executable.
+
+Note what is *not* claimed. This does not make arguments correct, only well-formed — the same
+limit D5 stated about itself. A well-formed call to delete the wrong file is untouched, and that
+is still what the supervisor is for.
+
+**What would overturn it.** A future Ollama that honours `format` and `tools` together coherently
+on every model in use — in which case the variant becomes one line, and the table above becomes
+the reason it existed. Re-measure before believing a release note; this behaviour is not
+documented either way, which is why it had to be probed.
+
+---
+
 ## Still open
 
 ### ~~Which chat endpoint~~ — settled as D8
@@ -717,7 +822,7 @@ and answers both halves, which is why this is no longer open:
 Revisit only if the threat model widens to an actor with prior filesystem access, which is a
 larger change than this entry.
 
-### The trim loop and tool results
+### ~~The trim loop and tool results~~ — closed 2026-08-17, when Phase 2 made it real
 
 **Noticed 2026-08-15**, from Prime Agent's compaction rules. Their cut-point selection never cuts
 at a tool result, because a result must stay with the call that produced it.
@@ -732,6 +837,151 @@ It bites the moment Phase 2 adds tool messages. A trim that drops a result while
 call leaves the model looking at an orphaned request, and the reliable response to that is to
 re-issue it — which is the repeat-call loop the supervisor exists to break. Recorded here rather
 than fixed, because there is nothing yet to fix.
+
+**Phase 2 arrived, and this is now fixed rather than noted.** The unit of dropping is a *group*:
+an assistant turn carrying `tool_calls` together with every `tool` turn immediately following it.
+`prepare()` erases groups, never turns, so neither half of the split can happen. `dropped()` still
+counts turns, so the number stays comparable with a tool-free session.
+
+Two things this entry did not anticipate, both found while fixing it:
+
+- **`record()` was dropping `reply.tool_calls` on the floor.** The assistant turn went into
+  history as `{role, content}` only, so the call was never *in* history to be orphaned — the
+  model would have seen results with no visible request from the very first turn, before any
+  trimming. Grouping alone would not have helped; the calls had to be carried too.
+- **An oversized tool result cannot be refused by the Session, and is silently dropped.**
+  `pin_latest_user` pins only `system` and the latest `user`, so a result is *always* droppable;
+  a result too large for the whole budget therefore takes its own call down with it, and the
+  model — seeing neither — re-issues the same call and gets the same result. Coherent history, no
+  progress. The loop substitutes a refusal naming the size before such a result reaches history
+  (`result_is_hopeless`), which converts it into one line the model can act on. The underlying
+  mismatch is left open and named: `read`'s cap is a 16 MB filesystem-safety limit with no
+  relation to any context window. Both it and the window are supervisor-supplied configuration
+  in the sense ROUTING.md §9 describes — §9 itself is about per-machine settings and names
+  neither — so wiring the cap to the window is a composition decision nobody has made yet.
+
+### Tool definitions vanish from some templates after a tool result
+
+**Measured 2026-08-17**, building the agent loop, and it is a model-selection criterion
+rather than a bug in anything this repo owns.
+
+Ollama 0.32.9, one `read` tool offered, comparing the prompt with and without the `tools`
+array so the difference is the definitions themselves:
+
+| model | tools cost, user last | tools cost, tool result last | |
+|---|---|---|---|
+| `qwen3.5-9b` | +267 | +267 | kept |
+| `qwen3.5-4b` | +267 | +267 | kept |
+| `hermes3-8b` | +208 | +208 | kept |
+| `granite4-7b` | +162 | +162 | kept |
+| `gemma4-e4b` | +55 | +55 | kept |
+| `llama3.2-3b` | +133 | **+31** | **lost** |
+| `llama3.1-8b` | +146 | **+42** | **lost** |
+
+On the two stock Meta llama3.x instruct templates the definitions are not rendered when
+the last message is a `tool` result — exactly the turn on which the model must decide
+whether to call another tool. It is a property of the **template, not the architecture**:
+`hermes3-8b` is llama3.1 underneath and keeps its definitions, because Nous ships its own
+template.
+
+**The mechanism, read out of the template rather than inferred from token counts** (added
+2026-08-17, and it is what turns this from a measurement into an explanation). In llama3.2's
+and llama3.1's Go templates the `{{ range $.Tools }}` block sits inside
+`{{- if and $.Tools $last }}`, itself nested under `{{- if eq .Role "user" }}`. It therefore
+renders only for a message that is **both** role `user` **and** the last message. A
+conversation ending in a `tool` result satisfies neither, for any message, so the block
+renders nowhere. Confirmed directly with `ollama show --template`. By contrast hermes3 gates
+its tools block on `{{- if .Tools }}` alone, granite4 builds one system message unconditionally,
+and qwen3.5 and gemma4 do the same in Jinja — none of them consult the last message's role.
+
+**On the absolute numbers:** they are setup-dependent — a re-measurement with a differently
+worded tool got +275/+275 where this table has +267/+267, and +139 where this has +133. What
+reproduced *exactly* were the two figures that matter, `llama3.2-3b` at **+31** and
+`llama3.1-8b` at **+42** when a tool result is last. Read the pattern, not the digits.
+
+**The failure it produces was seen before it was explained** — once. A live `hermes-cpp agent`
+run on `llama3.2-3b` sent an 832-token prompt on turn 1 and a **160**-token prompt on turn
+2 — smaller, while history had grown — and the model answered with a tool call written as
+prose: `{"name": "read", "parameters": {"paths": "['colors.txt', 'count.txt']"}}`. A
+Python-style list inside a string, which is verbatim the failure R2 was written about. The
+672-token drop is consistent with eight tool definitions going missing, which is what was
+being offered — an inference from one before/after pair, not a repeat of the controlled
+single-tool measurement above.
+
+> **That prose failure did not reproduce, and the honest reading is narrower.** An independent
+> pass asked both affected models to re-call a tool after a tool result and got proper
+> `tool_calls` every time. Pushed harder — asked for a tool *never used in that conversation*,
+> so the model could not imitate its own earlier call — `llama3.2-3b` still emitted a
+> structured call but with a **hallucinated argument name**, using `paths` (borrowed from the
+> `read` schema it remembered) where `write` declares `path`. `llama3.1-8b` got it right both
+> times despite losing its definitions on the same turn shape.
+>
+> So: definitions absent does **not** mean tool calling collapses. It means the model is
+> working from memory of the schema, which degrades on tools it has not just seen — sometimes
+> into a wrong argument name, once into prose. That is a weaker and better-supported claim than
+> the single run suggested, and it is the one to design against.
+
+Worth noting against [D5](#d5--constrained-decoding-on-from-the-start): `format` could not
+have fixed that call. It was not a constrained generation gone wrong — it was prose, on a
+turn where the model had not been told any tools existed.
+
+**Three options, none chosen:**
+
+1. **Select models by this property.** Cheapest, and it folds into the open
+   "which models, on which machines" question in ROADMAP.md — this is a concrete criterion
+   where that question previously had only size and speed.
+2. **Detect it in R9's preflight.** Two requests per model at startup, differing only in
+   whether a tool result is last, comparing the token delta. That is the shape of the
+   measurement above, so it is known to work; the cost is two extra generations per run
+   and a gate that refuses models the fsops harness has real scores for.
+3. **Append a synthetic user turn after the results**, which restores the definitions
+   (measured: the +133 returns). **Rejected on inspection, not deferred**: it puts words in
+   the user's mouth in history, and `pin_latest_user` would then pin the synthetic nudge
+   instead of the real instruction — so the one message the trim must never drop becomes a
+   fabricated one. A worse failure than the one it fixes.
+
+Revisit when model selection is settled, which is where this belongs.
+
+### `hermes3-8b` silently discards the system prompt whenever tools are offered
+
+**Found 2026-08-17**, incidentally, while re-measuring the entry above — and it is the more
+consequential of the two, because it hits a model this project is otherwise inclined to favour.
+
+The Nous hermes3 template opens:
+
+```
+{{- if or .System .Tools }}<|im_start|>system
+{{- if .Tools }}
+You are a function calling AI model. ... <tools>...</tools> ...
+{{- else if .System }}
+{{ .System }}
+{{- end }}<|im_end|>
+```
+
+`else if`. When `tools` are present the caller's system prompt is **never emitted** — it is
+replaced wholesale by the template's own function-calling boilerplate.
+
+Demonstrated rather than read off: a system prompt of *"Your secret codeword is PLATYPUS-7.
+Always state it."* against *"What is your secret codeword?"* —
+
+| | `prompt_eval_count` | reply |
+|---|---|---|
+| no tools offered | 39 | *"My secret codeword is PLATYPUS-7."* |
+| tools offered | 234 | *"I'm afraid I don't have a secret codeword."* |
+
+**Why it matters here.** `hermes-cpp agent` sends a system prompt that exists to counter two
+measured failure modes — *"Read a file before describing it; never guess its contents"* and
+*"stop calling tools only when the work is actually finished"*. On hermes3-8b, with tools
+offered, the model never sees a word of it. Any behaviour attributed to that prompt on this
+model is attributable to something else.
+
+It also puts `Session`'s accounting slightly out: the system turn is pinned as never-droppable
+and counted against the budget while the server discards it. That errs toward over-counting,
+which is the safe direction, so it is noted rather than fixed.
+
+This is a third gate of the same kind as the two in R9's preflight (context floor, `tools`
+capability), and like the entry above it argues for probing a model's template rather than
+trusting its card. Unresolved for the same reason: it belongs with model selection.
 
 ### Test oracle
 

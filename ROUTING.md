@@ -236,7 +236,7 @@ content hash and the fresh identity tuple, in `list`'s currency, so the result i
 usable as the next expected value. Durability is deliberately unclaimed: no fsync — R5 verifies
 content and R4 keeps the old bytes recoverable, and a crash-durability guarantee would be a
 DECISIONS.md entry, not a flag. Publication — parent creation, `link`, `rename` — is path-based
-until §12 step 4 widens the funnel to it; the interior-component window that leaves open, and
+until §12 step 5 widens the funnel to it; the interior-component window that leaves open, and
 why D10 does not backstop it, is recorded there.
 
 ### `shell` — kept, and it is a special case
@@ -359,9 +359,14 @@ that already has `nlohmann`. D4's one-declaration guarantee survives intact — 
 is not in `core`.
 
 That guarantee then extends further than D4 claimed. One descriptor list emits **both** the
-schema sent to Ollama as `format` (D5's constrained decoding) **and** the MCP tool definition the
+tool definitions offered to Ollama in its `tools` array **and** the MCP tool definition the
 programmatic caller reads. There is no second schema to keep in sync, so R2 drift stays
 unrepresentable across the MCP surface too.
+
+(Both said *"as `format`"* until 2026-08-17. [D12](./DECISIONS.md) settled that `format` cannot
+be sent beside `tools` at all, so the destination named here was wrong — not the guarantee.
+`supervisor/wire.cpp` is the renderer, and `tool_definitions()` is the one function both
+surfaces go through.)
 
 ---
 
@@ -548,7 +553,7 @@ in this codebase**.
 
 ## 12. Next steps
 
-Ordered. Steps 1–4 are Phase 2 and 2.5 as already written; only the tool list is new.
+Ordered. Steps 1–5 are Phase 2 and 2.5 as already written; only the tool list is new.
 
 1. ~~**Add the two link edges**~~ (§7) — `supervisor → core`, `app → supervisor`. Prerequisite
    for everything below, because they decide which target `tool.h` can live in. **Done
@@ -561,8 +566,17 @@ Ordered. Steps 1–4 are Phase 2 and 2.5 as already written; only the tool list 
    surface (`read`, `hash`, `list`, `find`, `grep`) and the mutating trio (`write`, `edit`,
    `move`), with `ObservedState` carrying §4's staleness table, the backup store outside the
    root, and the settled semantics recorded in §4. `shell` is deliberately not among them —
-   it waits on D7's gate (step 4), per §8.
-4. **Clear D7's gate, which is two conditions and not one.**
+   it waits on D7's gate (step 5), per §8.
+4. ~~**The agent loop**~~ — not in this list when it was written, because §12 tracks the tool
+   surface and the loop is Phase 2's own bullet. Recorded here anyway, since the steps below now
+   build on it. **Done 2026-08-17**: `supervisor/loop.cpp` drives the turn, `supervisor/wire.cpp`
+   is the JSON bridge §7 above specified, `app/toolset.cpp` composes the eight tools in the order
+   §4 lists them, and tool calls reached the wire for the first time under
+   [D12](./DECISIONS.md) — which settled that `tools` and `format` cannot both be sent, and made
+   the combination unrepresentable rather than discouraged. `shell` is still absent, waiting on
+   step 5.
+
+5. **Clear D7's gate, which is two conditions and not one.**
    ⚠️ Both are required before the programmatic frontend ships; a programmatic caller is exactly
    the one D6's threat model did not cover.
    - **Kernel confinement** — vendor D10's Landlock routine, `fork` → restrict → `exec`, one
@@ -593,12 +607,16 @@ Ordered. Steps 1–4 are Phase 2 and 2.5 as already written; only the tool list 
      model — can exploit it. Clearing this gate therefore means converting publication to
      `mkdirat`/`linkat`/`renameat2` under the same walked root descriptor, not just swapping
      `open_in_root`'s body. Until then the window is accepted *and named*, here.
-5. **`mcp.cpp`** in `app`. Callable from here on.
-6. **Tier 1** (`triage`, `summarize`) in `supervisor`, once model selection is settled.
+6. **`mcp.cpp`** in `app`. Callable from here on. Cheaper than it was: the tool definitions it
+   must publish are already rendered by `supervisor/wire.cpp`, from the same descriptors, so
+   D4's one-declaration guarantee reaches the MCP surface without a second schema.
+7. **Tier 1** (`triage`, `summarize`) in `supervisor`, once model selection is settled. Note
+   [D12](./DECISIONS.md): these are the callers `format` is *for* — a structured reply with no
+   tools offered, which is the one configuration it was re-measured working in.
 
 Independent of the above, and cheap:
 
-7. **Re-run `bench/fsops/`.** Both sweep documents carry the banner *"Re-run before treating
+8. **Re-run `bench/fsops/`.** Both sweep documents carry the banner *"Re-run before treating
    any per-task number as settled."* Per [NEXT-RUN.md](./bench/fsops/NEXT-RUN.md):
    - The working-tree escape is **already fixed** — runs now live in `~/.cache/hermes-fsops/runs`,
      outside any git repo. The published scores simply predate that fix.
@@ -611,12 +629,12 @@ Independent of the above, and cheap:
      single-task diagnostic only.
    - `gemma-e4b` still has no data and is now unblocked — the tag is present locally.
 
-   This is what turns the model-selection question in step 6 into a measurement. The re-run
+   This is what turns the model-selection question in step 7 into a measurement. The re-run
    also doubles as the baseline arm of `bench/delta`'s reliability experiment — same tasks,
    same model, collected once, used twice; design in
    [bench/delta/DESIGN.md](./bench/delta/DESIGN.md).
 
-8. **The substrate probe** ([D11](./DECISIONS.md#d11--the-substrate-is-probed-not-assumed)) —
+9. **The substrate probe** ([D11](./DECISIONS.md#d11--the-substrate-is-probed-not-assumed)) —
    independent of every step above and needs no link edge, because it touches no model and no
    network. It validates §4's identity tuple against the ground it is actually standing on,
    which is a Linux concern today (`/mnt/c`, network mounts, `tmpfs`, overlayfs) and not a

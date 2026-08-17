@@ -309,12 +309,38 @@ class Session {
 
   void add_user(std::string content);
 
+  /// Append one tool result, in the order the calls were made.
+  ///
+  /// Must follow the `record()` of the assistant turn that asked for it -- a result
+  /// whose call is not in history leaves the model answering a question it cannot see.
+  /// The loop calls this once per entry in `ChatReply::tool_calls`, including repeats:
+  /// measured, llama3.2-3b asked to `read a.txt` twice in one turn, and answering only
+  /// the first would leave a call unanswered.
+  ///
+  /// `content` is already-rendered JSON from `wire.h` -- either the rows or an
+  /// `{"error": ...}` object. This class does not know or care which.
+  void add_tool_result(std::string tool_name, std::string content);
+
   /// The messages to send, compacted to fit if they did not.
   ///
   /// Drops the oldest unpinned turns until the prompt fits, recording how many went.
   /// Deliberately *not* summarisation: what to summarise and when is an open question
   /// in ROADMAP.md, and quietly answering it here would be the wrong place. Dropping is
   /// the honest interim policy, and the count is exposed so it cannot happen unnoticed.
+  ///
+  /// **A call and its results are dropped together, never separately.** This was
+  /// recorded as an open hazard in DECISIONS.md before tool messages existed, and it is
+  /// the reason the unit of dropping is a group rather than a turn. Both halves of the
+  /// split are harmful, and the second is the one that matters:
+  ///
+  ///   - a result whose call is gone is a claim about nothing, and
+  ///   - a call whose result is gone reads as still outstanding, and the reliable
+  ///     response to an outstanding call is to re-issue it -- which is the repeat-call
+  ///     loop this whole project exists to break.
+  ///
+  /// So the erase unit is: an assistant turn carrying `tool_calls`, plus every `tool`
+  /// turn immediately following it. `dropped()` counts turns, not groups, so a session
+  /// that gave up one exchange of three messages reports three.
   [[nodiscard]] SessionResult<ollama::ChatRequest> prepare();
 
   /// Append the reply, verify the prompt was not discarded, and calibrate the estimate.

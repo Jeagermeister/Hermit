@@ -80,11 +80,20 @@ server", and it is the ecosystem's own warning inverted: a typical stdio MCP ser
 *all* the launching user's authority; this is the one that **reduces** authority instead of
 inheriting it.
 
-**Status, honestly** (2026-08-16): the second half of these stories is built — the sandbox, all
+**Status, honestly** (2026-08-17): the second half of these stories is built — the sandbox, all
 eight Tier 0 tools with per-call verification, the staleness guard, and the backup store are
-merged and tested. The first half — the loop that drives the local model, and the MCP server —
-is [ROUTING.md](./ROUTING.md) §12 steps 4–5, the next work. Until then the stories describe the
-destination, and §12 is the honest odometer.
+merged and tested. **The loop that drives the local model is now built too**, so a whole story
+runs end to end: `hermes-cpp agent` takes one instruction, offers the eight tools to a local
+model, dispatches what it asks for, and stops on a turn or wall-clock bound.
+
+What is still missing is the part that makes it a *supervisor* rather than a tool runner. The loop
+stops when the model stops asking for tools — which is trusting a completion claim, and R6 exists
+because that claim is often false. Nothing yet polls the filesystem to check the work, and nothing
+re-invokes with one concrete remaining failure (R7). That is Phase 3, and it is the difference
+between "the model said it was done" and "the work is done". The MCP frontend is
+[ROUTING.md](./ROUTING.md) §12 step 6.
+
+So: the stories' mechanics run; their *guarantees* do not yet. §12 remains the honest odometer.
 
 ## Why native code, honestly
 
@@ -112,8 +121,8 @@ The evidence sits in two places, across two machines and two agent harnesses:
 | `src/hermes/core/` | Library code. `sandbox` (R1), `tool` (D4's interface), `fsio` (the one open primitive), `sha256` (R3's hash), `observed` (the staleness guard), `backup` (R4's archive) |
 | `src/hermes/core/tools/` | The eight Tier 0 tools — read, list, find, grep, hash, write, edit, move — [ROUTING.md](./ROUTING.md) §4's surface, verified per call |
 | `src/hermes/ollama/` | The only layer that speaks HTTP: client and R9 preflight |
-| `src/hermes/supervisor/` | Bounded sessions and the context budget ([D7](./DECISIONS.md)'s middle layer) |
-| `src/hermes/app/` | Configuration, shared by the CLI and the coming MCP frontend |
+| `src/hermes/supervisor/` | The turn: `loop` (dispatch and the R8 bounds), `session` (history and the context budget), `wire` (the JSON bridge between `core`'s pure data and the model) — [D7](./DECISIONS.md)'s middle layer |
+| `src/hermes/app/` | `config` and `toolset` (composing the eight tools), shared by the CLI and the coming MCP frontend |
 | `src/main.cpp` | `hermes-cpp` — manual harness for the pieces that exist |
 | `tests/` | GoogleTest suite; run with `ctest` |
 | `DECISIONS.md` | The hard-to-reverse choices, and what would overturn each |
@@ -147,7 +156,21 @@ The binary is a manual harness for the pieces that exist, not the product's CLI:
 hermes-cpp resolve   --root DIR <path>...   # R1 path resolution
 hermes-cpp preflight --model NAME           # R9 model gates, against a live daemon
 hermes-cpp session   --model NAME           # context accounting, against a live model
+hermes-cpp agent     --root DIR --model NAME <instruction>   # the loop, end to end
 hermes-cpp config                           # every setting in force, and where it came from
+```
+
+`agent` is the whole turn: one instruction, the eight tools offered to a local model, one line of
+trace per turn and per call, and a summary that says which bound stopped it. Three bounds, not
+two: `--max-turns`, `--budget` wall-clock (R8), and a per-turn cap on how many calls one reply may
+make — the third is a runaway guard rather than a knob, and calls past it are refused rather than
+dropped, because a dropped call reads to the model as still outstanding. It prints, in so many
+words, that a clean stop is not evidence the work is correct — R6 is not satisfied yet, and a
+command that implied otherwise would be the more useful lie.
+
+```bash
+hermes-cpp agent --root ~/scratch --model qwen35-agent --max-turns 8 \
+  'Read notes.txt and tell me how many lines it has.'
 ```
 
 `resolve` shows how paths land against a sandbox root from a *different* working directory —

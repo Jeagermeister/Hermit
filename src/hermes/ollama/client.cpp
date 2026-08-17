@@ -6,6 +6,7 @@
 #include <charconv>
 #include <string>
 #include <utility>
+#include <variant>
 
 #include <httplib.h>
 
@@ -35,13 +36,6 @@ Failure transport_failure(httplib::Error error, std::string_view what) {
 /// nlohmann's dump() throws on any byte that is not valid UTF-8, and this API returns
 /// std::expected rather than throwing -- so an un-replaced dump() is not an error
 /// path, it is std::terminate. That matters here more than in most codebases: the
-/// supervisor's whole job is feeding file contents and tool output back to a model,
-/// and one latin-1 or binary file would take the process down. Invalid bytes become
-/// U+FFFD, which the model can see and reason about.
-std::string dump_lossy(const json& value) {
-  return value.dump(-1, ' ', /*ensure_ascii=*/false, json::error_handler_t::replace);
-}
-
 /// Restores the client's timeouts however the scope is left.
 ///
 /// chat() raises them for the length of one generation. Without this, an exception
@@ -117,6 +111,13 @@ std::string string_or_empty(const json& object, std::string_view key) {
 }
 
 }  // namespace
+
+/// See client.h. Declared there rather than kept private here because `wire.cpp` renders
+/// the same untrusted bytes -- tool output -- and reintroduced this exact crash by
+/// spelling `dump()` itself. One definition is the only way that stops recurring.
+std::string dump_lossy(const json& value) {
+  return value.dump(-1, ' ', /*ensure_ascii=*/false, json::error_handler_t::replace);
+}
 
 std::string_view to_string(TransportError e) noexcept {
   switch (e) {
@@ -255,6 +256,72 @@ Result<std::vector<ModelTag>> parse_tags(const json& body) {
   return found;
 }
 
+std::vector<ToolCall> parse_tool_calls(const json& calls) {
+  std::vector<ToolCall> found;
+  if (!calls.is_array()) return found;
+  found.reserve(calls.size());
+
+  for (const auto& entry : calls) {
+    if (!entry.is_object()) continue;
+
+    const auto function = entry.find("function");
+    if (function == entry.end() || !function->is_object()) continue;
+
+    ToolCall call;
+    call.name = string_or_empty(*function, "name");
+
+    // A call with no name cannot be dispatched. Propagating it as a half-value would
+    // only move the failure to the registry lookup, where the diagnostic is worse.
+    if (call.name.empty()) continue;
+
+    call.id = string_or_empty(entry, "id");
+
+    // Absent or non-object arguments become an empty object rather than a parse
+    // failure. What a missing argument means depends on the tool's own declaration,
+    // which this layer does not have; parse_args refuses it there, with the argument
+    // name in hand (ROUTING.md section 7).
+    if (const auto args = function->find("arguments");
+        args != function->end() && args->is_object()) {
+      call.arguments = *args;
+    } else {
+      call.arguments = json::object();
+    }
+
+    found.push_back(std::move(call));
+  }
+  return found;
+}
+
+/// The wire shape for one call in an assistant turn's history.
+///
+/// Rebuilt from parsed values rather than echoed verbatim -- the server's own object
+/// also carries `function.index`, which this does not keep. Verified 2026-08-17 that
+/// the reconstruction is faithful: across all five models probed, `prompt_eval_count`
+/// was identical for the verbatim echo, this shape, and this shape with `id` omitted
+/// (qwen3.5-9b 366, llama3.2-3b 132, hermes3-8b 290, granite4-7b 251, gemma4-e4b 145).
+/// So the prompt renders byte-identically and no template reads a field dropped here.
+json render_tool_call(const ToolCall& call) {
+  return json{{"id", call.id},
+              {"type", "function"},
+              {"function", {{"name", call.name}, {"arguments", call.arguments}}}};
+}
+
+json render_message(const ChatMessage& message) {
+  json rendered{{"role", message.role}, {"content", message.content}};
+
+  // Both fields are omitted when empty rather than sent as null or []. An empty
+  // `tool_calls` on every user turn is noise the template may or may not tolerate,
+  // and there is no reason to find out.
+  if (!message.tool_name.empty()) rendered["tool_name"] = message.tool_name;
+  if (!message.tool_calls.empty()) {
+    json calls = json::array();
+    calls.get_ref<json::array_t&>().reserve(message.tool_calls.size());
+    for (const auto& call : message.tool_calls) calls.push_back(render_tool_call(call));
+    rendered["tool_calls"] = std::move(calls);
+  }
+  return rendered;
+}
+
 json build_chat_options(const ChatRequest& request, std::uint64_t max_num_ctx) {
   json options{{"temperature", request.temperature}};
   if (request.max_tokens) options["num_predict"] = *request.max_tokens;
@@ -266,6 +333,42 @@ json build_chat_options(const ChatRequest& request, std::uint64_t max_num_ctx) {
   if (request.num_ctx) options["num_ctx"] = std::min(*request.num_ctx, max_num_ctx);
 
   return options;
+}
+
+json build_chat_payload(const ChatRequest& request, std::uint64_t max_num_ctx) {
+  json messages = json::array();
+  // Reserved rather than grown 1->2->4->8. Irrelevant for preflight's single nine-byte
+  // message, but this is the agent loop's hot path once file contents flow through it,
+  // where the payload is held three times over anyway (this array, the DOM, the dumped
+  // string) and doubling reallocations on top of that is pure waste.
+  messages.get_ref<json::array_t&>().reserve(request.messages.size());
+  for (const auto& message : request.messages) {
+    messages.push_back(render_message(message));
+  }
+
+  json payload{
+      {"model", request.model},
+      {"messages", std::move(messages)},
+      {"options", build_chat_options(request, max_num_ctx)},
+      {"stream", false},  // D1: blocking and single-threaded, so there is nothing to stream into
+  };
+
+  // D12: one or the other, never both -- the variant is what makes that structural,
+  // and this switch is the only place either key is written. `format` takes the schema
+  // directly on the native endpoint, with no OpenAI-style
+  // {"type":"json_schema","json_schema":{...}} wrapper around it.
+  if (const auto* tools = std::get_if<ChatRequest::Tools>(&request.constraint)) {
+    if (!tools->definitions.empty()) {
+      json definitions = json::array();
+      definitions.get_ref<json::array_t&>().reserve(tools->definitions.size());
+      for (const auto& definition : tools->definitions) definitions.push_back(definition);
+      payload["tools"] = std::move(definitions);
+    }
+  } else if (const auto* schema = std::get_if<ChatRequest::Schema>(&request.constraint)) {
+    payload["format"] = schema->schema;
+  }
+
+  return payload;
 }
 
 Result<ChatReply> parse_chat_reply(const json& body) {
@@ -289,10 +392,14 @@ Result<ChatReply> parse_chat_reply(const json& body) {
   reply.finish_reason = string_or_empty(body, "done_reason");
 
   // A model that returns only tool calls sends content: null, which is a legitimate
-  // reply and not a parse failure. Tool calls themselves land in Phase 2 with the
-  // agent loop; this reads the text half only.
+  // reply and not a parse failure -- and is the *usual* case for a working agent turn,
+  // measured: every correct call in the D12 table came back with content empty.
   reply.content = string_or_empty(*message, "content");
   reply.reasoning = string_or_empty(*message, "thinking");
+
+  if (const auto calls = message->find("tool_calls"); calls != message->end()) {
+    reply.tool_calls = parse_tool_calls(*calls);
+  }
 
   if (const auto prompt = body.find("prompt_eval_count"); prompt != body.end()) {
     reply.prompt_tokens = as_uint(*prompt).value_or(0);
@@ -446,25 +553,7 @@ Result<ModelCard> Client::show(std::string_view model) const {
 }
 
 Result<ChatReply> Client::chat(const ChatRequest& request) const {
-  json messages = json::array();
-  // Reserved rather than grown 1->2->4->8. Irrelevant for preflight's single nine-byte
-  // message, but this is the agent loop's hot path once file contents flow through it,
-  // where the payload is held three times over anyway (this array, the DOM, the dumped
-  // string) and doubling reallocations on top of that is pure waste.
-  messages.get_ref<json::array_t&>().reserve(request.messages.size());
-  for (const auto& message : request.messages) {
-    messages.push_back({{"role", message.role}, {"content", message.content}});
-  }
-
-  json payload{
-      {"model", request.model},
-      {"messages", std::move(messages)},
-      {"options", build_chat_options(request, options_.max_num_ctx)},
-      {"stream", false},  // D1: blocking and single-threaded, so there is nothing to stream into
-  };
-  // Constrained decoding (D5). The native endpoint takes the schema directly, with no
-  // OpenAI-style {"type":"json_schema","json_schema":{...}} wrapper around it.
-  if (request.schema) payload["format"] = *request.schema;
+  const json payload = build_chat_payload(request, options_.max_num_ctx);
 
   // Generation needs the long budget; metadata reads must not, or a wedged daemon
   // would hold startup for ten minutes instead of failing in two seconds. Scoped, so

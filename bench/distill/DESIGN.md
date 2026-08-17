@@ -57,11 +57,11 @@ re-running it is worth more than assuming either direction.
 
 | # | Gate | Why it blocks | Cleared by |
 |---|---|---|---|
-| 1 | A base model is chosen | Adapters do not transfer across bases; training before selection trains a fork of a model that may be dropped | ROUTING §12 step 7 → step 6 |
-| 2 | The recorder speaks this project's vocabulary | `proxy.py` records **upstream Hermes Agent** over `/v1/chat/completions` — tools `write_file`/`terminal`/`read_file`, and a `read_file` that decorates content with `N\|` prefixes. Hermes-Cpp uses native `/api/chat` and eight different tools. A corpus recorded today teaches tools that will never exist and a rendering [ROUTING §5](../../ROUTING.md) bans | ROUTING §12 steps 4–5, plus the agent loop |
+| 1 | A base model is chosen | Adapters do not transfer across bases; training before selection trains a fork of a model that may be dropped | ROUTING §12 step 8 → step 7 |
+| 2 | The recorder speaks this project's vocabulary | `proxy.py` records **upstream Hermes Agent** over `/v1/chat/completions` — tools `write_file`/`terminal`/`read_file`, and a `read_file` that decorates content with `N\|` prefixes. Hermes-Cpp uses native `/api/chat` and eight different tools. A corpus recorded today teaches tools that will never exist and a rendering [ROUTING §5](../../ROUTING.md) bans | ROUTING §12 steps 5–6 (the agent loop itself landed 2026-08-17) |
 | 3 | A task generator exists | Twelve task shapes is one to two orders of magnitude short of a LoRA corpus | new work, ~1 day |
 | 4 | The grader is frozen | delta's guardrail 5; the tournament's rubric was reachable from the spec alone | before any sampling |
-| 5 | E1 is collected | §1. Unrecoverable if skipped | ROUTING §12 step 7 + steps 4–5 |
+| 5 | E1 is collected | §1. Unrecoverable if skipped | ROUTING §12 step 8 + steps 5–6 |
 
 **Gate 2 is the one that surprises people.** The recorder works. It records the wrong system.
 
@@ -72,11 +72,11 @@ the reason in §1. Everything dashed is unbuilt today.
 
 ```mermaid
 flowchart TB
-    RERUN["fsops re-run<br/><i>--deterministic, n≥5</i><br/>ROUTING §12 step 7"]
-    GATE["D7 gate + mcp.cpp<br/>ROUTING §12 steps 4–5"]
+    RERUN["fsops re-run<br/><i>--deterministic, n≥5</i><br/>ROUTING §12 step 8"]
+    GATE["D7 gate + mcp.cpp<br/>ROUTING §12 steps 5–6"]
     LOOP["agent loop<br/>Phase 2"]
 
-    BASE["base model selected<br/>ROUTING §12 step 6"]
+    BASE["base model selected<br/>ROUTING §12 step 7"]
     E1["<b>E1 baseline</b><br/>arm A bare · arm B supervised"]
     REC["recorder on native /api/chat<br/>this project's eight tools"]
     GEN["tasks.py parameterised<br/>~1,000 instances"]

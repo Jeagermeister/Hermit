@@ -482,10 +482,25 @@ These are hard to reverse and benefit from being argued out before code exists:
 
 ## Phase 2 — Core loop and minimal tools
 
-- [ ] Agent loop: history, tool dispatch, bounded turns
-- [ ] `read`, `write`, `list` — **the tools exist as of 2026-08-16** ([ROUTING.md](./ROUTING.md)
-      §12 step 3); the "prove the loop end to end" half of this bullet stays open with the
-      agent-loop bullet above, which is why the box is not ticked
+- [x] ~~Agent loop: history, tool dispatch, bounded turns~~ — done 2026-08-17.
+      `src/hermes/supervisor/loop.cpp` drives `prepare() -> chat() -> record()`, dispatches every
+      call in the order the model made it, and feeds each result back as a `tool` message.
+      Bounded by turn count, wall clock (R8), **and** a per-turn cap on calls from one reply
+      (a runaway guard; calls past it are refused, never dropped), with the honest limit
+      written down: a
+      blocking single-threaded loop (D1) cannot interrupt a request already in flight, so the
+      real worst case is the budget plus one `chat_timeout`. That gap is the open
+      bounded-execution question in [DECISIONS.md](./DECISIONS.md), not a flag.
+      Three things had to be built underneath it, none of which existed: tool calls on the wire
+      ([D12](./DECISIONS.md)), the JSON bridge in `supervisor/wire.cpp` that ROUTING.md §7
+      specified but nothing had needed yet, and `app/toolset.cpp` composing the eight tools.
+- [x] ~~`read`, `write`, `list`~~ — **proved end to end 2026-08-17** against
+      `fsops-qwen3.5-9b:64k` on this laptop, sanitizers on and clean. The run worth recording is
+      the one nobody scripted: asked to overwrite an existing file, the model's `write` was
+      *refused* by the observed-state gate — "exists but was never read this session" — so it
+      read the file and retried, and the second call succeeded. R4 preserved the old bytes to
+      generation `0000` outside the root. That is §4's staleness table, R4 and R5 all working
+      under a real model rather than under a test.
 - [x] ~~`edit`~~ — done 2026-08-16, with the exactly-once occurrence rule and the
       observed-state gate recorded in [ROUTING.md](./ROUTING.md) §4; "hardest to get right"
       held up, which is why its semantics were argued before its code
@@ -514,7 +529,7 @@ model calling this as a tool.
       component-walking for in-root correctness. D6 accepted the race against a "confused 3B
       model" threat model; a callable frontend changes that model, so both are a gate rather
       than cleanup. Confinement alone is not enough — an in-root redirection is invisible to
-      the kernel and is D6's own worked example. [ROUTING.md](./ROUTING.md) §12 step 4 carries
+      the kernel and is D6's own worked example. [ROUTING.md](./ROUTING.md) §12 step 5 carries
       the implementation detail, including the grant set and the denied-write probe.
 - [x] ~~**Decide the hardlink answer**~~ — decided with D10, recorded under "Still open" in
       [DECISIONS.md](./DECISIONS.md): creation is blocked by the one-writable-root rule; a link
@@ -538,8 +553,21 @@ model calling this as a tool.
 ## Phase 3 — The supervisor (the actual product)
 
 - [ ] **State verification.** After each turn, check what the model *claims* against what the
-      filesystem *shows*.
+      filesystem *shows*. **Now the one thing standing between the loop and the product**: the
+      loop stops when the model stops asking for tools, which is trusting a completion claim and
+      is exactly what R6 forbids. `StopReason::Answered` is documented as meaning only "stopped
+      asking", and the CLI prints that caveat rather than letting a zero exit status imply
+      success. A live example arrived unprompted while building the loop: handed a tool result
+      whose `content` was the four characters `aaaa`, `llama3.2-3b` reported *"a.txt is 1
+      character long"* — reading its own tool output wrong, in confident prose.
 - [ ] **Re-invocation** with one concrete remaining failure, per the tournament recommendation.
+      **Measured support, 2026-08-17**: handed a refusal as a tool result, only `qwen3.5-9b` used
+      it to correct itself. `llama3.2-3b`, `hermes3-8b` and `gemma4-e4b` all stopped calling tools
+      and addressed the human instead — *"Please provide me with the path of the file"*. Stated at
+      its real width: the refusal injected in that probe was deliberately incoherent, so this
+      measures reaction to a confusing error rather than to a fair one. The direction is the
+      point — these models do not reliably self-correct, so re-invocation has to come from
+      outside them.
 - [ ] **Guardrails** — dry-run, backup-before-mutate, undo. The erased `tally.py` is the argument.
       *Where* backups live was settled 2026-08-15 — never granted to the confined child, per
       [D10](./DECISIONS.md) and [ROUTING.md](./ROUTING.md) §11 — so what remains here is
@@ -572,6 +600,20 @@ Upstream is ~870k lines of non-test Python. A wholesale port is not the goal and
   Hermes 4 70B. Whether a supervisor architecture is still the right answer when the model is
   6× larger is an open question, not a settled one: the bounded-session finding came from
   watching *small* models drift.
+  **Two concrete criteria arrived 2026-08-17**, where this question previously had only size
+  and speed — and both are properties of a model's *chat template*, which no model card
+  reports and `ollama show` does not summarise:
+  1. **Do the tool definitions survive a tool result?** On the two stock Meta llama3.x
+     instruct templates they do not, so the model is not told its tools exist on the turn it
+     must decide whether to call one. Template-specific, not architectural: `hermes3-8b` is
+     llama3.1 underneath and is unaffected.
+  2. **Does the caller's system prompt survive offering tools?** On `hermes3-8b` it does not
+     — the template substitutes its own function-calling preamble — so the instructions this
+     project relies on never reach that model at all.
+
+  Both are in [DECISIONS.md](./DECISIONS.md) under "Still open", with mechanisms read out of
+  the templates. Together they argue that model selection needs a *template probe*, not just
+  R9's two card-readable gates.
 - **Whether to train a worker model at all.** Design recorded in
   [bench/distill/DESIGN.md](./bench/distill/DESIGN.md) — gated, not scheduled, and deliberately
   filed here rather than as a Phase item. The blocking issue is measurement order, not
