@@ -1,6 +1,7 @@
 #include <hermes/supervisor/loop.h>
 
 #include <cmath>
+#include <optional>
 #include <utility>
 
 #include <hermes/supervisor/wire.h>
@@ -27,6 +28,7 @@ std::string unknown_tool(std::string_view name) {
 
 std::string_view to_string(StopReason r) noexcept {
   switch (r) {
+    case StopReason::VerificationFailed: return "the tree could not be verified";
     case StopReason::Answered:       return "the model answered without asking for a tool";
     case StopReason::TurnBudget:     return "the turn budget ran out";
     case StopReason::TimeBudget:     return "the wall-clock budget ran out";
@@ -105,10 +107,32 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
   const auto started = Clock::now();
   LoopOutcome outcome;
 
+  // The baseline, taken before the model is told anything. Everything the run is later
+  // judged to have done is measured against this, so it must precede the first request.
+  TreeSnapshot baseline;
+  TreeSnapshot previous;
+  if (options_.verifier != nullptr) {
+    auto taken = options_.verifier->snapshot();
+    if (!taken) {
+      outcome.reason = StopReason::VerificationFailed;
+      outcome.detail = taken.error().message();
+      outcome.elapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started);
+      return outcome;
+    }
+    baseline = std::move(*taken);
+    previous = baseline;
+  }
+
   const auto finish = [&](StopReason reason, std::string detail) {
     outcome.reason = reason;
     outcome.detail = std::move(detail);
     outcome.dropped = session.dropped();
+    // The net effect of the run: last against first, so a file created and deleted again
+    // does not appear and one written three times appears once. Taken on every exit path,
+    // including the bounds -- a run that ran out of turns still changed whatever it
+    // changed, and that is exactly what a caller deciding whether to re-invoke needs.
+    if (options_.verifier != nullptr) outcome.net_changes = diff(baseline, previous);
     outcome.elapsed =
         std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started);
     return outcome;
@@ -167,11 +191,25 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     event.content = reply->content;
     event.dropped = session.dropped();
 
+    // R6, and the ordering is the point: the tree is read *after* the turn's calls have
+    // run, and nothing about it comes from the reply. A model that answered in prose still
+    // gets its turn verified, because shell and tools we did not write are exactly what
+    // ROUTING.md section 6 says this layer exists to cover.
+    const auto verify = [&]() -> std::optional<std::string> {
+      if (options_.verifier == nullptr) return std::nullopt;
+      auto taken = options_.verifier->snapshot(&previous);
+      if (!taken) return taken.error().message();
+      event.changes = diff(previous, *taken);
+      previous = std::move(*taken);
+      return std::nullopt;
+    };
+
     const auto emit = [&] {
       if (options_.observer) options_.observer(event);
     };
 
     if (reply->tool_calls.empty()) {
+      if (auto failed = verify()) return finish(StopReason::VerificationFailed, *failed);
       emit();
       // Either an answer, or nothing at all. `generated()` is the broader question,
       // because a thinking model that spent its whole budget reasoning returns empty
@@ -223,6 +261,7 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
       session.add_tool_result(call.name, std::move(dispatched.content));
     }
 
+    if (auto failed = verify()) return finish(StopReason::VerificationFailed, *failed);
     emit();
   }
 }

@@ -552,14 +552,21 @@ model calling this as a tool.
 
 ## Phase 3 — The supervisor (the actual product)
 
-- [ ] **State verification.** After each turn, check what the model *claims* against what the
-      filesystem *shows*. **Now the one thing standing between the loop and the product**: the
-      loop stops when the model stops asking for tools, which is trusting a completion claim and
-      is exactly what R6 forbids. `StopReason::Answered` is documented as meaning only "stopped
-      asking", and the CLI prints that caveat rather than letting a zero exit status imply
-      success. A live example arrived unprompted while building the loop: handed a tool result
-      whose `content` was the four characters `aaaa`, `llama3.2-3b` reported *"a.txt is 1
-      character long"* — reading its own tool output wrong, in confident prose.
+- [x] ~~**State verification — the observation half**~~ — done 2026-08-17
+      ([D13](./DECISIONS.md)). `supervisor/verify.cpp` snapshots the tree before the run and
+      after every turn, and reports a hash-verified changeset: created, deleted, modified,
+      touched-but-identical, type-changed, readability-changed. It never reads the reply, which
+      is the design decision rather than an implementation detail — parsing what a model *says*
+      it did puts the reply back on the critical path, and the failure being defended against is
+      confident wrongness in fluent English, not a detectable grammar. Hashes carry forward
+      across snapshots, so a turn costs the walk plus the bytes that actually moved.
+- [ ] **State verification — the judgment half.** Deciding whether the changes are the *right*
+      ones needs a post-condition, and a free-text instruction does not carry one. A live run
+      shows the gap exactly: asked to create `report.md` containing a summary, `llama3.2-3b`
+      created the file — changeset accurate, hash and all — containing the literal text
+      `grep -oP '(?<=^).*' notes.txt`. A shell command, written as content. Bytes moved, the
+      report is correct, the work is wrong. [D13](./DECISIONS.md) states the two open positions;
+      this bullet closes when one is chosen.
 - [ ] **Re-invocation** with one concrete remaining failure, per the tournament recommendation.
       **Measured support, 2026-08-17**: handed a refusal as a tool result, only `qwen3.5-9b` used
       it to correct itself. `llama3.2-3b`, `hermes3-8b` and `gemma4-e4b` all stopped calling tools

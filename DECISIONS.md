@@ -796,6 +796,92 @@ documented either way, which is why it had to be probed.
 
 ---
 
+## D13 — Per-turn verification observes the filesystem, never the reply
+
+**Decided 2026-08-17**, building Phase 3's first half. ROUTING.md §6 already assigned per-turn
+verification to the supervisor; this is how it is done, and the three choices that were not
+obvious.
+
+**1. It reads the tree, not the model's account of the tree.** The natural reading of R6
+("never trust a completion claim") is: parse what the model said it did and check each
+statement. That is a trap — it puts the reply back on the critical path, just later, and prose
+does not parse. The measured failure is not that models lie in a detectable grammar; it is that
+they are confidently wrong in fluent English. Handed a tool result whose `content` was the four
+characters `aaaa`, `llama3.2-3b` reported *"a.txt is 1 character long"*. No parser catches that.
+
+So `TreeVerifier` never sees a `ChatReply`. A snapshot before, a snapshot after, and the
+difference is ground truth regardless of whether the model called ten tools, answered in prose,
+or crashed mid-turn.
+
+**2. Hashes are carried forward, not recomputed.** R3 forbids the cheap check outright —
+verify by content hash, never by existence — and its evidence is `05_copy`, where two models
+overwrote `config.ini` with invented content while the assertion "config.ini still exists"
+passed for both. But hashing every file every turn costs O(tree bytes) per turn, on a loop whose
+justification is cheap process launches.
+
+The resolution: every turn walks and stats the tree, an entry whose identity tuple is unchanged
+keeps the hash already computed for it, and only new or tuple-moved entries are read. The first
+snapshot pays for a baseline; every one after costs the walk plus the bytes that actually moved.
+Measured on a small tree: baseline hashed 43 bytes, the next walk hashed 23 — exactly what
+changed. There is a test asserting the byte count, because a regression here is silent: the diff
+stays correct and every turn just quietly costs the whole tree.
+
+The tuple is trustworthy for this because it is already §4's currency for the staleness guard:
+`dev:ino` catches unlink-and-recreate, and `ctime` is the field a confined process cannot forge
+while backdating `mtime` (D10).
+
+**A consequence worth naming: a moved tuple is not a modification.** A touch, a chmod, or a
+rewrite of identical bytes moves the tuple and moves no content. Those are reported as
+`touched`, separately from `modified`, because folding them together would make every report
+noisier than the signal in it — and a reader who learns the noise is noise stops reading the
+report at all.
+
+**3. The whole tree, not the paths the tools touched.** Cheaper and wrong, for the one reason
+§6 exists: per-turn verification must cover "shell and tools we did not write". A changeset
+built from tool output inherits the tool layer's blind spot, which is the thing being defended
+against — both destructive `05_copy` incidents and every escape into the repository root came
+*through* file tools.
+
+**4. It fails closed.** An unreadable directory hides a subtree, and every file under it would
+appear deleted. A snapshot that cannot see the tree refuses rather than reporting a confident
+diff of what it managed to reach, and a run that asked for verification and cannot have it stops
+(`StopReason::VerificationFailed`) rather than continuing unverified while looking identical
+from outside.
+
+### What this deliberately does not decide
+
+**It answers "what changed". It does not answer "is the work done".** That needs a
+post-condition, and a free-text instruction does not carry one.
+
+A live run makes the gap concrete better than any argument. Asked to *"create report.md
+containing a one-line summary of notes.txt"*, `llama3.2-3b` created `report.md`, and the
+changeset correctly reports `created report.md` with a hash. The file contains:
+
+```
+grep -oP '(?<=^).*' notes.txt
+```
+
+A shell command, written as file content. Bytes moved, the changeset is accurate, the reply was
+confident, and the work is entirely wrong. Observation cannot close that gap — only a stated
+post-condition can.
+
+So two positions remain open, and the project has to pick one:
+
+1. **The supervisor is given post-conditions** — by a task definition, a caller, or a Tier 1
+   model asked to write them before work starts. R7's re-invocation then has something concrete
+   to re-state, which is what the tournament recommendation actually requires: *one concrete
+   remaining failure*, not "try again".
+2. **The supervisor reports rather than judges** — hands back the changeset and lets the caller
+   decide. Weaker, and it makes `bench/delta`'s reliability arm unmeasurable, because there is
+   no verdict to compare against.
+
+**What would overturn D13 itself.** Evidence that the walk's cost is material on a real tree —
+it is one `stat` per entry per turn, and nothing has yet run it against a large repository.
+`TreeVerifier` exposes `last_entries_walked()` and `last_hashed_bytes()` so that stays a
+measurement rather than an assumption.
+
+---
+
 ## Still open
 
 ### ~~Which chat endpoint~~ — settled as D8

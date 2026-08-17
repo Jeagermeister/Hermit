@@ -25,6 +25,7 @@
 #include <hermes/ollama/preflight.h>
 #include <hermes/supervisor/loop.h>
 #include <hermes/supervisor/session.h>
+#include <hermes/supervisor/verify.h>
 
 #include <algorithm>
 #include <charconv>
@@ -71,6 +72,7 @@ int usage(std::ostream& to = std::cerr) {
       "  --max-turns N          turn bound for one run (default 12)\n"
       "  --budget N             wall-clock seconds for one run, checked between turns (R8)\n"
       "  --backups DIR          where undo data goes; must be outside --root (R4)\n"
+      "  --no-verify            skip the per-turn hash diff of the tree (R6); on by default\n"
       "\n"
       "environment: HERMES_CONFIG (absolute), HERMES_SANDBOX_ROOT (absolute), HERMES_MODEL,\n"
       "             HERMES_OLLAMA_URL, HERMES_MAX_NUM_CTX\n";
@@ -321,6 +323,7 @@ int agent_command(std::span<const std::string_view> args) {
   std::size_t max_turns = 12;
   std::uint64_t budget_seconds = 300;
   std::optional<std::filesystem::path> backup_dir;
+  bool verify = true;
 
   // A flag whose value is missing is reported as such. Letting it fall through to
   // `load` would report it as an unknown flag instead, which sends the operator looking
@@ -365,6 +368,10 @@ int agent_command(std::span<const std::string_view> args) {
     }
     if (takes_value("--backups", value)) {
       backup_dir = std::filesystem::path{value};
+      continue;
+    }
+    if (args[i] == "--no-verify") {
+      verify = false;
       continue;
     }
     passthrough.push_back(args[i]);
@@ -497,7 +504,17 @@ int agent_command(std::span<const std::string_view> args) {
     if (!event.content.empty() && event.calls.empty()) {
       std::cout << "        answered in " << event.content.size() << " characters\n";
     }
+    // R6: what the filesystem shows, printed beside what the model did. Nothing here is
+    // derived from the reply.
+    for (const auto& change : event.changes.changes) {
+      std::cout << "        ~ " << hermes::supervisor::to_string(change.kind) << "  "
+                << change.path << '\n';
+    }
   };
+
+  // Held here so it outlives the loop, which holds it by pointer.
+  hermes::supervisor::TreeVerifier verifier{*box};
+  if (verify) loop_options.verifier = &verifier;
 
   hermes::supervisor::AgentLoop loop{*client, tools->registry(), *box, loop_options};
 
@@ -507,7 +524,10 @@ int agent_command(std::span<const std::string_view> args) {
             << "window  : " << session->window() << " tokens, " << session->prompt_budget()
             << " for the prompt\n"
             << "tools   : " << loop.definitions().size() << " offered\n"
-            << "bounds  : " << max_turns << " turns, " << budget_seconds << "s\n\n"
+            << "bounds  : " << max_turns << " turns, " << budget_seconds << "s, "
+            << loop_options.max_calls_per_turn << " calls/turn\n"
+            << "verify  : " << (verify ? "per-turn hash diff of the tree (R6)" : "off")
+            << "\n\n"
             << "instruction: " << instruction << "\n\n";
 
   const auto outcome = loop.run(*session, instruction);
@@ -522,12 +542,39 @@ int agent_command(std::span<const std::string_view> args) {
     std::cout << "\nreply:\n" << outcome.final_content << '\n';
   }
 
-  // R6, said out loud rather than left to be inferred from a zero exit status: the loop
-  // stopping is not evidence the work is right. Phase 3's state verification is what
-  // will make an exit status mean something.
+  if (verify) {
+    std::cout << "\nwhat actually changed (hash-verified, R6):\n";
+    if (outcome.net_changes.empty()) {
+      std::cout << "  nothing\n";
+    } else {
+      const std::string rendered = outcome.net_changes.render();
+      std::string line;
+      for (const char c : rendered) {
+        if (c != '\n') {
+          line.push_back(c);
+          continue;
+        }
+        std::cout << "  " << line << '\n';
+        line.clear();
+      }
+      std::cout << "  (" << outcome.net_changes.substantive() << " of "
+                << outcome.net_changes.changes.size() << " moved bytes)\n";
+    }
+  }
+
+  // Said out loud rather than left to be inferred from a zero exit status. What exists now
+  // is the *observation* half of R6: the changeset above owes nothing to the reply, so a
+  // model announcing success over an untouched tree is contradicted by it. What does not
+  // exist is the judgment half -- deciding whether those are the *right* changes needs a
+  // post-condition, and a free-text instruction does not carry one (see verify.h).
   if (outcome.ran_to_completion()) {
-    std::cout << "\nnote: the model stopped asking for tools. Whether the work is correct is\n"
-                 "      not checked here -- that is Phase 3 (R6 state verification).\n";
+    std::cout << "\nnote: the model stopped asking for tools, and the changes above are what\n"
+                 "      the filesystem shows. Whether they are the *correct* changes is not\n"
+                 "      decided here -- that needs a post-condition this command was not given.\n";
+    if (outcome.net_changes.substantive() == 0) {
+      std::cout << "      Nothing moved. For a read-only instruction that is right; for one\n"
+                   "      that asked for work, it is the failure R6 was written about.\n";
+    }
   }
   return outcome.ran_to_completion() ? 0 : 1;
 }
