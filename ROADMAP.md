@@ -572,3 +572,11 @@ Upstream is ~870k lines of non-test Python. A wholesale port is not the goal and
   Hermes 4 70B. Whether a supervisor architecture is still the right answer when the model is
   6× larger is an open question, not a settled one: the bounded-session finding came from
   watching *small* models drift.
+- **Whether to train a worker model at all.** Design recorded in
+  [bench/distill/DESIGN.md](./bench/distill/DESIGN.md) — gated, not scheduled, and deliberately
+  filed here rather than as a Phase item. The blocking issue is measurement order, not
+  capability: a worker fine-tune moves `bench/delta` E1's arm A and arm B together, so E1 must be
+  collected first or the supervision delta is unrecoverable. Note also that the corpus cannot be
+  collected today for a reason easy to miss — `bench/fsops/proxy.py` records *upstream Hermes
+  Agent's* tool vocabulary over `/v1/chat/completions`, not this project's eight tools over
+  native `/api/chat`. The recorder works; it records the wrong system.
