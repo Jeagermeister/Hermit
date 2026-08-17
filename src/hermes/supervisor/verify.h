@@ -104,6 +104,21 @@ struct FileState {
   /// that becomes unreadable is reported, because that is itself a change worth seeing.
   bool readable = true;
 
+  /// Permission bits only -- `st_mode & 07777`, so setuid, setgid and the sticky bit are
+  /// included and the file-type bits are not (those are already `is_dir`/`is_symlink`).
+  ///
+  /// Recorded because a `chmod` moves ctime and no content, so without it the single most
+  /// security-relevant thing a model can do to a file it may not rewrite -- make it
+  /// executable -- was indistinguishable from a touch, and `TouchedOnly` is the kind this
+  /// header tells readers to skim. `08_write_and_run_script` asks for exactly that
+  /// ("make count.sh executable and run it"), so it is ordinary behaviour and not an
+  /// exotic case.
+  ///
+  /// Not added to `IdentityTuple`: that type is section 4's currency for the staleness
+  /// guard and is shared with every tool, so widening it would ripple through the whole
+  /// mutate surface to answer a question only this layer asks.
+  std::uint32_t mode = 0;
+
   friend bool operator==(const FileState&, const FileState&) = default;
 };
 
@@ -132,6 +147,16 @@ enum class ChangeKind {
   /// change that can be proven, and both are worth surfacing rather than swallowing.
   ReadabilityChanged,
 
+  /// The permission bits moved and the content did not -- a `chmod`.
+  ///
+  /// Counted by `substantive()` even though no bytes moved, which is the one place that
+  /// method departs from "bytes". Gaining the executable bit is an act with consequences,
+  /// not an artefact of one, and a supervisor that reported it in the same breath as a
+  /// touched mtime would be training its reader to miss it. When content moved *as well*,
+  /// the kind stays `Modified` -- the larger fact wins -- but `mode_before`/`mode_after`
+  /// are still filled in, so a `chmod` is never hidden behind a rewrite.
+  PermissionsChanged,
+
   /// A path changed what it *is* -- file to directory, directory to symlink. Rare, and
   /// never innocent enough to fold into Modified.
   TypeChanged,
@@ -149,6 +174,12 @@ struct Change {
   /// most of which set only one side -- do not have to name the other.
   std::string before{};
   std::string after{};
+
+  /// Permission bits either side, filled in whenever they differ -- on *any* kind, not
+  /// only `PermissionsChanged`. Both zero when they did not move. A rewrite that also
+  /// flipped the executable bit reports as `Modified` and still shows the flip here.
+  std::uint32_t mode_before = 0;
+  std::uint32_t mode_after = 0;
 };
 
 /// What a turn did to the tree, in path order.
@@ -157,8 +188,12 @@ struct Changeset {
 
   [[nodiscard]] bool empty() const noexcept { return changes.empty(); }
 
-  /// Changes that moved bytes. The number that answers "did anything actually happen",
-  /// which is a different question from "did anything get touched".
+  /// Changes a reader must not skim past: created, deleted, modified, type-changed, and
+  /// permissions-changed. The number that answers "did anything actually happen", which is
+  /// a different question from "did anything get touched".
+  ///
+  /// Four of the five moved bytes; `PermissionsChanged` did not, and is counted anyway
+  /// because a `chmod +x` is an act rather than a side effect of one.
   [[nodiscard]] std::size_t substantive() const noexcept;
 
   /// One line per change, sorted, ending in a newline. For a report or a trace.

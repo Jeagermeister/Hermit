@@ -45,6 +45,17 @@ std::optional<std::string> hash_regular(int dir_fd, const char* name,
   return to_hex(digest.finish());
 }
 
+/// Permission bits as a person reads them: four octal digits, so setuid and the sticky
+/// bit are visible rather than truncated away.
+std::string octal(std::uint32_t mode) {
+  std::string out(4, '0');
+  for (int i = 3; i >= 0; --i) {
+    out[static_cast<std::size_t>(i)] = static_cast<char>('0' + (mode & 7u));
+    mode >>= 3;
+  }
+  return out;
+}
+
 }  // namespace
 
 std::string_view to_string(ChangeKind k) noexcept {
@@ -54,6 +65,7 @@ std::string_view to_string(ChangeKind k) noexcept {
     case ChangeKind::Modified:           return "modified";
     case ChangeKind::TouchedOnly:        return "touched";
     case ChangeKind::ReadabilityChanged: return "readability";
+    case ChangeKind::PermissionsChanged: return "permissions";
     case ChangeKind::TypeChanged:        return "type";
   }
   return "unknown";
@@ -87,7 +99,8 @@ std::size_t Changeset::substantive() const noexcept {
   return static_cast<std::size_t>(
       std::count_if(changes.begin(), changes.end(), [](const Change& c) {
         return c.kind == ChangeKind::Created || c.kind == ChangeKind::Deleted ||
-               c.kind == ChangeKind::Modified || c.kind == ChangeKind::TypeChanged;
+               c.kind == ChangeKind::Modified || c.kind == ChangeKind::TypeChanged ||
+               c.kind == ChangeKind::PermissionsChanged;
       }));
 }
 
@@ -105,6 +118,15 @@ std::string Changeset::render() const {
       text += change.before.empty() ? std::string{"-"} : change.before.substr(0, 12);
       text += " -> ";
       text += change.after.empty() ? std::string{"-"} : change.after.substr(0, 12);
+    }
+    // Shown on every kind that carries it, not only PermissionsChanged: a rewrite that
+    // also flipped the executable bit is one line, and the flip is the half a reader
+    // would otherwise never see.
+    if (change.mode_before != change.mode_after) {
+      text += "  ";
+      text += octal(change.mode_before);
+      text += " -> ";
+      text += octal(change.mode_after);
     }
     text += '\n';
   }
@@ -197,6 +219,8 @@ std::expected<TreeSnapshot, VerifyError> TreeVerifier::snapshot(
       state.tuple = tuple_from(st);
       state.is_dir = S_ISDIR(st.st_mode);
       state.is_symlink = S_ISLNK(st.st_mode);
+      // Permission bits only; the type bits are already in the two flags above.
+      state.mode = static_cast<std::uint32_t>(st.st_mode & 07777);
 
       if (S_ISREG(st.st_mode)) {
         // The incremental step: an unchanged identity tuple means the content cannot have
@@ -258,22 +282,42 @@ Changeset diff(const TreeSnapshot& before, const TreeSnapshot& after) {
     const FileState& was = lhs->second;
     const FileState& now = rhs->second;
 
+    // Filled in on whichever kind wins below, so a chmod is never hidden behind a rewrite.
+    const std::uint32_t mode_before = was.mode != now.mode ? was.mode : 0;
+    const std::uint32_t mode_after = was.mode != now.mode ? now.mode : 0;
+
     if (was.is_dir != now.is_dir || was.is_symlink != now.is_symlink) {
       out.changes.push_back(Change{.path = lhs->first,
                                    .kind = ChangeKind::TypeChanged,
                                    .before = was.sha256,
-                                   .after = now.sha256});
+                                   .after = now.sha256,
+                                   .mode_before = mode_before,
+                                   .mode_after = mode_after});
     } else if (was.readable != now.readable) {
       out.changes.push_back(Change{.path = lhs->first,
                                    .kind = ChangeKind::ReadabilityChanged,
                                    .before = was.sha256,
-                                   .after = now.sha256});
+                                   .after = now.sha256,
+                                   .mode_before = mode_before,
+                                   .mode_after = mode_after});
     } else if (was.readable && was.sha256 != now.sha256) {
       // R3's rule, and the only branch that claims bytes moved.
       out.changes.push_back(Change{.path = lhs->first,
                                    .kind = ChangeKind::Modified,
                                    .before = was.sha256,
-                                   .after = now.sha256});
+                                   .after = now.sha256,
+                                   .mode_before = mode_before,
+                                   .mode_after = mode_after});
+    } else if (was.mode != now.mode) {
+      // A chmod: the bits moved and the content did not. Its own kind rather than folded
+      // into TouchedOnly, because that is the kind this layer tells readers to skim, and
+      // gaining the executable bit is the one thing in it that must not be skimmed.
+      out.changes.push_back(Change{.path = lhs->first,
+                                   .kind = ChangeKind::PermissionsChanged,
+                                   .before = {},
+                                   .after = {},
+                                   .mode_before = mode_before,
+                                   .mode_after = mode_after});
     } else if (was.tuple != now.tuple) {
       // The tuple moved and the content did not. Reported, and reported separately,
       // because calling this a modification would make the report untrustworthy in the
