@@ -1,5 +1,8 @@
 # Hermit
 
+**H**ash-verified · **E**vidence-driven · **R**etries with concrete failure · **M**inimal
+structurally-enforced authority · **I**ndependent verification · **T**iered dispatch
+
 ## Start here
 
 | document | what it answers |
