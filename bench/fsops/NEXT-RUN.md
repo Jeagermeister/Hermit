@@ -7,7 +7,7 @@ simplest task in the suite between sweeps. Until sampling is pinned, no per-task
 anything.
 
 ```bash
-cd ~/Source/Hermes-Cpp/bench/fsops
+cd ~/Source/Hermit/bench/fsops
 ./selftest.py                                    # always first
 BENCH_GPU="NVIDIA RTX 5080 Laptop 16GB" \
   ./run_fsops.py --models qwen-9b llama31-8b llama32-3b \
@@ -43,7 +43,7 @@ Run one shell task with `--transcripts` and read the `workdir` argument the mode
 python3 -c "import json;[print(json.loads(l)['response'].get('tool_calls')) for l in open('transcripts/qwen-9b-07_run_script-r1.jsonl')]"
 ```
 
-Working trees now live in `~/.cache/hermes-fsops/runs` (override `FSOPS_RUNS`), outside any git
+Working trees now live in `~/.cache/hermit-fsops/runs` (override `FSOPS_RUNS`), outside any git
 repo, so this can no longer pollute tracked source. **Re-run at least `01_create_file`,
 `02_make_dirs` and `08_write_and_run_script` from outside the repo before trusting their
 scores** — those are the three with confirmed escaped artifacts.
@@ -76,7 +76,7 @@ so `ollama pull gemma4:e4b-it-qat` should be near-instant.
 - Re-run `hermes3-8b` vs `llama31-8b`. 3/36 vs 10/36 at matched size and quant is suggestive but
   inside the noise floor, and it is the one result that most deserves to be right.
 - Phase 0 ran on 2026-08-13, but through `local-agent-benchmarks/hermes-diagnostic/`, not
-  `bench/run_hermes_diagnostic.py` (which remains unrun and superseded). It produced a
+  `bench/run_hermit_diagnostic.py` (which remains unrun and superseded). It produced a
   Hermes-only leaderboard rather than the harness comparison: there is no model overlap between
   the two harnesses, and the 64,000-context floor may make the matched run impossible as
   specified. So "is Hermes better or worse than OpenCode" is **still unanswered**, and this

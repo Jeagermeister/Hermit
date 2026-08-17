@@ -7,7 +7,7 @@ FetchContent_Declare(googletest
   SYSTEM)
 FetchContent_MakeAvailable(googletest)
 
-add_executable(hermes_tests
+add_executable(hermit_tests
   sandbox_test.cpp
   tool_test.cpp
   fsio_test.cpp
@@ -24,11 +24,11 @@ add_executable(hermes_tests
   verify_test.cpp
   judge_test.cpp)
 
-target_link_libraries(hermes_tests
-  PRIVATE hermes_app hermes_core hermes_ollama hermes_supervisor hermes_warnings
+target_link_libraries(hermit_tests
+  PRIVATE hermit_app hermit_core hermit_ollama hermit_supervisor hermit_warnings
           GTest::gtest_main)
 
 include(GoogleTest)
 # A symlink-loop bug shows up as non-termination, not as a wrong answer, so the loop
 # test needs a clock behind it or it hangs the suite instead of failing it.
-gtest_discover_tests(hermes_tests PROPERTIES TIMEOUT 30)
+gtest_discover_tests(hermit_tests PROPERTIES TIMEOUT 30)

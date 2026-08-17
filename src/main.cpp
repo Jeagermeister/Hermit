@@ -1,15 +1,15 @@
 // Manual harness for the pieces that exist so far.
 //
-//   hermes-cpp resolve   --root DIR <path>...   R1 sandbox resolution
-//   hermes-cpp preflight --model NAME           R9 model preflight
-//   hermes-cpp session   --model NAME           context accounting, against a real model
-//   hermes-cpp config                           the resolved settings, and their origins
+//   hermit resolve   --root DIR <path>...   R1 sandbox resolution
+//   hermit preflight --model NAME           R9 model preflight
+//   hermit session   --model NAME           context accounting, against a real model
+//   hermit config                           the resolved settings, and their origins
 //
 // Not the product's CLI -- that arrives with the agent loop. This is how each piece is
 // looked at by hand against the real filesystem and the real daemon, which is where
 // the last two bugs came from.
 //
-// Argument parsing moved out to hermes::app::Config on 2026-08-13. It is not shaped
+// Argument parsing moved out to hermit::app::Config on 2026-08-13. It is not shaped
 // like a CLI parser because it is not one: the same settings have to arrive from a
 // file and the environment when the MCP-over-stdio frontend lands (D7), and a second
 // implementation of "where does the sandbox root come from" is exactly the divergence
@@ -19,13 +19,13 @@
 // settings and two of them are safety limits, so "what is actually in force, and which
 // source set it?" needs an answer that does not involve reading the code.
 
-#include <hermes/app/config.h>
-#include <hermes/app/toolset.h>
-#include <hermes/core/sandbox.h>
-#include <hermes/ollama/preflight.h>
-#include <hermes/supervisor/loop.h>
-#include <hermes/supervisor/session.h>
-#include <hermes/supervisor/verify.h>
+#include <hermit/app/config.h>
+#include <hermit/app/toolset.h>
+#include <hermit/core/sandbox.h>
+#include <hermit/ollama/preflight.h>
+#include <hermit/supervisor/loop.h>
+#include <hermit/supervisor/session.h>
+#include <hermit/supervisor/verify.h>
 
 #include <algorithm>
 #include <charconv>
@@ -49,11 +49,11 @@ namespace {
 // operator requested is output, not a diagnostic, and piping it should work.
 int usage(std::ostream& to = std::cerr) {
   to <<
-      "usage: hermes-cpp resolve   --root DIR <path>...\n"
-      "       hermes-cpp preflight --model NAME\n"
-      "       hermes-cpp session   --model NAME   (try --max-num-ctx 2048 to force compaction)\n"
-      "       hermes-cpp agent     --root DIR --model NAME <instruction>\n"
-      "       hermes-cpp config\n"
+      "usage: hermit resolve   --root DIR <path>...\n"
+      "       hermit preflight --model NAME\n"
+      "       hermit session   --model NAME   (try --max-num-ctx 2048 to force compaction)\n"
+      "       hermit agent     --root DIR --model NAME <instruction>\n"
+      "       hermit config\n"
       "\n"
       "settings, in increasing precedence: defaults < --config file < environment < flags\n"
       "  --config PATH          a JSON config file. Never searched for implicitly.\n"
@@ -75,8 +75,8 @@ int usage(std::ostream& to = std::cerr) {
       "  --no-verify            skip the per-turn hash diff of the tree (R6); verification\n"
       "                         is on by default\n"
       "\n"
-      "environment: HERMES_CONFIG (absolute), HERMES_SANDBOX_ROOT (absolute), HERMES_MODEL,\n"
-      "             HERMES_OLLAMA_URL, HERMES_MAX_NUM_CTX\n";
+      "environment: HERMIT_CONFIG (absolute), HERMIT_SANDBOX_ROOT (absolute), HERMIT_MODEL,\n"
+      "             HERMIT_OLLAMA_URL, HERMIT_MAX_NUM_CTX\n";
   return 2;
 }
 
@@ -102,7 +102,7 @@ std::optional<std::uint64_t> whole_number(std::string_view text, std::uint64_t m
   return value;
 }
 
-int report(const hermes::app::ConfigProblem& problem) {
+int report(const hermit::app::ConfigProblem& problem) {
   std::cerr << "error: " << problem.message() << '\n';
   return 2;
 }
@@ -114,16 +114,16 @@ int resolve_command(std::span<const std::string_view> args) {
   // No model and no network: resolution is pure filesystem work, so an Ollama URL
   // exported for something else must not be able to break it.
   const auto config =
-      hermes::app::load(args, {.sandbox_root = true, .model = false, .ollama = false}, paths);
+      hermit::app::load(args, {.sandbox_root = true, .model = false, .ollama = false}, paths);
   if (!config) return report(config.error());
   if (paths.empty()) {
     std::cerr << "error: resolve needs at least one path to resolve\n";
     return usage();
   }
 
-  auto box = hermes::Sandbox::open(config->sandbox_root);
+  auto box = hermit::Sandbox::open(config->sandbox_root);
   if (!box) {
-    std::cerr << "error: " << hermes::to_string(box.error()) << ": " << config->sandbox_root << '\n';
+    std::cerr << "error: " << hermit::to_string(box.error()) << ": " << config->sandbox_root << '\n';
     return 1;
   }
 
@@ -143,7 +143,7 @@ int resolve_command(std::span<const std::string_view> args) {
     } else {
       ++failures;
       std::cout << "  REJECT  " << raw << "\n"
-                << "          -> " << hermes::to_string(p.error()) << '\n';
+                << "          -> " << hermit::to_string(p.error()) << '\n';
     }
   }
   return failures == 0 ? 0 : 1;
@@ -153,11 +153,11 @@ int resolve_command(std::span<const std::string_view> args) {
 int preflight_command(std::span<const std::string_view> args) {
   std::vector<std::string_view> extra;
   const auto config =
-      hermes::app::load(args, {.sandbox_root = false, .model = true, .ollama = true}, extra);
+      hermit::app::load(args, {.sandbox_root = false, .model = true, .ollama = true}, extra);
   if (!config) {
     // `preflight qwen35-agent` -- the old positional shape -- otherwise reports "no
     // model", which is true and unhelpful when the model name is right there.
-    if (config.error().kind == hermes::app::ConfigError::MissingRequired && !extra.empty()) {
+    if (config.error().kind == hermit::app::ConfigError::MissingRequired && !extra.empty()) {
       std::cerr << "error: preflight takes the model as a flag; did you mean --model "
                 << extra.front() << "?\n";
       return 2;
@@ -169,13 +169,13 @@ int preflight_command(std::span<const std::string_view> args) {
     return 2;
   }
 
-  const auto client = hermes::ollama::Client::open(config->client);
+  const auto client = hermit::ollama::Client::open(config->client);
   if (!client) {
     std::cerr << "error: " << client.error().detail << '\n';
     return 1;
   }
 
-  const auto report_out = hermes::ollama::preflight(*client, config->model, config->preflight);
+  const auto report_out = hermit::ollama::preflight(*client, config->model, config->preflight);
 
   // To stderr: the report is a startup diagnostic, and a caller redirecting stdout is
   // collecting the model's output, not this.
@@ -202,14 +202,14 @@ int session_command(std::span<const std::string_view> args) {
 
   std::vector<std::string_view> extra;
   const auto config =
-      hermes::app::load(args, {.sandbox_root = false, .model = true, .ollama = true}, extra);
+      hermit::app::load(args, {.sandbox_root = false, .model = true, .ollama = true}, extra);
   if (!config) return report(config.error());
   if (!extra.empty()) {
     std::cerr << "error: session takes no positional arguments, got: " << extra.front() << '\n';
     return 2;
   }
 
-  const auto client = hermes::ollama::Client::open(config->client);
+  const auto client = hermit::ollama::Client::open(config->client);
   if (!client) {
     std::cerr << "error: " << client.error().detail << '\n';
     return 1;
@@ -218,7 +218,7 @@ int session_command(std::span<const std::string_view> args) {
   // The architecture is the one ceiling no request can raise (R9), so the session is
   // told about it rather than left to discover it from a collapsed prompt. A model whose
   // card cannot be read is not a reason to refuse -- the clamp still bounds the window.
-  hermes::supervisor::SessionOptions options;
+  hermit::supervisor::SessionOptions options;
   options.model = config->model;
   options.num_ctx = config->client.max_num_ctx;
   if (const auto card = client->show(config->model)) {
@@ -236,7 +236,7 @@ int session_command(std::span<const std::string_view> args) {
       std::clamp<std::uint64_t>(window / 4, 1, static_cast<std::uint64_t>(kMaxGenerationTokens));
   options.max_tokens = static_cast<int>(options.reply_reserve);
 
-  auto session = hermes::supervisor::Session::open(
+  auto session = hermit::supervisor::Session::open(
       options, *client,
       "You are a terse test fixture. Answer in one short sentence and nothing more.");
   if (!session) {
@@ -379,7 +379,7 @@ int agent_command(std::span<const std::string_view> args) {
   if (malformed) return 2;
 
   std::vector<std::string_view> words;
-  const auto config = hermes::app::load(
+  const auto config = hermit::app::load(
       passthrough, {.sandbox_root = true, .model = true, .ollama = true}, words);
   if (!config) return report(config.error());
   if (words.empty()) {
@@ -395,9 +395,9 @@ int agent_command(std::span<const std::string_view> args) {
     instruction += word;
   }
 
-  auto box = hermes::Sandbox::open(config->sandbox_root);
+  auto box = hermit::Sandbox::open(config->sandbox_root);
   if (!box) {
-    std::cerr << "error: " << hermes::to_string(box.error()) << ": " << config->sandbox_root
+    std::cerr << "error: " << hermit::to_string(box.error()) << ": " << config->sandbox_root
               << '\n';
     return 1;
   }
@@ -407,7 +407,7 @@ int agent_command(std::span<const std::string_view> args) {
   // whole point of the rule.
   if (!backup_dir) {
     backup_dir = box->root().parent_path() /
-                 (".hermes-backups-" + box->root().filename().string());
+                 (".hermit-backups-" + box->root().filename().string());
   }
   {
     // Cheap containment check on the *lexical* paths, which is enough for an operator
@@ -447,20 +447,20 @@ int agent_command(std::span<const std::string_view> args) {
     }
   }
 
-  const auto client = hermes::ollama::Client::open(config->client);
+  const auto client = hermit::ollama::Client::open(config->client);
   if (!client) {
     std::cerr << "error: " << client.error().detail << '\n';
     return 1;
   }
 
-  auto tools = hermes::app::ToolSet::tier0(*backup_dir);
+  auto tools = hermit::app::ToolSet::tier0(*backup_dir);
   if (!tools) {
     std::cerr << "error: composing the tool set failed: "
-              << hermes::to_string(tools.error().kind) << '\n';
+              << hermit::to_string(tools.error().kind) << '\n';
     return 1;
   }
 
-  hermes::supervisor::SessionOptions options;
+  hermit::supervisor::SessionOptions options;
   options.model = config->model;
   options.num_ctx = config->client.max_num_ctx;
   if (const auto card = client->show(config->model)) {
@@ -474,7 +474,7 @@ int agent_command(std::span<const std::string_view> args) {
   // Terse and specific about the two things these models get wrong most: inventing file
   // contents rather than reading them, and announcing completion without doing the work.
   // Not a fix for either -- R6 is why the supervisor exists -- just not an invitation.
-  auto session = hermes::supervisor::Session::open(
+  auto session = hermit::supervisor::Session::open(
       options, *client,
       "You do filesystem work by calling the tools you were given. Read a file before "
       "describing it; never guess its contents. Make one tool call per step, and stop "
@@ -484,14 +484,14 @@ int agent_command(std::span<const std::string_view> args) {
     return 1;
   }
 
-  hermes::supervisor::LoopOptions loop_options;
+  hermit::supervisor::LoopOptions loop_options;
   loop_options.max_turns = max_turns;
   loop_options.budget = std::chrono::seconds{static_cast<long>(budget_seconds)};
 
   // One line per turn, then one indented line per call. The result is truncated for
   // display only -- a `read` of a real file would otherwise bury the trace, and what is
   // wanted here is the shape of the run, not its payload.
-  loop_options.observer = [](const hermes::supervisor::TurnEvent& event) {
+  loop_options.observer = [](const hermit::supervisor::TurnEvent& event) {
     std::cout << "  turn " << event.turn << "  prompt " << event.prompt_tokens
               << "  generated " << event.generated_tokens;
     if (event.reasoning_chars > 0) std::cout << "  thinking " << event.reasoning_chars << "ch";
@@ -516,16 +516,16 @@ int agent_command(std::span<const std::string_view> args) {
     // R6: what the filesystem shows, printed beside what the model did. Nothing here is
     // derived from the reply.
     for (const auto& change : event.changes.changes) {
-      std::cout << "        ~ " << hermes::supervisor::to_string(change.kind) << "  "
+      std::cout << "        ~ " << hermit::supervisor::to_string(change.kind) << "  "
                 << change.path << '\n';
     }
   };
 
   // Held here so it outlives the loop, which holds it by pointer.
-  hermes::supervisor::TreeVerifier verifier{*box};
+  hermit::supervisor::TreeVerifier verifier{*box};
   if (verify) loop_options.verifier = &verifier;
 
-  hermes::supervisor::AgentLoop loop{*client, tools->registry(), *box, loop_options};
+  hermit::supervisor::AgentLoop loop{*client, tools->registry(), *box, loop_options};
 
   std::cout << "root    : " << box->root() << '\n'
             << "backups : " << *backup_dir << "  (outside the root, R4)\n"
@@ -541,7 +541,7 @@ int agent_command(std::span<const std::string_view> args) {
 
   const auto outcome = loop.run(*session, instruction);
 
-  std::cout << "\nstopped : " << hermes::supervisor::to_string(outcome.reason) << '\n'
+  std::cout << "\nstopped : " << hermit::supervisor::to_string(outcome.reason) << '\n'
             << "turns   : " << outcome.turns << " of " << max_turns << '\n'
             << "calls   : " << outcome.calls << " (" << outcome.refusals << " refused)\n"
             << "dropped : " << outcome.dropped << " turns of history\n"
@@ -611,7 +611,7 @@ int config_command(std::span<const std::string_view> args) {
   // precisely when it would be most useful. `.ollama = false` is what makes that true
   // of a bad URL too -- `render()` marks it rather than this command refusing to run.
   const auto config =
-      hermes::app::load(args, {.sandbox_root = false, .model = false, .ollama = false}, extra);
+      hermit::app::load(args, {.sandbox_root = false, .model = false, .ollama = false}, extra);
   if (!config) return report(config.error());
   if (!extra.empty()) {
     std::cerr << "error: config takes no positional arguments, got: " << extra.front() << '\n';

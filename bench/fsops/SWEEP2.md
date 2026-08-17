@@ -2,7 +2,7 @@
 
 > ### ⚠ These scores are lower bounds
 >
-> Agents were later found writing correct output into the **Hermes-Cpp repo root**
+> Agents were later found writing correct output into the **Hermit repo root**
 > instead of `--in` — see [`results/evidence/escaped-to-repo-root/`](./results/evidence/escaped-to-repo-root/).
 > `llama32-3b` scored 0/3 on `01_create_file` while having produced the exactly-correct
 > file, in the wrong place. The penalty is uneven: models emitting absolute paths were
@@ -128,7 +128,7 @@ contamination. The `<br>` case is not explained by rendering and may well be int
 way the design consequence is unchanged: the write path needs read-back verification, and
 content that must match exactly cannot be trusted to a single unverified write.
 
-## What this means for Hermes-Cpp
+## What this means for Hermit
 
 1. **Backup-before-mutate is mandatory**, on the evidence of §1, not by analogy.
 2. **Verify by content hash, never by existence** (§1).

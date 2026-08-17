@@ -4,7 +4,7 @@
 #   tools/parity <subsys>  - commits touching that subsystem since it was ported
 set -euo pipefail
 
-REF="${HERMES_REF_REPO:-$HOME/Source/hermes-upstream}"
+REF="${HERMIT_REF_REPO:-$HOME/Source/hermes-upstream}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LEDGER="$ROOT/parity.tsv"
 

@@ -26,7 +26,7 @@ show Hermes' own `read_file` decorating content, which is the same hazard by ano
 - *"Prefer patch/write tools or line-based edits for very short files"* — that is OpenCode's
   edit tool design.
 
-The distinction matters enormously for Hermes-Cpp: a **model-intrinsic** failure is one you must
+The distinction matters enormously for Hermit: a **model-intrinsic** failure is one you must
 design *around*, while a **harness** failure is one you can design *away*. Running identical
 stages through a second harness is the cleanest control available.
 
@@ -36,8 +36,8 @@ differently under two harnesses, the cause is tool design — and that becomes a
 ## Running it
 
 ```bash
-./run_hermes_diagnostic.py --models qwen-9b gemma-12b gemma-e4b --repeats 3
-./run_hermes_diagnostic.py --models gemma-12b --stages 01_read --repeats 1 --tag <installed>  # smoke
+./run_hermit_diagnostic.py --models qwen-9b gemma-12b gemma-e4b --repeats 3
+./run_hermit_diagnostic.py --models gemma-12b --stages 01_read --repeats 1 --tag <installed>  # smoke
 ```
 
 Results land in `results/`, logs in `logs/`, agent working trees in `runs/` (gitignored).
@@ -97,8 +97,8 @@ Two modes, and the choice matters:
 | `--deterministic` | **GPU A/B**, or isolating any backend effect | Pins `temperature 0` and a fixed `seed`, so a difference is attributable to the thing you changed rather than to sampling. |
 
 ```bash
-./run_hermes_diagnostic.py --models qwen-9b --repeats 3                    # Phase 0
-./run_hermes_diagnostic.py --models qwen-9b --repeats 3 --deterministic    # GPU A/B
+./run_hermit_diagnostic.py --models qwen-9b --repeats 3                    # Phase 0
+./run_hermit_diagnostic.py --models qwen-9b --repeats 3 --deterministic    # GPU A/B
 ```
 
 `--deterministic` builds a `<model>-det:<seed>` variant with `temperature 0` and `seed` pinned,
@@ -111,7 +111,7 @@ env vars would be silently ignored and produce *fake* determinism.
 Set `BENCH_GPU` so every result file names the card it ran on:
 
 ```bash
-BENCH_GPU="Radeon Pro W7900 48GB" ./run_hermes_diagnostic.py --models qwen-9b --repeats 3
+BENCH_GPU="Radeon Pro W7900 48GB" ./run_hermit_diagnostic.py --models qwen-9b --repeats 3
 ```
 
 Kitchen's card changes on **2026-08-14** (W7900 48 GB ROCm → RTX PRO 5000 72 GB CUDA). Results

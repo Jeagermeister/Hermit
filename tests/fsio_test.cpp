@@ -1,4 +1,4 @@
-#include <hermes/core/fsio.h>
+#include <hermit/core/fsio.h>
 
 #include <gtest/gtest.h>
 
@@ -16,17 +16,17 @@
 #include <unistd.h>
 
 namespace fs = std::filesystem;
-using hermes::Fd;
-using hermes::open_in_root;
-using hermes::read_file;
-using hermes::Sandbox;
+using hermit::Fd;
+using hermit::open_in_root;
+using hermit::read_file;
+using hermit::Sandbox;
 
 namespace {
 
 class FsioTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    std::string tpl = (fs::temp_directory_path() / "hermes_fsio_XXXXXX").string();
+    std::string tpl = (fs::temp_directory_path() / "hermit_fsio_XXXXXX").string();
     std::vector<char> buf(tpl.begin(), tpl.end());
     buf.push_back('\0');
     ASSERT_NE(::mkdtemp(buf.data()), nullptr) << "could not create temp dir";

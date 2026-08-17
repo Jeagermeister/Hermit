@@ -1,6 +1,6 @@
-#include <hermes/core/tools/hash.h>
-#include <hermes/core/tools/list.h>
-#include <hermes/core/tools/read.h>
+#include <hermit/core/tools/hash.h>
+#include <hermit/core/tools/list.h>
+#include <hermit/core/tools/read.h>
 
 #include <gtest/gtest.h>
 
@@ -13,23 +13,23 @@
 #include <variant>
 #include <vector>
 
-#include <hermes/core/observed.h>
-#include <hermes/core/sha256.h>
-#include <hermes/core/tool.h>
+#include <hermit/core/observed.h>
+#include <hermit/core/sha256.h>
+#include <hermit/core/tool.h>
 
 namespace fs = std::filesystem;
-using hermes::Field;
-using hermes::HashTool;
-using hermes::ListTool;
-using hermes::parse_args;
-using hermes::RawArgs;
-using hermes::ReadTool;
-using hermes::Sandbox;
-using hermes::sha256_hex;
-using hermes::Tool;
-using hermes::ToolOutput;
-using hermes::ToolRegistry;
-using hermes::ToolRow;
+using hermit::Field;
+using hermit::HashTool;
+using hermit::ListTool;
+using hermit::parse_args;
+using hermit::RawArgs;
+using hermit::ReadTool;
+using hermit::Sandbox;
+using hermit::sha256_hex;
+using hermit::Tool;
+using hermit::ToolOutput;
+using hermit::ToolRegistry;
+using hermit::ToolRow;
 
 namespace {
 
@@ -44,7 +44,7 @@ namespace {
 class ObserveToolsTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    std::string tpl = (fs::temp_directory_path() / "hermes_obs_XXXXXX").string();
+    std::string tpl = (fs::temp_directory_path() / "hermit_obs_XXXXXX").string();
     std::vector<char> buf(tpl.begin(), tpl.end());
     buf.push_back('\0');
     ASSERT_NE(::mkdtemp(buf.data()), nullptr) << "could not create temp dir";
@@ -99,15 +99,15 @@ class ObserveToolsTest : public ::testing::Test {
   }
 
   // Parse + invoke through the registry, the way a dispatch site will.
-  std::expected<ToolOutput, hermes::ToolError> call(Tool& tool, const RawArgs& raw) {
+  std::expected<ToolOutput, hermit::ToolError> call(Tool& tool, const RawArgs& raw) {
     auto parsed = parse_args(tool.spec(), raw, *box_);
-    if (!parsed) return std::unexpected{hermes::ToolError{to_string(parsed.error())}};
+    if (!parsed) return std::unexpected{hermit::ToolError{to_string(parsed.error())}};
     return tool.invoke(*parsed);
   }
 
   fs::path tmp_;
   std::unique_ptr<Sandbox> box_;
-  hermes::ObservedState state_;
+  hermit::ObservedState state_;
 };
 
 // --- read --------------------------------------------------------------------

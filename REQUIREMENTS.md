@@ -15,7 +15,7 @@ Evidence base: **259 runs** — 252 across two sweeps, plus 7 targeted probes, 2
 `--in` entirely — confirmed by three probes launching from different directories with `--in`
 pointed elsewhere; each returned its launch directory. The **file tools** resolve differently
 again: agents wrote `hello.txt`, `project/src/utils/`, `data/` and `logs/` into the
-**Hermes-Cpp repository root** while their working tree sat four levels below. One escaped
+**Hermit repository root** while their working tree sat four levels below. One escaped
 directory contained `.hermes-tmp.HRRyCn`, proving a Hermes file tool wrote it rather than a
 shell command.
 
@@ -161,7 +161,7 @@ at startup rather than 60 runs into a job.
 
 Requirements R3 through R7 — verification, backup, read-back, state polling, retry — have **no
 upstream equivalent that these runs revealed**. Hermes Agent did not do them in any observed
-run; that is why the failures above were observable at all. The valuable part of Hermes-Cpp is
+run; that is why the failures above were observable at all. The valuable part of Hermit is
 therefore not ported code, it is new code.
 
 *Stated precisely, because it is a negative claim about code that has not been read:* this is

@@ -322,13 +322,13 @@ relied on it alone would be trusting the model to use our tools.
 [D7](./DECISIONS.md)'s layering table already assigns every piece:
 
 ```
-src/hermes/core/tools/        Tier 0. Cannot reach a model.
-src/hermes/supervisor/tools/  Tier 1. Links the transport.
-src/hermes/app/mcp.cpp        The frontend. JSON-RPC over stdin/stdout.
+src/hermit/core/tools/        Tier 0. Cannot reach a model.
+src/hermit/supervisor/tools/  Tier 1. Links the transport.
+src/hermit/app/mcp.cpp        The frontend. JSON-RPC over stdin/stdout.
 ```
 
-**The tier boundary is enforced by the build graph, not by discipline.** `hermes_core` links
-neither `hermes_ollama` nor anything that could reach it, so a Tier 0 tool that tried to call a
+**The tier boundary is enforced by the build graph, not by discipline.** `hermit_core` links
+neither `hermit_ollama` nor anything that could reach it, so a Tier 0 tool that tried to call a
 model would fail to link. This is the same property `SandboxPath` gives R1: structural, and still
 true at tool #37.
 
@@ -336,13 +336,13 @@ true at tool #37.
 
 Verified missing against `CMakeLists.txt` on 2026-08-15; **both added 2026-08-16**:
 
-1. **`hermes_supervisor` did not link `hermes_core`.** Stated precisely: the gap was a missing
+1. **`hermit_supervisor` did not link `hermit_core`.** Stated precisely: the gap was a missing
    *usage-requirement declaration*, not an in-tree link failure — every target publishes the
    same include dir and the two final binaries linked all four archives, so a Tier 1 tool here
    would in fact have compiled and linked by accident. The edge turns that accident into a
-   declared dependency, which is exactly what an out-of-tree consumer of `hermes::supervisor`
+   declared dependency, which is exactly what an out-of-tree consumer of `hermit::supervisor`
    alone would have been broken by. Required before `triage` or `summarize` exists.
-2. **`hermes_app` did not link `hermes_supervisor`.** No *library* target saw all four — only
+2. **`hermit_app` did not link `hermit_supervisor`.** No *library* target saw all four — only
    the final binaries (the CLI and the test runner) did — so registry composition in `app`
    would likewise have leaned on the binaries' link lines rather than a declared edge. Required
    before `mcp.cpp` exists.
@@ -351,7 +351,7 @@ Verified missing against `CMakeLists.txt` on 2026-08-15; **both added 2026-08-16
 
 [D4](./DECISIONS.md) gives tools an `Args` struct with field descriptors "for schema generation
 and parsing" — both JSON operations. But [D2](./DECISIONS.md) deliberately put `nlohmann` in the
-build *with the client*, and `hermes_core` links no JSON library.
+build *with the client*, and `hermit_core` links no JSON library.
 
 The resolution is better than widening `core`: **descriptors are pure data** (name, type,
 required, documentation) with no JSON types, and rendering them to JSON Schema happens in a layer
@@ -425,7 +425,7 @@ rather than the reverse.
 stdio natively — `command`, `args`, `env`, `disabled`, `autoApprove` under an `mcpServers` map,
 read from `.kiro/settings/mcp.json` (workspace, taking precedence) and `~/.kiro/settings/mcp.json`
 (user), hot-reloaded on save. **That is exactly the transport D7 already specifies**, so no new
-frontend shape is needed: a Hermes-Cpp binary is a `command` entry and nothing more.
+frontend shape is needed: a Hermit binary is a `command` entry and nothing more.
 
 **A "Power" is the wrong vehicle, and this is settled rather than open.** Powers are pre-built
 integrations *maintained by Kiro* for Kiro Web, toggled in agent settings; some wrap MCP servers
@@ -445,7 +445,7 @@ about not legislating the caller's budget.
 the argument.** It warns that stdio MCP servers "execute arbitrary commands inside your
 environment with the same privileges and access as the agent itself, including access to your
 source code, environment variables, secrets, and any credentials available in the session."
-Ambient full authority is the ecosystem default. Hermes-Cpp is the MCP server that *reduces*
+Ambient full authority is the ecosystem default. Hermit is the MCP server that *reduces*
 it — R1 containment by construction, D10 confinement for the one tool that cannot be, R3/R4/R5
 verification on every mutation. That is the pitch, and it is stronger for a programmatic caller
 than for a human one.
@@ -457,7 +457,7 @@ free:
 
 | Path | Cost |
 |---|---|
-| `"command": "wsl.exe", "args": ["-e", "hermes-cpp", …]` | Requires WSL, which is not a safe assumption. Kiro passes Windows paths; the sandbox root needs a Linux path. **The translation layer sits directly on `Sandbox::resolve`** |
+| `"command": "wsl.exe", "args": ["-e", "hermit", …]` | Requires WSL, which is not a safe assumption. Kiro passes Windows paths; the sandbox root needs a Linux path. **The translation layer sits directly on `Sandbox::resolve`** |
 | A native Windows build | A separate package — see [SCOPE.md](./SCOPE.md) § Platforms |
 
 **Neither is on the near path, and that is the decision.** Linux is the product. This section
@@ -474,7 +474,7 @@ fidelity anywhere. The only thing that scales with hardware is Tier 1, which is 
 always optional.
 
 Choosing a model appropriate to the machine is an **operator responsibility**. The model and base
-URL are already `hermes_app` settings, so this is a config file per machine.
+URL are already `hermit_app` settings, so this is a config file per machine.
 
 **Where a capability must be restricted, gate on the model, not the machine.** A rule like "no
 mutating tools on the laptop" reintroduces the per-machine variant this section forbids, and
@@ -503,8 +503,8 @@ another worker modifies it in between: best case the exact `old` no longer match
 fails closed; worst case R4's snapshot captures an intermediate state neither worker intended,
 and undo restores something that never existed.
 
-Concurrency therefore lives in the **caller's harness**, expressed as more `hermes-cpp` processes.
-Nothing inside Hermes gains a thread. The join is `hash` — deterministic, and a Tier 0 call.
+Concurrency therefore lives in the **caller's harness**, expressed as more `hermit` processes.
+Nothing inside Hermit gains a thread. The join is `hash` — deterministic, and a Tier 0 call.
 
 ---
 
@@ -618,7 +618,7 @@ Independent of the above, and cheap:
 
 8. **Re-run `bench/fsops/`.** Both sweep documents carry the banner *"Re-run before treating
    any per-task number as settled."* Per [NEXT-RUN.md](./bench/fsops/NEXT-RUN.md):
-   - The working-tree escape is **already fixed** — runs now live in `~/.cache/hermes-fsops/runs`,
+   - The working-tree escape is **already fixed** — runs now live in `~/.cache/hermit-fsops/runs`,
      outside any git repo. The published scores simply predate that fix.
    - `01_create_file`, `02_make_dirs` and `08_write_and_run_script` are the three with confirmed
      escaped artifacts and are the minimum re-run.

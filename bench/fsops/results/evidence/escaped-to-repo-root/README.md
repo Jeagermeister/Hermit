@@ -1,6 +1,6 @@
 # Work that landed in the repo root instead of `--in`
 
-Recovered 2026-08-13 from the Hermes-Cpp repository root after sweeps 1 and 2.
+Recovered 2026-08-13 from the Hermit repository root after sweeps 1 and 2.
 
 | artifact | task | what it actually shows |
 |---|---|---|
@@ -24,13 +24,13 @@ unaffected, while models emitting relative paths were penalised. Part of what th
 as "filesystem ability" is really "does this model emit absolute paths."
 
 That is a **tool-design artifact**, on the harness side of exactly the line Phase 0 exists to
-draw — and it is fixable, which makes it a Hermes-Cpp requirement rather than a model limitation.
+draw — and it is fixable, which makes it a Hermit requirement rather than a model limitation.
 
 ## The fix
 
-Working trees moved out of the repository (`~/.cache/hermes-fsops/runs`, override with
+Working trees moved out of the repository (`~/.cache/hermit-fsops/runs`, override with
 `FSOPS_RUNS`), so a git-root fallback can no longer land inside tracked source. `WATCH_DIRS`
-still includes the Hermes-Cpp root so the same escape is caught if it recurs.
+still includes the Hermit root so the same escape is caught if it recurs.
 
 **Still unconfirmed:** whether Hermes resolves an empty `workdir` to the enclosing git root
 specifically. Run one shell task with `--transcripts` on an idle GPU and read the `workdir`
@@ -58,10 +58,10 @@ two models fits that.
 **The escapes therefore came from the file tools, not the shell.** `project/src/utils/` contained
 `.hermes-tmp.HRRyCn`, a Hermes-authored temp file, so a file tool wrote it. Those apparently
 resolve relative paths against something other than cwd — an enclosing git or project root is
-the remaining hypothesis, consistent with every escaped artifact landing at the Hermes-Cpp root
+the remaining hypothesis, consistent with every escaped artifact landing at the Hermit root
 while the runs sat four levels below it.
 
-**After moving run trees to `~/.cache/hermes-fsops/runs`, six runs of the two previously-escaping
+**After moving run trees to `~/.cache/hermit-fsops/runs`, six runs of the two previously-escaping
 tasks produced zero strays** and the repo root stayed clean. That is consistent with the
 hypothesis but is six runs, not proof.
 

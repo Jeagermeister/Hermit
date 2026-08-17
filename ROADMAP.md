@@ -51,7 +51,7 @@ A finding you must design *around* is very different from one you can design *aw
 
 **Harness of record:** `local-agent-benchmarks/hermes-diagnostic/`. That is what produced the
 data — preflight/postflight, three-way classification, controller locking, protected-baseline
-hashing. `bench/run_hermes_diagnostic.py` in *this* repo was superseded and has never been run;
+hashing. `bench/run_hermit_diagnostic.py` in *this* repo was superseded and has never been run;
 don't reach for it.
 
 ### Status: ran, and produced a leaderboard rather than the delta
@@ -107,11 +107,11 @@ don't reach for it.
 
 ## Phase 1 — Foundations (no blockers)
 
-- [x] **Sandbox root and path resolution (R1)** — `src/hermes/core/sandbox.{h,cpp}`, 42 tests.
+- [x] **Sandbox root and path resolution (R1)** — `src/hermit/core/sandbox.{h,cpp}`, 42 tests.
       `SandboxPath` is constructible only by `Sandbox::resolve`, so any code taking one is
       R1-correct by construction. Resolution is POSIX-order (components walked, symlinks
       expanded as met), which is what makes `..` after a symlink mean what the OS means.
-- [x] **Model preflight (R9)** — `src/hermes/ollama/preflight.{h,cpp}`, 15 tests. Six checks
+- [x] **Model preflight (R9)** — `src/hermit/ollama/preflight.{h,cpp}`, 15 tests. Six checks
       are defined; a default run emits five, since the inference warmup is opt-in and the
       tools gate is waivable. Each check that runs fails closed: "I could not determine the
       context window" is a failure, not a pass. Findings from building it:
@@ -153,7 +153,7 @@ don't reach for it.
         pinned-variant discipline the benchmark harnesses built (8 `-agent` variants against 6
         base tags) turns out to be an artifact of
         driving Ollama through an endpoint that could not set `num_ctx`.
-- [x] **Ollama client** — `src/hermes/ollama/client.{h,cpp}`. Native `/api/tags`, `/api/show`
+- [x] **Ollama client** — `src/hermit/ollama/client.{h,cpp}`. Native `/api/tags`, `/api/show`
       and `/api/chat`, non-streamed; verified against a live daemon and clean under ASan/UBSan
       and clang. Tool-call dispatch is deliberately *not* here — it belongs with the agent loop
       in Phase 2, and this reads the text half of a reply only.
@@ -169,19 +169,19 @@ don't reach for it.
       interrogating the wrong component. **Verified on g++ 15.2 and clang 21.1, both against
       libstdc++. libc++ is untested.**
 - [x] JSON handling — nlohmann v3.12.0, in the build with the client (D2)
-- [x] **Config + CLI entry point** — `src/hermes/app/config.{h,cpp}`, 78 tests. Four sources
+- [x] **Config + CLI entry point** — `src/hermit/app/config.{h,cpp}`, 78 tests. Four sources
       overlaid field by field — defaults < `--config` file < environment < flags — with each
-      field recording which source last wrote it. A new `hermes_app` target, because settings
+      field recording which source last wrote it. A new `hermit_app` target, because settings
       that name a model and a base URL cannot live in `core` under D7's layering table, and
       because the MCP-over-stdio frontend has to compose itself from the same settings rather
-      than from a second parser. `hermes-cpp config` prints the resolved set. Findings from
+      than from a second parser. `hermit config` prints the resolved set. Findings from
       building it:
       - **R1 is a rule about configuration, not just about path resolution.** Its own words are
         "never inherit a working directory, never infer a project or git root," and applying
         that here settles two questions that would otherwise have been taste. The sandbox root
         gets **no default** — not the working directory, not `$HOME`, not a git root, because
         every candidate default *is* an inferred root. And there is **no implicit config-file
-        search**: walking up from the working directory looking for `.hermes.json` is the same
+        search**: walking up from the working directory looking for `.hermit.json` is the same
         act, so a file is read when it is named and never otherwise.
       - **A relative sandbox root has three different honest answers, one per source.** This was
         not anticipated and is the most interesting thing the work turned up. A path in a *file*
@@ -220,7 +220,7 @@ don't reach for it.
         process.** `!file` is false, so the guard passes; libstdc++ throws
         `std::ios_base::failure` out of `basic_filebuf::underflow` on the first read — from
         inside the streambuf, where the stream's exception mask does not gate it —
-        `istreambuf_iterator` propagates it, and `main` has no handler. `hermes-cpp config
+        `istreambuf_iterator` propagates it, and `main` has no handler. `hermit config
         --config /etc` dumped core. Pointing at a config *directory* instead of the file inside
         it is an ordinary slip. Fixed by requiring a regular file before opening, which also
         covers a FIFO (where the `open` itself would have blocked forever) and a device node,
@@ -232,7 +232,7 @@ don't reach for it.
         job is to bound a wedged daemon — the same shape as R9's original fail-open and the
         sandbox's EACCES bug. Now bounded at both ends, in the overlays and again in
         `validate`.
-      - **`HERMES_CONFIG=` set-but-empty read no file and said nothing** — the fail-closed rule
+      - **`HERMIT_CONFIG=` set-but-empty read no file and said nothing** — the fail-closed rule
         broken for the single variable that selects every other setting. It was also the one
         setting read through a bare `getenv` rather than the injected lookup, so no test could
         reach it; that is why it survived. Both fixed together, which is not a coincidence.
@@ -254,16 +254,16 @@ don't reach for it.
       **A second review round, against the fixed code, found four more — including one the
       first round's own fix introduced.** Recorded because the pattern is the lesson:
 
-      - **`HERMES_CONFIG` was resolved against the working directory, while
-        `HERMES_SANDBOX_ROOT` right beside it was rejected for exactly that.** The fix that
+      - **`HERMIT_CONFIG` was resolved against the working directory, while
+        `HERMIT_SANDBOX_ROOT` right beside it was rejected for exactly that.** The fix that
         routed the variable through the testable seam never asked whether the value was
         relative. Same doctrine, opposite treatment, three functions apart — and the longer
         route was worse: a cwd-dependent *file* can itself set a relative `sandbox_root`
         anchored to whichever directory won. An inferred root arriving by the back door. Now
         rejected, with the same message as its sibling.
       - **The D7 loopback check ran for commands that never open a socket.** An
-        `HERMES_OLLAMA_URL` exported for some other tool broke `resolve`, which is pure
-        filesystem work — and stopped `hermes-cpp config` printing, which is the command whose
+        `HERMIT_OLLAMA_URL` exported for some other tool broke `resolve`, which is pure
+        filesystem work — and stopped `hermit config` printing, which is the command whose
         entire job is showing you which value is wrong. Gated on a new `Requirements::ollama`,
         with `render()` marking a non-loopback URL instead. Verified that `preflight` still
         refuses one, since that is the half that matters.
@@ -285,9 +285,9 @@ don't reach for it.
       flag the operator actually got wrong and no file is read on the strength of a line
       already known to be invalid. Two parsers over one command line can only be reconciled by
       ordering, not by making each smarter.
-- [x] **Session/history model** — `src/hermes/supervisor/session.{h,cpp}`, 49 tests, plus a
-      `hermes-cpp session` harness for the one property a unit test cannot settle. A new
-      `hermes_supervisor` target: [D7](./DECISIONS.md)'s table puts bounded sessions in the
+- [x] **Session/history model** — `src/hermit/supervisor/session.{h,cpp}`, 49 tests, plus a
+      `hermit session` harness for the one property a unit test cannot settle. A new
+      `hermit_supervisor` target: [D7](./DECISIONS.md)'s table puts bounded sessions in the
       supervisor layer, and this is the first code that belongs there. It drives no socket
       itself — `prepare()` returns a `ChatRequest` and `record()` consumes a `ChatReply` — so
       every policy decision in it is testable offline, for the same reason D8's clamp is.
@@ -455,7 +455,7 @@ don't reach for it.
       guarantees actually hold, rather than assuming them. [ROUTING.md](./ROUTING.md) §4's
       `dev:ino:size:mtime:ctime` identity tuple is shared by `list`, the staleness guard and
       `edit`'s fail-closed check, and **every component of it is substrate-dependent and was
-      unchecked**. Lives in `hermes_core` beside `Sandbox`, needs no new link edge, and is
+      unchecked**. Lives in `hermit_core` beside `Sandbox`, needs no new link edge, and is
       implementable before ROUTING.md §12 step 1. See
       [D11](./DECISIONS.md#d11--the-substrate-is-probed-not-assumed).
 
@@ -483,7 +483,7 @@ These are hard to reverse and benefit from being argued out before code exists:
 ## Phase 2 — Core loop and minimal tools
 
 - [x] ~~Agent loop: history, tool dispatch, bounded turns~~ — done 2026-08-17.
-      `src/hermes/supervisor/loop.cpp` drives `prepare() -> chat() -> record()`, dispatches every
+      `src/hermit/supervisor/loop.cpp` drives `prepare() -> chat() -> record()`, dispatches every
       call in the order the model made it, and feeds each result back as a `tool` message.
       Bounded by turn count, wall clock (R8), **and** a per-turn cap on calls from one reply
       (a runaway guard; calls past it are refused, never dropped), with the honest limit
@@ -569,7 +569,7 @@ model calling this as a tool.
         mount or a mounted share under `--root` is read, contradicting verify.h's "never opens
         anything outside the root". Lands with D7's `openat2` gate.
       - `hash_regular` has no byte cap and no deadline, while `read`/`grep`/`edit` are capped at
-        16 MiB. Hermes' SHA-256 is a portable software implementation (~60 MB/s, roughly 70x
+        16 MiB. Hermit's SHA-256 is a portable software implementation (~60 MB/s, roughly 70x
         slower than a hardware-accelerated `sha256sum`), so a large tree's baseline runs outside
         the R8 bound entirely — the budget is only checked between turns.
       - The walk opens every sibling directory of a level before descending, so fd use is

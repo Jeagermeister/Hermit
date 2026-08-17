@@ -68,7 +68,7 @@ tag against the newest upstream tag.
 
 ## Keeping the reference current
 
-The reference clone lives at `~/Source/hermes-upstream` (override with `$HERMES_REF_REPO`).
+The reference clone lives at `~/Source/hermes-upstream` (override with `$HERMIT_REF_REPO`).
 It is blobless and single-branch — 261 MB against 5.8 GB for a full mirror, because upstream
 carries 1,505 branches of which only `main` matters here.
 

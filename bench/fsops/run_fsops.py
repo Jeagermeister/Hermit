@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Filesystem-operations benchmark for SMALL local models under Hermes Agent.
 
-Separate from bench/run_hermes_diagnostic.py on purpose. That one reproduces the
+Separate from bench/run_hermit_diagnostic.py on purpose. That one reproduces the
 OpenCode stages byte-for-byte to isolate harness effects; this one asks a different
 question:
 
     Which small models can be trusted with the primitive filesystem operations
-    Hermes-Cpp's supervisor will hand them - and what do they break when they fail?
+    Hermit's supervisor will hand them - and what do they break when they fail?
 
 Two things are scored, always:
   1. Did the task get done?          -> per-task assertions in tasks.py
@@ -45,10 +45,10 @@ from tasks import TASKS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
 # Working trees live OUTSIDE the repository. On 2026-08-12 agents wrote task output into
-# the Hermes-Cpp repo root instead of --in - correct work, wrong directory - which scored as
+# the Hermit repo root instead of --in - correct work, wrong directory - which scored as
 # model failure and polluted tracked source. Keeping run trees out of any git repo means a
 # git-root fallback cannot land on real code.
-RUNS = Path(os.environ.get("FSOPS_RUNS", Path.home() / ".cache" / "hermes-fsops" / "runs"))
+RUNS = Path(os.environ.get("FSOPS_RUNS", Path.home() / ".cache" / "hermit-fsops" / "runs"))
 LOGS, RESULTS = ROOT / "logs", ROOT / "results"
 TRANSCRIPTS = ROOT / "transcripts"
 
@@ -114,7 +114,7 @@ FAILURE_SIGNATURES = ("API call failed", "HTTP 404", "HTTP 500", "HTTP 502",
 # --------------------------------------------------------------------- utilities
 # Directories an escaping agent has actually been seen to write into. A single canary
 # one level above the working tree was NOT enough: on 2026-08-12 a model wrote task 08's
-# count.sh into the Hermes-Cpp REPO ROOT - four levels up - and the run scored clean.
+# count.sh into the Hermit REPO ROOT - four levels up - and the run scored clean.
 # Hermes' terminal tool appears to fall back to a project/git root when the model leaves
 # `workdir` empty, so relative-path shell commands land outside --in entirely.
 # RUNS' parent, plus the repo tree - the repo root stays watched precisely because that
@@ -412,7 +412,7 @@ def run_task(model_key: str, tag: str, task_name: str, rep: int, timeout: int,
 def provenance() -> dict:
     """Everything needed to prove a future run is comparable to this one.
 
-    The task-suite hash is the important field. Hermes-Cpp will eventually be scored
+    The task-suite hash is the important field. Hermit will eventually be scored
     against these numbers, and that comparison is only valid if it ran the SAME tasks -
     the same lesson `bench/stages.py` encodes for the OpenCode baseline. A differing
     hash means the two datasets are unrelated experiments, not a before/after.
@@ -605,7 +605,7 @@ def main() -> int:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out = RESULTS / (args.out or f"fsops-{stamp}.json")
     out.write_text(json.dumps({
-        "harness": "hermes-fsops",
+        "harness": "hermit-fsops",
         "note": "Filesystem primitives for small models under Hermes Agent. Independent of the "
                 "Phase 0 OpenCode comparison - do not merge the two datasets.",
         "machine": os.uname().nodename,

@@ -1,4 +1,4 @@
-#include <hermes/app/config.h>
+#include <hermit/app/config.h>
 
 #include <gtest/gtest.h>
 
@@ -9,18 +9,18 @@
 #include <string_view>
 #include <vector>
 
-using hermes::app::apply_env;
-using hermes::app::apply_flags;
-using hermes::app::apply_json;
-using hermes::app::Config;
-using hermes::app::ConfigError;
-using hermes::app::ConfigSource;
-using hermes::app::Field;
-using hermes::app::find_config_flag;
-using hermes::app::parse_whole;
-using hermes::app::Requirements;
-using hermes::app::select_config_file;
-using hermes::app::validate;
+using hermit::app::apply_env;
+using hermit::app::apply_flags;
+using hermit::app::apply_json;
+using hermit::app::Config;
+using hermit::app::ConfigError;
+using hermit::app::ConfigSource;
+using hermit::app::Field;
+using hermit::app::find_config_flag;
+using hermit::app::parse_whole;
+using hermit::app::Requirements;
+using hermit::app::select_config_file;
+using hermit::app::validate;
 
 namespace {
 
@@ -32,7 +32,7 @@ namespace {
 /// A fake environment. `apply_env` takes a lookup rather than calling getenv so a test
 /// can state precisely which variables exist -- including the difference between unset
 /// and set-to-empty, which the two are treated differently.
-hermes::app::EnvLookup env_of(std::map<std::string, std::string, std::less<>> vars) {
+hermit::app::EnvLookup env_of(std::map<std::string, std::string, std::less<>> vars) {
   return [vars = std::move(vars)](std::string_view name) -> std::optional<std::string> {
     const auto found = vars.find(name);
     if (found == vars.end()) return std::nullopt;
@@ -45,7 +45,7 @@ std::vector<std::string_view> flags(std::initializer_list<std::string_view> args
 }
 
 /// apply_flags with the positional vector a caller would otherwise have to declare.
-hermes::app::ConfigResult<void> apply(Config& config,
+hermit::app::ConfigResult<void> apply(Config& config,
                                       std::initializer_list<std::string_view> args) {
   const auto owned = flags(args);
   std::vector<std::string_view> positional;
@@ -56,7 +56,7 @@ nlohmann::json parse(std::string_view text) {
   return nlohmann::json::parse(text, nullptr, false);
 }
 
-constexpr std::string_view kBase = "/etc/hermes";
+constexpr std::string_view kBase = "/etc/hermit";
 
 }  // namespace
 
@@ -82,7 +82,7 @@ TEST(Config, TheClampDefaultsToTheValueD8Records) {
 }
 
 TEST(Config, TheContextFloorDefaultsToR9s) {
-  EXPECT_EQ(Config{}.preflight.minimum_context, hermes::ollama::kMinimumContext);
+  EXPECT_EQ(Config{}.preflight.minimum_context, hermit::ollama::kMinimumContext);
   EXPECT_TRUE(Config{}.preflight.require_tools);
   EXPECT_FALSE(Config{}.preflight.warmup);
 }
@@ -95,7 +95,7 @@ TEST(Config, FlagsBeatEnvironmentBeatsFile) {
   EXPECT_EQ(config.model, "from-file");
   EXPECT_EQ(config.origin(Field::Model), ConfigSource::File);
 
-  ASSERT_TRUE(apply_env(config, env_of({{"HERMES_MODEL", "from-env"}})));
+  ASSERT_TRUE(apply_env(config, env_of({{"HERMIT_MODEL", "from-env"}})));
   EXPECT_EQ(config.model, "from-env");
   EXPECT_EQ(config.origin(Field::Model), ConfigSource::Environment);
 
@@ -108,7 +108,7 @@ TEST(Config, ASourceThatSaysNothingOverwritesNothing) {
   // The overlays are field-by-field, not whole-object replacement. A config file that
   // sets only the model must not reset the URL somebody exported.
   Config config;
-  ASSERT_TRUE(apply_env(config, env_of({{"HERMES_OLLAMA_URL", "http://127.0.0.1:9999"}})));
+  ASSERT_TRUE(apply_env(config, env_of({{"HERMIT_OLLAMA_URL", "http://127.0.0.1:9999"}})));
   ASSERT_TRUE(apply(config, {"--model", "qwen"}));
 
   EXPECT_EQ(config.client.base_url, "http://127.0.0.1:9999");
@@ -186,13 +186,13 @@ TEST(Config, ARelativeRootInAFileAnchorsToTheFilesOwnDirectory) {
   // against the working directory would make one file mean different things depending
   // on where the binary was launched.
   Config config;
-  ASSERT_TRUE(apply_json(config, parse(R"({"sandbox_root": "work"})"), "/etc/hermes"));
-  EXPECT_EQ(config.sandbox_root, std::filesystem::path{"/etc/hermes/work"});
+  ASSERT_TRUE(apply_json(config, parse(R"({"sandbox_root": "work"})"), "/etc/hermit"));
+  EXPECT_EQ(config.sandbox_root, std::filesystem::path{"/etc/hermit/work"});
 }
 
 TEST(Config, AnAbsoluteRootInAFileIsLeftAlone) {
   Config config;
-  ASSERT_TRUE(apply_json(config, parse(R"({"sandbox_root": "/srv/work"})"), "/etc/hermes"));
+  ASSERT_TRUE(apply_json(config, parse(R"({"sandbox_root": "/srv/work"})"), "/etc/hermit"));
   EXPECT_EQ(config.sandbox_root, std::filesystem::path{"/srv/work"});
 }
 
@@ -246,10 +246,10 @@ TEST(Config, AnEmptyStringIsRejected) {
 
 TEST(Config, TheEnvironmentSetsThePerMachineValues) {
   Config config;
-  ASSERT_TRUE(apply_env(config, env_of({{"HERMES_SANDBOX_ROOT", "/srv/work"},
-                                        {"HERMES_MODEL", "qwen35-agent"},
-                                        {"HERMES_OLLAMA_URL", "http://localhost:11500"},
-                                        {"HERMES_MAX_NUM_CTX", "131072"}})));
+  ASSERT_TRUE(apply_env(config, env_of({{"HERMIT_SANDBOX_ROOT", "/srv/work"},
+                                        {"HERMIT_MODEL", "qwen35-agent"},
+                                        {"HERMIT_OLLAMA_URL", "http://localhost:11500"},
+                                        {"HERMIT_MAX_NUM_CTX", "131072"}})));
   EXPECT_EQ(config.sandbox_root, std::filesystem::path{"/srv/work"});
   EXPECT_EQ(config.model, "qwen35-agent");
   EXPECT_EQ(config.client.base_url, "http://localhost:11500");
@@ -261,24 +261,24 @@ TEST(Config, ARelativeRootInTheEnvironmentIsRejected) {
   // an environment variable has neither, and picking an anchor silently is how an
   // inferred root gets back in.
   Config config;
-  const auto result = apply_env(config, env_of({{"HERMES_SANDBOX_ROOT", "work"}}));
+  const auto result = apply_env(config, env_of({{"HERMIT_SANDBOX_ROOT", "work"}}));
   ASSERT_FALSE(result);
   EXPECT_EQ(result.error().kind, ConfigError::BadValue);
   EXPECT_NE(result.error().detail.find("--root"), std::string::npos);
 }
 
 TEST(Config, AVariableSetToEmptyIsAnErrorRatherThanUnset) {
-  // `export HERMES_MODEL=` is somebody trying to say something. Treating it as unset
+  // `export HERMIT_MODEL=` is somebody trying to say something. Treating it as unset
   // silently falls back to a different source, which is a surprise either way.
   Config config;
-  const auto result = apply_env(config, env_of({{"HERMES_MODEL", ""}}));
+  const auto result = apply_env(config, env_of({{"HERMIT_MODEL", ""}}));
   ASSERT_FALSE(result);
   EXPECT_EQ(result.error().kind, ConfigError::BadValue);
 }
 
 TEST(Config, AnUnparseableClampInTheEnvironmentIsRejected) {
   Config config;
-  const auto result = apply_env(config, env_of({{"HERMES_MAX_NUM_CTX", "64k"}}));
+  const auto result = apply_env(config, env_of({{"HERMIT_MAX_NUM_CTX", "64k"}}));
   ASSERT_FALSE(result);
   EXPECT_EQ(result.error().kind, ConfigError::BadValue);
 }
@@ -289,12 +289,12 @@ TEST(Config, TimeoutsAndPolicyAreDeliberatelyNotInTheEnvironment) {
   // them is a long tail of settings quietly in force on one machine and not another --
   // the confound D3 exists to keep out.
   Config config;
-  ASSERT_TRUE(apply_env(config, env_of({{"HERMES_CHAT_TIMEOUT", "1"},
-                                        {"HERMES_WARMUP", "1"},
-                                        {"HERMES_MIN_CONTEXT", "1"}})));
+  ASSERT_TRUE(apply_env(config, env_of({{"HERMIT_CHAT_TIMEOUT", "1"},
+                                        {"HERMIT_WARMUP", "1"},
+                                        {"HERMIT_MIN_CONTEXT", "1"}})));
   EXPECT_EQ(config.client.chat_timeout.count(), 600);
   EXPECT_FALSE(config.preflight.warmup);
-  EXPECT_EQ(config.preflight.minimum_context, hermes::ollama::kMinimumContext);
+  EXPECT_EQ(config.preflight.minimum_context, hermit::ollama::kMinimumContext);
 }
 
 // --- flags -------------------------------------------------------------------
@@ -363,7 +363,7 @@ TEST(Config, TheConfigFlagIsConsumedWithItsValue) {
   // path must not fall through into the positional list, where `resolve` would try to
   // resolve it as a sandbox path.
   Config config;
-  const auto owned = flags({"--config", "/etc/hermes/hermes.json", "a.txt"});
+  const auto owned = flags({"--config", "/etc/hermit/hermit.json", "a.txt"});
   std::vector<std::string_view> positional;
   ASSERT_TRUE(apply_flags(config, owned, positional));
   EXPECT_EQ(positional, (std::vector<std::string_view>{"a.txt"}));
@@ -372,11 +372,11 @@ TEST(Config, TheConfigFlagIsConsumedWithItsValue) {
 // --- locating the config file ------------------------------------------------
 
 TEST(Config, TheConfigFlagIsFoundBeforeAnythingIsApplied) {
-  const auto owned = flags({"--model", "qwen", "--config", "/etc/hermes.json"});
+  const auto owned = flags({"--model", "qwen", "--config", "/etc/hermit.json"});
   const auto found = find_config_flag(owned);
   ASSERT_TRUE(found);
   ASSERT_TRUE(*found);
-  EXPECT_EQ(**found, "/etc/hermes.json");
+  EXPECT_EQ(**found, "/etc/hermit.json");
 }
 
 TEST(Config, NoConfigFlagIsNotAnError) {
@@ -439,7 +439,7 @@ TEST(Config, EveryValueTakingFlagIsInTheSharedTable) {
   // make find_config_flag skip a live `--config` and quietly not load a named file.
   // The other direction -- a value-taking flag added to apply_flags but missing from
   // the table -- is caught inside take(), which refuses to run for an unlisted flag.
-  for (const std::string_view flag : hermes::app::flags_taking_a_value()) {
+  for (const std::string_view flag : hermit::app::flags_taking_a_value()) {
     Config config;
     const auto alone = flags({flag});
     std::vector<std::string_view> unused;
@@ -462,12 +462,12 @@ TEST(Config, EveryValueTakingFlagIsInTheSharedTable) {
 TEST(Config, TheSharedTableHoldsExactlyTheNineValueTakingFlags) {
   // Pins the count so a flag silently dropped from the table is noticed even if no
   // other test happens to exercise it.
-  EXPECT_EQ(hermes::app::flags_taking_a_value().size(), 9u);
+  EXPECT_EQ(hermit::app::flags_taking_a_value().size(), 9u);
 }
 
 TEST(Config, NoBooleanFlagIsListedAsValueTaking) {
   for (const std::string_view boolean : {"--warmup", "--no-warmup", "--tools", "--no-tools"}) {
-    for (const std::string_view listed : hermes::app::flags_taking_a_value()) {
+    for (const std::string_view listed : hermit::app::flags_taking_a_value()) {
       EXPECT_NE(boolean, listed) << boolean << " must not consume the next argument";
     }
   }
@@ -512,7 +512,7 @@ TEST(Config, ABadCommandLineIsReportedBeforeAnyFileIsOpened) {
   // error is raised before any source is consulted.
   const auto owned = flags({"--model", "--", "--config", "/nope/absent.json"});
   std::vector<std::string_view> positional;
-  const auto result = hermes::app::load(owned, {}, positional);
+  const auto result = hermit::app::load(owned, {}, positional);
   ASSERT_FALSE(result);
   EXPECT_EQ(result.error().kind, ConfigError::MissingFlagValue);
   EXPECT_NE(result.error().detail.find("--model"), std::string::npos);
@@ -523,7 +523,7 @@ TEST(Config, ABadCommandLineIsReportedBeforeAnyFileIsOpened) {
 TEST(Config, AnUnknownFlagIsReportedBeforeAConfigFileIsRead) {
   const auto owned = flags({"--frobnicate", "--config", "/nope/absent.json"});
   std::vector<std::string_view> positional;
-  const auto result = hermes::app::load(owned, {}, positional);
+  const auto result = hermit::app::load(owned, {}, positional);
   ASSERT_FALSE(result);
   EXPECT_EQ(result.error().kind, ConfigError::UnknownFlag);
 }
@@ -532,7 +532,7 @@ TEST(Config, AnUnknownFlagIsReportedBeforeAConfigFileIsRead) {
 
 TEST(Config, TheFlagBeatsTheEnvironmentWhenChoosingAFile) {
   const auto owned = flags({"--config", "from-flag.json"});
-  const auto chosen = select_config_file(owned, env_of({{"HERMES_CONFIG", "/etc/from-env.json"}}));
+  const auto chosen = select_config_file(owned, env_of({{"HERMIT_CONFIG", "/etc/from-env.json"}}));
   ASSERT_TRUE(chosen);
   ASSERT_TRUE(*chosen);
   EXPECT_EQ(**chosen, "from-flag.json");
@@ -540,19 +540,19 @@ TEST(Config, TheFlagBeatsTheEnvironmentWhenChoosingAFile) {
 
 TEST(Config, TheEnvironmentSelectsAFileWhenNoFlagDoes) {
   const auto owned = flags({});
-  const auto chosen = select_config_file(owned, env_of({{"HERMES_CONFIG", "/etc/from-env.json"}}));
+  const auto chosen = select_config_file(owned, env_of({{"HERMIT_CONFIG", "/etc/from-env.json"}}));
   ASSERT_TRUE(chosen);
   ASSERT_TRUE(*chosen);
   EXPECT_EQ(**chosen, "/etc/from-env.json");
 }
 
-TEST(Config, ARelativeHermesConfigIsRejected) {
-  // The same rule as HERMES_SANDBOX_ROOT, and it was missed when this variable was
+TEST(Config, ARelativeHermitConfigIsRejected) {
+  // The same rule as HERMIT_SANDBOX_ROOT, and it was missed when this variable was
   // first routed through the seam. A relative value makes *which file is read* depend
   // on the working directory -- and that file may set its own relative sandbox_root,
   // anchored to whichever directory won. An inferred root by a longer route.
   const auto owned = flags({});
-  const auto chosen = select_config_file(owned, env_of({{"HERMES_CONFIG", "rel.json"}}));
+  const auto chosen = select_config_file(owned, env_of({{"HERMIT_CONFIG", "rel.json"}}));
   ASSERT_FALSE(chosen);
   EXPECT_EQ(chosen.error().kind, ConfigError::BadValue);
   EXPECT_NE(chosen.error().detail.find("--config"), std::string::npos);
@@ -576,11 +576,11 @@ TEST(Config, AnEmptyConfigPathIsRejectedByBothParsers) {
   EXPECT_EQ(result.error().kind, ConfigError::BadValue);
 }
 
-TEST(Config, AnEmptyHermesConfigIsAnErrorRatherThanNoFile) {
+TEST(Config, AnEmptyHermitConfigIsAnErrorRatherThanNoFile) {
   // This was the fail-closed rule broken for the one variable that selects all the
-  // others: `export HERMES_CONFIG=` silently read no file and said nothing.
+  // others: `export HERMIT_CONFIG=` silently read no file and said nothing.
   const auto owned = flags({});
-  const auto chosen = select_config_file(owned, env_of({{"HERMES_CONFIG", ""}}));
+  const auto chosen = select_config_file(owned, env_of({{"HERMIT_CONFIG", ""}}));
   ASSERT_FALSE(chosen);
   EXPECT_EQ(chosen.error().kind, ConfigError::BadValue);
 }
@@ -658,7 +658,7 @@ TEST(Config, AFailedEnvironmentOverlayAppliesNothingAtAll) {
   // root it had just been told not to trust.
   Config config;
   const auto result = apply_env(
-      config, env_of({{"HERMES_SANDBOX_ROOT", "/srv/escaped"}, {"HERMES_MODEL", ""}}));
+      config, env_of({{"HERMIT_SANDBOX_ROOT", "/srv/escaped"}, {"HERMIT_MODEL", ""}}));
   ASSERT_FALSE(result);
   EXPECT_TRUE(config.sandbox_root.empty());
   EXPECT_EQ(config.origin(Field::SandboxRoot), ConfigSource::Default);
@@ -681,7 +681,7 @@ TEST(Config, ACommandNeedingARootFailsWithoutOne) {
   EXPECT_EQ(result.error().kind, ConfigError::MissingRequired);
   // The message has to say all three ways to supply it, and why there is no default.
   EXPECT_NE(result.error().detail.find("--root"), std::string::npos);
-  EXPECT_NE(result.error().detail.find("HERMES_SANDBOX_ROOT"), std::string::npos);
+  EXPECT_NE(result.error().detail.find("HERMIT_SANDBOX_ROOT"), std::string::npos);
 }
 
 TEST(Config, ACommandNeedingNoRootDoesNotDemandOne) {
@@ -712,7 +712,7 @@ TEST(Config, ANonLoopbackUrlIsRejectedForACommandThatDialsIt) {
 }
 
 TEST(Config, AUrlNothingOpensDoesNotBlockACommandThatNeverDialsIt) {
-  // `resolve` is pure filesystem work. An HERMES_OLLAMA_URL exported for some other
+  // `resolve` is pure filesystem work. An HERMIT_OLLAMA_URL exported for some other
   // tool used to break it, and used to stop `config` printing the very value that was
   // wrong -- the one command whose job is to show you what is in force.
   Config config;

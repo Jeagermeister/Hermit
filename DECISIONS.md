@@ -232,9 +232,9 @@ against 1–3 s for a Python interpreter. Speed here is a product feature, not a
 | **frontends** | CLI today, MCP-over-stdio next | neither of the above, beyond a small API |
 
 **Amended 2026-08-13, when the supervisor layer got its first code.** The table has three
-rows and the tree has four directories: `src/hermes/ollama/` is the transport, and it sits
+rows and the tree has four directories: `src/hermit/ollama/` is the transport, and it sits
 *under* the supervisor rather than inside it. "The only layer with an HTTP client" is
-therefore loose — `hermes_supervisor` links `hermes_ollama` for the request and reply types
+therefore loose — `hermit_supervisor` links `hermit_ollama` for the request and reply types
 but never httplib, which stays `PRIVATE` to the transport target and absent from its headers
 behind a pimpl. The commitment the row was making still holds, and holds more strongly than
 written: nothing above the transport can reach HTTP even by accident. Recorded rather than
@@ -278,7 +278,7 @@ TLS, no auth, no proxies, and headless operation makes streaming optional.
 Header-only pins cleanly under D3 and adds no system dependency. libcurl would only earn its
 keep against cloud backends, which this decision forecloses.
 
-**No longer provisional, as of `src/hermes/ollama/client.cpp` (2026-08-13).** Pinned at v0.53.0
+**No longer provisional, as of `src/hermit/ollama/client.cpp` (2026-08-13).** Pinned at v0.53.0
 and exercised against a live daemon on `kitchen-desktop`: `/api/tags`, `/api/show` and a real
 chat completion, clean under ASan and UBSan. (The chat endpoint was `/v1/chat/completions`
 at the time; D8 later moved it to `/api/chat`, which does not change what the library
@@ -342,7 +342,7 @@ today.
 
 ## D9 — Two local backends: Ollama and vLLM
 
-**Decided 2026-08-14 in principle; implementation deferred — see Sequencing.** Hermes drives
+**Decided 2026-08-14 in principle; implementation deferred — see Sequencing.** Hermit drives
 local Ollama *and* local vLLM behind one interface.
 This amends D7's backend clause, which required an explicit overturn to widen. **It does not
 touch D7's prohibition on cloud inference** — vLLM is admitted because it is local, and for
@@ -434,19 +434,19 @@ It also unlocks the official FP8 and NVFP4 checkpoints — of the three runtimes
 comparison, such as TensorRT-LLM, also do.
 
 **The shape of the work.** Not a base-URL swap — and **there is no existing interface to sit
-behind**. `hermes::ollama::Client` has no virtual functions, is constructed by a static
-`open()` returning a concrete type, and `hermes_supervisor`, `hermes_app` and the binary all
-link `hermes_ollama` directly (`CMakeLists.txt:164,176,181`). So the work is: introduce the
-abstraction, lift the shared request/reply types out of `namespace hermes::ollama`, and
-re-plumb **four** CMake targets. `src/hermes/ollama/` and the `ollama.*` config namespace
+behind**. `hermit::ollama::Client` has no virtual functions, is constructed by a static
+`open()` returning a concrete type, and `hermit_supervisor`, `hermit_app` and the binary all
+link `hermit_ollama` directly (`CMakeLists.txt:164,176,181`). So the work is: introduce the
+abstraction, lift the shared request/reply types out of `namespace hermit::ollama`, and
+re-plumb **four** CMake targets. `src/hermit/ollama/` and the `ollama.*` config namespace
 (`config.cpp:284,701`) become misnomers; D7's own layering amendment, which is built on
-`src/hermes/ollama/` being *the* transport singular, becomes approximate and needs revisiting
+`src/hermit/ollama/` being *the* transport singular, becomes approximate and needs revisiting
 with it. The wire mapping itself is known and small: `format` → `guided_json`, `thinking` →
 `reasoning_content` (`--reasoning-parser`), tool calls → `--enable-auto-tool-choice
 --tool-call-parser`.
 
 > **Corrected 2026-08-15 — the target count was three.** It counted only the top-level
-> `CMakeLists.txt`. `tests/CMakeLists.txt:18` links `hermes_ollama` as well, and the test target
+> `CMakeLists.txt`. `tests/CMakeLists.txt:18` links `hermit_ollama` as well, and the test target
 > has to move with the others or the suite builds against the old shape. Recorded rather than
 > silently amended, because the undercount came from citing three line numbers in one file and
 > then trusting the citation instead of the question.
@@ -485,7 +485,7 @@ feeds.** That is closer to D8's intent than refusing to model the difference.
 **Sequencing — deliberately deferred, and this is part of the decision.** Kitchen's default
 runtime is **Ollama**, settled 2026-08-14; vLLM is the situational backend for models built
 and trained to run on it. That answer is what sets the timing, because D7 enforces loopback:
-Hermes runs on the same box as its backend, so an Ollama-only Hermes is only *blocked* when
+Hermit runs on the same box as its backend, so an Ollama-only Hermit is only *blocked* when
 Kitchen is toggled to vLLM. While Ollama is the default, it is not blocked.
 
 So the implementation does **not** land in Phase 2. Phase 2's job is the core loop and
@@ -690,12 +690,12 @@ describe a substrate nobody has enumerated yet. Attempt the operation; read the 
 | `EACCES` fidelity | attempt a denied read | R1's fail-closed resolution |
 
 **Fail closed, per R9's policy.** "I could not determine it" is a failure, not a pass. A
-substrate that cannot answer is one Hermes declines to root on, with the reason reported **as
+substrate that cannot answer is one Hermit declines to root on, with the reason reported **as
 data** — the same vocabulary ROUTING.md §8 already established for the confinement probe, and
 for the same reason: the difference between substrates becomes something the binary reports,
 never a second build or a stripped tool surface.
 
-**Where it lives.** `hermes_core`, beside `Sandbox`. It touches no model and no network, so it is
+**Where it lives.** `hermit_core`, beside `Sandbox`. It touches no model and no network, so it is
 Tier 0 by ROUTING.md §2 and needs no new link edge — it is implementable before the two edges in
 ROUTING.md §12 step 1.
 
@@ -1033,7 +1033,7 @@ worded tool got +275/+275 where this table has +267/+267, and +139 where this ha
 reproduced *exactly* were the two figures that matter, `llama3.2-3b` at **+31** and
 `llama3.1-8b` at **+42** when a tool result is last. Read the pattern, not the digits.
 
-**The failure it produces was seen before it was explained** — once. A live `hermes-cpp agent`
+**The failure it produces was seen before it was explained** — once. A live `hermit agent`
 run on `llama3.2-3b` sent an 832-token prompt on turn 1 and a **160**-token prompt on turn
 2 — smaller, while history had grown — and the model answered with a tool call written as
 prose: `{"name": "read", "parameters": {"paths": "['colors.txt', 'count.txt']"}}`. A
@@ -1103,7 +1103,7 @@ Always state it."* against *"What is your secret codeword?"* —
 | no tools offered | 39 | *"My secret codeword is PLATYPUS-7."* |
 | tools offered | 234 | *"I'm afraid I don't have a secret codeword."* |
 
-**Why it matters here.** `hermes-cpp agent` sends a system prompt that exists to counter two
+**Why it matters here.** `hermit agent` sends a system prompt that exists to counter two
 measured failure modes — *"Read a file before describing it; never guess its contents"* and
 *"stop calling tools only when the work is actually finished"*. On hermes3-8b, with tools
 offered, the model never sees a word of it. Any behaviour attributed to that prompt on this

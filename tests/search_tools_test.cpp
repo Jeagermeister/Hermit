@@ -1,5 +1,5 @@
-#include <hermes/core/tools/find.h>
-#include <hermes/core/tools/grep.h>
+#include <hermit/core/tools/find.h>
+#include <hermit/core/tools/grep.h>
 
 #include <gtest/gtest.h>
 
@@ -12,23 +12,23 @@
 #include <variant>
 #include <vector>
 
-#include <hermes/core/observed.h>
-#include <hermes/core/tool.h>
-#include <hermes/core/tools/hash.h>
-#include <hermes/core/tools/read.h>
+#include <hermit/core/observed.h>
+#include <hermit/core/tool.h>
+#include <hermit/core/tools/hash.h>
+#include <hermit/core/tools/read.h>
 
 namespace fs = std::filesystem;
-using hermes::Field;
-using hermes::FindTool;
-using hermes::GrepTool;
-using hermes::HashTool;
-using hermes::parse_args;
-using hermes::RawArgs;
-using hermes::ReadTool;
-using hermes::Sandbox;
-using hermes::Tool;
-using hermes::ToolOutput;
-using hermes::ToolRow;
+using hermit::Field;
+using hermit::FindTool;
+using hermit::GrepTool;
+using hermit::HashTool;
+using hermit::parse_args;
+using hermit::RawArgs;
+using hermit::ReadTool;
+using hermit::Sandbox;
+using hermit::Tool;
+using hermit::ToolOutput;
+using hermit::ToolRow;
 
 namespace {
 
@@ -44,7 +44,7 @@ namespace {
 class SearchToolsTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    std::string tpl = (fs::temp_directory_path() / "hermes_search_XXXXXX").string();
+    std::string tpl = (fs::temp_directory_path() / "hermit_search_XXXXXX").string();
     std::vector<char> buf(tpl.begin(), tpl.end());
     buf.push_back('\0');
     ASSERT_NE(::mkdtemp(buf.data()), nullptr) << "could not create temp dir";
@@ -88,15 +88,15 @@ class SearchToolsTest : public ::testing::Test {
     return nullptr;
   }
 
-  std::expected<ToolOutput, hermes::ToolError> call(Tool& tool, const RawArgs& raw) {
+  std::expected<ToolOutput, hermit::ToolError> call(Tool& tool, const RawArgs& raw) {
     auto parsed = parse_args(tool.spec(), raw, *box_);
-    if (!parsed) return std::unexpected{hermes::ToolError{to_string(parsed.error())}};
+    if (!parsed) return std::unexpected{hermit::ToolError{to_string(parsed.error())}};
     return tool.invoke(*parsed);
   }
 
   fs::path tmp_;
   std::unique_ptr<Sandbox> box_;
-  hermes::ObservedState state_;
+  hermit::ObservedState state_;
 };
 
 // --- grep --------------------------------------------------------------------
@@ -289,7 +289,7 @@ TEST_F(SearchToolsTest, FindRefusesAFileStart) {
 // --- the full observe surface composes ---------------------------------------
 
 TEST_F(SearchToolsTest, AllFiveObserveToolsShareOneRegistry) {
-  hermes::ToolRegistry registry;
+  hermit::ToolRegistry registry;
   ASSERT_TRUE(registry.add(std::make_unique<ReadTool>(state_)).has_value());
   ASSERT_TRUE(registry.add(std::make_unique<HashTool>()).has_value());
   ASSERT_TRUE(registry.add(std::make_unique<FindTool>()).has_value());
