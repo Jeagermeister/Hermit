@@ -184,6 +184,7 @@ add_library(hermes::ollama ALIAS hermes_ollama)
 # accident. The edge turns that accident into a declared dependency; an out-of-tree
 # consumer of hermes::supervisor alone is who it would actually have broken.
 add_library(hermes_supervisor
+  src/hermes/supervisor/judge.cpp
   src/hermes/supervisor/loop.cpp
   src/hermes/supervisor/session.cpp
   src/hermes/supervisor/verify.cpp
