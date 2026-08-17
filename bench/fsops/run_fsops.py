@@ -357,9 +357,17 @@ def run_task(model_key: str, tag: str, task_name: str, rep: int, timeout: int,
         "harness_error": harness_error,
         "valid": harness_error is None and not timed_out,
         "log": str(log.relative_to(ROOT)),
+        # All three gate on PROXY_PORT together, and must keep doing so. Transcript
+        # paths are deterministic per model/task/repeat, and only the recording branch
+        # unlinks them - so a run with transcripts OFF that read this file would report
+        # the tool calls of whatever proxy run last occupied the same cell. That is not
+        # hypothetical: fsops-20260813T123040Z.json has `"transcripts": false` and
+        # `01_create_file` r1 carrying `"tool_calls": ["terminal"]`, lifted from the
+        # 122605Z run of the identical cell. Absent recording the honest answer is
+        # "not observed", which is what empty means here - never "no tools were called".
         "transcript": str(transcript.relative_to(ROOT)) if PROXY_PORT else None,
-        "tool_calls": tool_calls_from(transcript),
-        "reasoning_chars": reasoning_chars_from(transcript),
+        "tool_calls": tool_calls_from(transcript) if PROXY_PORT else [],
+        "reasoning_chars": reasoning_chars_from(transcript) if PROXY_PORT else 0,
         "worktree": str(work),
         "when": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }

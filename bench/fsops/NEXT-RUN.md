@@ -51,6 +51,23 @@ scores** — those are the three with confirmed escaped artifacts.
 **Note the proxy destabilises long runs** (qwen-4b: 0 timeouts without, 4 in 7 with). Use
 `--transcripts` for single-task diagnosis only, never a full sweep. That bug is unfixed.
 
+**Note also that the destabilisation figure is n=3 against n=7 and was never task-matched.**
+Sweep 1 records qwen-4b at 5 timeouts in 36 runs unproxied, and they cluster — 5 of the 12 runs
+on `03_move_file`, `08_write_and_run_script`, `10_bulk_move` and `11_append_preserve`, versus 0
+of the 24 elsewhere. Since `--transcripts` exists to diagnose *failing* tasks, the proxy arm was
+most likely drawn from that 42% bucket, against which 4-in-7 is unremarkable. The baseline
+appears in no committed results file. **Before treating the proxy as the cause, check which task
+those 7 runs used** — and re-measure paired, alternating run by run, with the timeout raised so
+slow runs are timed rather than censored.
+
+**Transcript-derived fields in published results before 2026-08-16 are unreliable.**
+`tool_calls` and `reasoning_chars` were read unconditionally while only the recording branch
+unlinked the transcript, so a transcripts-off run inherited the previous proxy run's file for the
+same model/task/repeat cell. `fsops-20260813T123040Z.json` shows it: `"transcripts": false`,
+`"transcript": null`, and `01_create_file` r1 reporting `"tool_calls": ["terminal"]`. Both fields
+now gate on the proxy and read empty when it is off. Treat those fields in older result files as
+absent, not as evidence — the scores themselves are unaffected, since nothing scored off them.
+
 **2. `gemma-e4b` is still untested.** Its base was removed from Ollama; the blobs are retained,
 so `ollama pull gemma4:e4b-it-qat` should be near-instant.
 
