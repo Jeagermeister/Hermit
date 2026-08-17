@@ -7,6 +7,8 @@
 
 #include <gtest/gtest.h>
 
+#include <sys/stat.h>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -401,4 +403,98 @@ TEST_F(VerifyFixture, AnEmptyTreeSnapshotsCleanlyAndDiffsToNothing) {
   ASSERT_TRUE(snap.has_value());
   EXPECT_TRUE(snap->empty());
   EXPECT_TRUE(diff(*snap, *snap).empty());
+}
+
+// --- Permission bits: a chmod is an act, not an artefact ---------------------
+
+TEST_F(VerifyFixture, ABaselineRecordsThePermissionBits) {
+  const auto snap = verifier_->snapshot();
+  ASSERT_TRUE(snap.has_value()) << snap.error().message();
+  // Only the permission bits: the file-type bits live in is_dir/is_symlink, and a mode
+  // carrying S_IFREG here would make every comparison below meaningless.
+  EXPECT_EQ(snap->at("notes.txt").mode & ~0777u, 0u);
+  EXPECT_TRUE(snap->at("data").is_dir);
+  EXPECT_NE(snap->at("data").mode, 0u) << "a directory has permissions too";
+}
+
+TEST_F(VerifyFixture, MakingAFileExecutableIsItsOwnKindAndIsSubstantive) {
+  // The gap this closes: chmod moves ctime and no content, so before the mode was recorded
+  // this was reported as `touched` -- the kind verify.h tells readers to skim -- and
+  // substantive() did not count it. `08_write_and_run_script` asks a model to make a script
+  // executable, so this is ordinary behaviour rather than an exotic case.
+  const auto before = verifier_->snapshot();
+  ASSERT_TRUE(before.has_value()) << before.error().message();
+
+  ASSERT_EQ(::chmod((root_ / "notes.txt").c_str(), 0755), 0);
+  const auto after = verifier_->snapshot(&*before);
+  ASSERT_TRUE(after.has_value()) << after.error().message();
+
+  const Changeset set = diff(*before, *after);
+  ASSERT_EQ(set.changes.size(), 1u) << set.render();
+  EXPECT_EQ(set.changes[0].path, "notes.txt");
+  EXPECT_EQ(set.changes[0].kind, ChangeKind::PermissionsChanged);
+  EXPECT_NE(set.changes[0].kind, ChangeKind::TouchedOnly) << "this is not noise";
+  EXPECT_EQ(set.changes[0].mode_after & 0111u, 0111u) << "the executable bit is what moved";
+  EXPECT_EQ(set.substantive(), 1u);
+  EXPECT_EQ(set.render(), "permissions  notes.txt  0644 -> 0755\n");
+}
+
+TEST_F(VerifyFixture, AChmodIsNotHiddenBehindARewrite) {
+  // When content moves as well, the larger fact wins the kind -- but the permission delta
+  // still rides along, because a model that rewrote a file *and* made it executable has
+  // done the second thing whether or not the first is more interesting.
+  const auto before = verifier_->snapshot();
+  ASSERT_TRUE(before.has_value());
+
+  write("notes.txt", "CHANGED\n");
+  ASSERT_EQ(::chmod((root_ / "notes.txt").c_str(), 0755), 0);
+  const auto after = verifier_->snapshot(&*before);
+  ASSERT_TRUE(after.has_value());
+
+  const Changeset set = diff(*before, *after);
+  ASSERT_EQ(set.changes.size(), 1u) << set.render();
+  EXPECT_EQ(set.changes[0].kind, ChangeKind::Modified) << "the rewrite is the bigger fact";
+  EXPECT_EQ(set.changes[0].mode_before & 0111u, 0u);
+  EXPECT_EQ(set.changes[0].mode_after & 0111u, 0111u) << "and the chmod still shows";
+  EXPECT_NE(set.render().find("0644 -> 0755"), std::string::npos) << set.render();
+}
+
+TEST_F(VerifyFixture, APermissionChangeThatChangesNothingElseIsNotAModification) {
+  // The mirror of the above: R3's rule is content, so a chmod must never claim bytes moved.
+  const auto before = verifier_->snapshot();
+  ASSERT_TRUE(before.has_value());
+  ASSERT_EQ(::chmod((root_ / "notes.txt").c_str(), 0600), 0);
+  const auto after = verifier_->snapshot(&*before);
+  ASSERT_TRUE(after.has_value());
+
+  const Changeset set = diff(*before, *after);
+  ASSERT_EQ(set.changes.size(), 1u) << set.render();
+  EXPECT_NE(set.changes[0].kind, ChangeKind::Modified);
+  EXPECT_TRUE(set.changes[0].before.empty()) << "no hash is claimed on either side";
+  EXPECT_TRUE(set.changes[0].after.empty());
+  EXPECT_EQ(before->at("notes.txt").sha256, after->at("notes.txt").sha256);
+}
+
+TEST_F(VerifyFixture, TheSetuidAndStickyBitsAreVisibleNotTruncated) {
+  // Four octal digits, so a file that gains setuid does not render identically to one that
+  // gained nothing. Recorded as its own test because a three-digit format would pass every
+  // other assertion in this file.
+  const auto before = verifier_->snapshot();
+  ASSERT_TRUE(before.has_value());
+  ASSERT_EQ(::chmod((root_ / "notes.txt").c_str(), 04644), 0);
+  const auto after = verifier_->snapshot(&*before);
+  ASSERT_TRUE(after.has_value());
+
+  const Changeset set = diff(*before, *after);
+  ASSERT_EQ(set.changes.size(), 1u) << set.render();
+  EXPECT_EQ(set.changes[0].kind, ChangeKind::PermissionsChanged);
+  EXPECT_EQ(set.render(), "permissions  notes.txt  0644 -> 4644\n");
+}
+
+TEST_F(VerifyFixture, AnUnchangedTreeStillReportsNoPermissionChange) {
+  const auto before = verifier_->snapshot();
+  ASSERT_TRUE(before.has_value());
+  const auto after = verifier_->snapshot(&*before);
+  ASSERT_TRUE(after.has_value());
+  EXPECT_TRUE(diff(*before, *after).empty()) << "recording mode must not invent changes";
 }

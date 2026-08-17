@@ -567,8 +567,10 @@ int agent_command(std::span<const std::string_view> args) {
         std::cout << "  " << line << '\n';
         line.clear();
       }
+      // "moved bytes" was wrong even before chmod joined the count -- substantive() has
+      // always counted changes, not bytes, and now one of the kinds it counts moves none.
       std::cout << "  (" << outcome.net_changes.substantive() << " of "
-                << outcome.net_changes.changes.size() << " moved bytes)\n";
+                << outcome.net_changes.changes.size() << " are substantive)\n";
     }
   }
 
