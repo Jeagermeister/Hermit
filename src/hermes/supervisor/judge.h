@@ -48,9 +48,9 @@
 // established the fact. Refused a file by its permissions, we did not -- the bytes may be
 // right and we were not allowed to look, so `Undecidable`. Handed a directory where a
 // file's bytes were expected, we did -- a directory does not hold those bytes, so `Unmet`,
-// and the model can act on it. Review 2026-08-17 found these collapsed together, which
-// made `met()` false while `first_unmet()` returned nothing: a run stalled on a verdict it
-// could not act on, in exactly the case `Preserved` exists to catch.
+// and the model can act on it. Collapsing the two produces a verdict `met()` calls false
+// while `first_unmet()` returns nothing for: a run stalled with no finding it can act on,
+// in exactly the case `Preserved` exists to catch.
 //
 // Measurement fails closed. Judgment never does. Collapsing the last two into a boolean
 // would force a wrong answer whenever the judge cannot look -- and would send R7 to
@@ -202,9 +202,8 @@ struct Verdict {
   ///
   /// Returns a *copy*, not a pointer into `findings`. The natural R7 call site is
   /// `judge(before, after, expected).first_unmet()`, and a pointer into a temporary's
-  /// vector is a use-after-free the moment it is dereferenced -- caught by ASan during
-  /// review 2026-08-17, before any caller existed. A Finding is three short strings; one
-  /// copy per turn is not a cost worth a dangling pointer.
+  /// vector is a use-after-free the moment it is dereferenced. A Finding is three short
+  /// strings; one copy per turn is not a cost worth a dangling pointer.
   [[nodiscard]] std::optional<Finding> first_unmet() const;
 
   /// One line per finding, in declaration order, ending in a newline.

@@ -122,11 +122,11 @@ struct Requirements {
   /// Whether this command will actually open a Client.
   ///
   /// Gates the D7 loopback check, and that gating is the point: `resolve` never opens a
-  /// socket, so an `HERMES_OLLAMA_URL` exported for some other tool used to break pure
-  /// path resolution. Worse, it stopped `hermes-cpp config` from printing — the one
-  /// command whose job is to show you which value is wrong refused to show you the
-  /// value that was wrong. A URL that is never used cannot leak anything; `render()`
-  /// marks a non-loopback one instead, and the commands that dial it still refuse.
+  /// socket, so an `HERMES_OLLAMA_URL` exported for some other tool must not break pure
+  /// path resolution — and must not stop `hermes-cpp config` from printing, since that
+  /// is the one command whose job is to show you which value is wrong. A URL that is
+  /// never used cannot leak anything; `render()` marks a non-loopback one instead, and
+  /// the commands that dial it still refuse.
   bool ollama = false;
 };
 

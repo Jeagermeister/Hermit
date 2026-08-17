@@ -31,12 +31,8 @@ Failure transport_failure(httplib::Error error, std::string_view what) {
   }
 }
 
-/// Serialise without throwing.
-///
-/// nlohmann's dump() throws on any byte that is not valid UTF-8, and this API returns
-/// std::expected rather than throwing -- so an un-replaced dump() is not an error
-/// path, it is std::terminate. That matters here more than in most codebases: the
-/// Restores the client's timeouts however the scope is left.
+/// Raises the client's read/write timeouts for the scope's lifetime, restoring
+/// them however the scope is left.
 ///
 /// chat() raises them for the length of one generation. Without this, an exception
 /// or an early return leaves the 600 s budget installed on the shared connection,

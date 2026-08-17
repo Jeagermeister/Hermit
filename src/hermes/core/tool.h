@@ -2,34 +2,21 @@
 
 // D4 --- Tool interface: virtual dispatch, declarative arguments.
 //
-// One descriptor list per tool feeds everything that must agree about its
-// arguments: the tool definition offered to Ollama in its `tools` array (D12),
-// the MCP tool definition a programmatic caller reads (D7), and the parser that
-// turns a model-supplied call into typed values. Hand-maintained copies of that
-// information disagree eventually -- a field added to one and not the other
-// fails silently -- so R2 drift is made unrepresentable instead: there is one
-// declaration, and everything else is derived from it (ROUTING.md section 7).
+// One descriptor per tool drives everything that must agree on its shape:
+// the Ollama `tools` entry (D12), and the MCP definition (D7) once it
+// exists. One declaration, derived everywhere else -- R2 makes drift
+// unrepresentable rather than just discouraged (ROUTING.md §7). The Ollama
+// renderer is supervisor/wire.cpp's tool_definition(); MCP's is not yet
+// built and will call the same declaration.
 //
-// The first of those renderers exists as of 2026-08-17, in
-// `supervisor/wire.cpp`. Until then this paragraph said the descriptors became
-// "the JSON Schema sent to Ollama as `format` (D5)", which D12 falsified:
-// `format` cannot be sent beside `tools` -- it breaks tool calling outright on
-// four of the seven models measured. The destination was wrong, not the
-// guarantee.
+// JSON-free by design: rendering happens in supervisor/wire.cpp, which
+// links hermes_ollama and so has nlohmann (D2); hermes_core links neither
+// and stays JSON-free. Enforced by the build graph, not discipline.
 //
-// Everything in this header is JSON-free on purpose. D2 put nlohmann in the
-// build with the Ollama client, and hermes_core links no JSON library.
-// Descriptors, arguments and results are pure data here; rendering them to and
-// from JSON happens in a layer that already has the library. The tier boundary
-// stays enforced by the build graph, not by discipline.
-//
-// R1 is structural, not procedural: parsing an argument declared Path produces
-// a SandboxPath, which only Sandbox::resolve constructs. The argument channel
-// therefore cannot hand a tool a file outside the root, and the containment
-// check cannot be forgotten at tool #37. Stated at its real width: a tool body
-// is still first-party C++ and could reach the filesystem by other means --
-// that is what D10's kernel confinement backstops, not what this header claims
-// to prevent.
+// R1 is structural: a Path argument can only become a SandboxPath, which
+// only Sandbox::resolve constructs, so no tool can be handed an out-of-root
+// path by omission. It doesn't stop a tool body reaching the filesystem by
+// other means -- D10's kernel confinement is the backstop for that.
 
 #include <cstdint>
 #include <expected>
@@ -64,16 +51,12 @@ struct ArgSpec {
   std::string_view doc;
 };
 
-/// A tool, declared: the single source the schema generators render and the
-/// parser enforces. ROUTING.md section 7 extends D4's guarantee through this
-/// struct -- the Ollama `tools` entry and the MCP tool definition both derive
-/// from here, so there is no second copy to fall out of sync. The first of those
-/// renderers exists as of 2026-08-17: `supervisor/wire.cpp`'s
-/// `tool_definition()`. The second, MCP's, is still to come and will call it.
+/// A tool, declared: the single source the Ollama renderer derives from and
+/// parse_args enforces -- MCP's renderer, not yet built, will derive from
+/// the same declaration (D4, ROUTING.md §7).
 ///
-/// `args` is a view: it must reference storage that outlives the spec, in
-/// practice a static array beside the tool. C++23 span will happily bind a
-/// temporary vector here and dangle at the next sequence point -- do not.
+/// `args` is a non-owning view -- point it at a static array beside the
+/// tool. Binding a temporary vector here dangles at the next sequence point.
 struct ToolSpec {
   std::string_view name;
   std::string_view description;
@@ -101,13 +84,13 @@ std::string_view to_string(SpecError e) noexcept;
 // arrive as a string, lists as a vector of strings. Anything else in the
 // incoming JSON is the decoder's problem to reject.
 //
-// This said such input "should not arise" under D5's constrained decoding.
-// After D12 there is no decode-time constraint on tool arguments at all -- the
-// model's own tool-call channel is what shapes them -- so the decoder's
-// rejection is the only thing standing there, and `wire.cpp`'s `raw_args_from`
-// refuses a number, a boolean or a null rather than coercing it. Measured, that
-// input does arise: llama3.2-3b sent `paths` as a scalar where a list belongs,
-// and a Python-style list inside a string before that.
+// D5's constrained decoding does not cover this: after D12, tool-call arguments
+// have no decode-time constraint at all -- the model's own tool-call channel is
+// what shapes them -- so the decoder's rejection is the only thing standing
+// there, and `wire.cpp`'s `raw_args_from` refuses a number, a boolean or a null
+// rather than coercing it. Measured, that input does arise: llama3.2-3b sent
+// `paths` as a scalar where a list belongs, and a Python-style list inside a
+// string before that.
 
 struct RawArg {
   std::string name;

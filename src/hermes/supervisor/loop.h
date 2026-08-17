@@ -43,51 +43,35 @@
 // loop continues. ROUTING.md section 3 asks for one loud line the model can act on, and
 // R9's fail-closed rule wants the refusal to be data rather than an abort.
 //
-// --- A per-model hazard the loop cannot fix, measured 2026-08-17 --------------
+// --- A per-model hazard the loop cannot fix -----------------------------------
 //
 // **On the two stock Meta llama3.x instruct templates the tool definitions are not
 // rendered when the last message is a tool result** -- precisely the turn on which the
 // model has to decide whether to call another tool. Two of seven models measured; it is a
 // property of the template, not the architecture, so hermes3-8b is llama3.1 underneath and
-// unaffected. The measured table, the ruled-out alternatives and the three candidate
-// responses live in DECISIONS.md under "Still open" -- **there** rather than duplicated
-// here, because model selection is where the decision belongs and one copy of a table is
-// this project's whole position on drift.
+// unaffected. Measured table, mechanism and the three candidate responses: DECISIONS.md
+// under "Still open" -- one copy, since model selection is where the decision belongs.
 //
-// The mechanism is in the template, not inferred: llama3.x renders its `{{ range $.Tools }}`
-// block only inside `{{- if and $.Tools $last }}` under `{{- if eq .Role "user" }}`, so a
-// conversation ending in a `tool` result renders it nowhere.
-//
-// What it costs is narrower than one run suggested. Tool calling does not collapse; the model
-// works from memory of a schema it can no longer see, which degrades on tools it has not just
-// used -- measured, `llama3.2-3b` called `write` with `paths` (borrowed from `read`) where the
-// declaration says `path`. Once, in a live run, it degraded all the way to prose. A loop cannot
-// detect either from a reply, and cannot fix it without fabricating a user turn (see below), so
-// it is a model-selection constraint the loop merely suffers.
+// What it costs is narrower than the first run suggested: tool calling does not collapse,
+// the model works from memory of a schema it can no longer see -- measured, `llama3.2-3b`
+// called `write` with `paths` (borrowed from `read`) where the declaration says `path`, and
+// once degraded all the way to prose. A loop cannot detect either from a reply, and cannot
+// fix it without fabricating a user turn (see below), so it is a model-selection constraint
+// the loop merely suffers.
 //
 // --- And one that silences the system prompt entirely --------------------------
 //
-// `hermes3-8b`'s template writes its own function-calling preamble *instead of* the caller's
-// system prompt -- `{{- if .Tools }} ... {{- else if .System }}` -- so whenever tools are
-// offered, nothing the caller put in the system turn reaches the model. Demonstrated with a
-// planted codeword: stated verbatim with no tools, denied outright with tools.
+// `hermes3-8b` writes its own function-calling preamble *instead of* the caller's system
+// prompt whenever tools are offered -- demonstrated, recorded in DECISIONS.md under "Still
+// open" -- so `app`'s system prompt (which exists to counter two measured failure modes) is
+// never seen by that model when tools are on, and no observed behaviour may be credited to it.
 //
-// The system prompt `app` sends exists to counter two measured failure modes ("read a file
-// before describing it"; "stop calling tools only when the work is actually finished"). On that
-// model it is not in the prompt at all, so no observed behaviour may be credited to it. Both
-// hazards are recorded in DECISIONS.md under "Still open".
-//
-// Note what it means for D5: `format` could not have fixed that call either. It was not a
-// constrained generation gone wrong -- it was prose, on a turn where the model had not been
-// told any tools existed.
-//
-// **Not worked around here, deliberately.** The obvious mitigation -- append a synthetic
-// user turn after the results, which restores the definitions (measured: +133 returns) --
-// would put words in the user's mouth in the history, and `pin_latest_user` would then
-// pin that synthetic turn instead of the real instruction, so the one message the trim
-// must never drop would become a fabricated nudge. That is a worse failure than the one
-// it fixes. The honest options are to select models by this property or to detect it in
-// R9's preflight, and neither is decided; see DECISIONS.md.
+// **Not worked around here, deliberately.** The obvious mitigation -- append a synthetic user
+// turn after the results, which restores the missing definitions above -- would put words in
+// the user's mouth in history, and `pin_latest_user` would then pin that synthetic turn
+// instead of the real instruction: the one message the trim must never drop becomes a
+// fabricated nudge. Worse than the failure it fixes; see DECISIONS.md for the undecided
+// alternatives.
 //
 // Measured, and it is the reason Phase 3 exists rather than being an upgrade: on the
 // fsops set, only qwen3.5-9b reliably *used* a refusal to correct itself. Handed an
