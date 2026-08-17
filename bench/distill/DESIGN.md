@@ -65,6 +65,49 @@ re-running it is worth more than assuming either direction.
 
 **Gate 2 is the one that surprises people.** The recorder works. It records the wrong system.
 
+### The order, drawn
+
+The single edge that matters is the thick one: E1 must be collected before a corpus exists, for
+the reason in §1. Everything dashed is unbuilt today.
+
+```mermaid
+flowchart TB
+    RERUN["fsops re-run<br/><i>--deterministic, n≥5</i><br/>ROUTING §12 step 7"]
+    GATE["D7 gate + mcp.cpp<br/>ROUTING §12 steps 4–5"]
+    LOOP["agent loop<br/>Phase 2"]
+
+    BASE["base model selected<br/>ROUTING §12 step 6"]
+    E1["<b>E1 baseline</b><br/>arm A bare · arm B supervised"]
+    REC["recorder on native /api/chat<br/>this project's eight tools"]
+    GEN["tasks.py parameterised<br/>~1,000 instances"]
+
+    CORPUS["corpus<br/><i>~180 GPU-hours</i>"]
+    TRAIN["LoRA adapter"]
+    EVAL["held-out eval<br/>frozen grader"]
+    OUT{{"report — including<br/>a negative result"}}
+
+    RERUN --> BASE
+    RERUN --> E1
+    GATE --> LOOP
+    LOOP --> REC
+    LOOP --> E1
+    BASE --> CORPUS
+    REC --> CORPUS
+    GEN --> CORPUS
+    E1 ==>|"must precede"| CORPUS
+    CORPUS --> TRAIN --> EVAL --> OUT
+
+    classDef ready stroke-width:2px
+    classDef pending stroke-dasharray:6
+    classDef gated stroke-width:3px
+    class RERUN,GEN ready
+    class GATE,LOOP,BASE,REC,CORPUS,TRAIN,EVAL,OUT pending
+    class E1 gated
+```
+
+Read it as a dependency graph, not a schedule. Only `fsops re-run` is startable today, and
+`tasks.py parameterised` needs no gate but also buys nothing until the rest clears.
+
 ---
 
 ## 4. What the corpus would cost
