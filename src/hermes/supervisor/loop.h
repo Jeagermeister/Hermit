@@ -108,6 +108,7 @@
 #include <hermes/core/tool.h>
 #include <hermes/ollama/client.h>
 #include <hermes/supervisor/session.h>
+#include <hermes/supervisor/verify.h>
 
 namespace hermes::supervisor {
 
@@ -135,6 +136,14 @@ enum class StopReason {
 
   /// `Client::chat` failed. Ollama stopped answering; no retry is attempted (D7).
   Transport,
+
+  /// A tree snapshot could not be taken, so the run cannot be verified.
+  ///
+  /// Fails closed rather than continuing unverified. A caller that asked for verification
+  /// and silently got none would be in the worst position of all -- believing the work was
+  /// checked. The usual cause is an unreadable directory, which hides a subtree and would
+  /// otherwise report every file under it as deleted.
+  VerificationFailed,
 };
 
 std::string_view to_string(StopReason r) noexcept;
@@ -177,6 +186,15 @@ struct TurnEvent {
 
   /// History given up before this turn was sent, cumulative.
   std::size_t dropped = 0;
+
+  /// What this turn did to the tree, hash-verified and owing nothing to the model's
+  /// account of it (R6). Always empty when no verifier was supplied.
+  ///
+  /// Per turn rather than per call on purpose: a turn is the unit at which
+  /// ROUTING.md section 6 places this, and attributing a change to one call among several
+  /// would need a snapshot between each, which costs a walk per call to answer a question
+  /// nothing asks.
+  Changeset changes{};
 };
 
 struct LoopOptions {
@@ -204,6 +222,18 @@ struct LoopOptions {
   /// model made would leave it waiting on an answer that never comes, which is the
   /// orphaned-call failure the Session's grouped trim was written to avoid.
   std::size_t max_calls_per_turn = 8;
+
+  /// Verify the tree after every turn (R6). Optional; null means no verification, which
+  /// is the right default for a caller that only wants the loop.
+  ///
+  /// A pointer rather than a value because a verifier is a collaborator with a lifetime,
+  /// like the registry and the sandbox, and because "absent" has to be representable. It
+  /// must outlive the loop.
+  ///
+  /// Supplying one changes failure behaviour, deliberately: a snapshot that cannot be
+  /// taken stops the run (`VerificationFailed`) rather than degrading it to an unverified
+  /// one that looks identical from outside.
+  TreeVerifier* verifier = nullptr;
 
   /// Called once per completed turn, after its calls have run. Empty by default.
   ///
@@ -236,6 +266,17 @@ struct LoopOutcome {
   /// Turns the Session gave up to make room, over the whole run. Non-zero means the
   /// model was answering with holes in its history, which belongs in any report.
   std::size_t dropped = 0;
+
+  /// What the whole run did to the tree: the last snapshot against the first, so a file
+  /// created and then deleted again does not appear, and one written three times appears
+  /// once. Empty when no verifier was supplied, and *legitimately* empty when a run
+  /// changed nothing -- which is itself the finding R6 is about, since a model that
+  /// reports success over an untouched tree is the measured failure (`llama32-3b` replied
+  /// `DONE` on an untouched tree in 18 of 27 failed runs).
+  ///
+  /// This is evidence, not a verdict. Whether the changes are the *right* ones needs a
+  /// post-condition the supervisor has not been given; see verify.h's closing note.
+  Changeset net_changes{};
 
   /// The model's last prose reply. Empty for every reason except `Answered`, and
   /// legitimately empty even then if the model answered with tool calls to the end.

@@ -20,7 +20,8 @@ add_executable(hermes_tests
   config_test.cpp
   session_test.cpp
   wire_test.cpp
-  loop_test.cpp)
+  loop_test.cpp
+  verify_test.cpp)
 
 target_link_libraries(hermes_tests
   PRIVATE hermes_app hermes_core hermes_ollama hermes_supervisor hermes_warnings

@@ -796,6 +796,140 @@ documented either way, which is why it had to be probed.
 
 ---
 
+## D13 — Per-turn verification observes the filesystem, never the reply
+
+**Decided 2026-08-17**, building Phase 3's first half. ROUTING.md §6 already assigned per-turn
+verification to the supervisor; this is how it is done, and the four choices that were not
+obvious.
+
+**1. It reads the tree, not the model's account of the tree.** The natural reading of R6
+("never trust a completion claim") is: parse what the model said it did and check each
+statement. That is a trap — it puts the reply back on the critical path, just later, and prose
+does not parse. The measured failure is not that models lie in a detectable grammar; it is that
+they are confidently wrong in fluent English. Handed a tool result whose `content` was the four
+characters `aaaa`, `llama3.2-3b` reported *"a.txt is 1 character long"*. No parser catches that.
+
+So `TreeVerifier` never sees a `ChatReply`. A snapshot before, a snapshot after, and the
+difference is ground truth regardless of whether the model called ten tools, answered in prose,
+or crashed mid-turn.
+
+**2. Hashes are carried forward, not recomputed.** R3 forbids the cheap check outright —
+verify by content hash, never by existence — and its evidence is `05_copy`, where two models
+overwrote `config.ini` with invented content while the assertion "config.ini still exists"
+passed for both. But hashing every file every turn costs O(tree bytes) per turn, on a loop whose
+justification is cheap process launches.
+
+The resolution: every turn walks and stats the tree, an entry whose identity tuple is unchanged
+keeps the hash already computed for it, and only new or tuple-moved entries are read. The first
+snapshot pays for a baseline; every one after costs the walk plus the bytes that actually moved.
+
+Measured by `TheSecondWalkHashesOnlyWhatMoved`: a 17-byte baseline, then 8 bytes on the next
+walk -- exactly the file that changed. `ALargeUnchangedFileIsNotReReadWhenASmallOneMoves` makes
+the same point where it is worth money: a 204,817-byte baseline, then 8 bytes. Both assert the
+exact count, because a regression here is silent -- the diff stays correct and every turn just
+quietly costs the whole tree.
+
+*(Corrected 2026-08-17 during review: this entry first quoted "43 bytes, then 23", which matches
+no test and no fixture in the repository. The mechanism was right and the citation was invented.
+A decision that nominates `last_hashed_bytes()` as what keeps this "a measurement rather than an
+assumption" is the worst place in the document to carry an unsourced number.)*
+
+The tuple is trustworthy for this because it is already §4's currency for the staleness guard:
+`dev:ino` catches unlink-and-recreate, and `ctime` is the field a confined process cannot forge
+while backdating `mtime` (D10).
+
+**Amended 2026-08-17, same day, by review.** That paragraph is wrong as an absolute, and the
+counter-example was demonstrated rather than argued. A writer holding a `MAP_SHARED` mapping
+changes content with *no* timestamp movement at all: the kernel stamps `mtime`/`ctime` on the
+page **fault**, not on later stores to an already-dirty page. Measured:
+
+```
+content via read()      : PWNED!!!      (was ORIGINAL)
+mtime  1786984353.035598369 -> 1786984353.035598369
+ctime  1786984353.035598369 -> 1786984353.035598369
+IDENTITY TUPLE UNCHANGED: YES -> hash reused: YES (mutation invisible)
+```
+
+So the tuple is trustworthy against ordinary writers -- `write`, `rename`, `truncate`, an
+editor -- and **not** against a held shared mapping. It is not reachable through the current
+tool surface, which has no `shell`: the eight tools are `read, hash, list, find, grep, write,
+edit, move`. It becomes reachable the moment `shell` lands, which is precisely the case §6 says
+this layer exists to cover, so it is a gate on that work rather than a defect to fix now. The
+honest fix when it matters is to stop trusting the tuple for reuse and hash unconditionally,
+trading the optimisation for the guarantee.
+
+Worth recording what did **not** break, because it was the failure I predicted and it was the
+wrong one: coarse, jiffy-granular `ctime` does not defeat the tuple on this kernel. 200,000
+same-size in-place rewrites produced 200,000 distinct ctimes on both tmpfs and btrfs, zero
+collisions -- multigrain timestamps, and the snapshot's own `stat()` is what arms the
+fine-grained stamp for the next write. Coarse-granularity *filesystems* (vfat, exfat, ext4 with
+128-byte inodes) remain untested and nothing validates the root's filesystem.
+
+Also amended: point 3's claim that a race between the `fstatat` and the hash is a defect. It is
+not, and the obvious repair would make it worse. Pairing the *old* tuple with *new* bytes is
+self-correcting -- the next walk sees a moved tuple and re-hashes. Taking the tuple *after* the
+read instead would pair a fresh tuple with a possibly-torn hash and freeze it in place for the
+rest of the run, because every later walk would match that tuple and reuse it. The ordering in
+the code is the fail-closed one and stays.
+
+**A consequence worth naming: a moved tuple is not a modification.** A touch, a chmod, or a
+rewrite of identical bytes moves the tuple and moves no content. Those are reported as
+`touched`, separately from `modified`, because folding them together would make every report
+noisier than the signal in it — and a reader who learns the noise is noise stops reading the
+report at all.
+
+**3. The whole tree, not the paths the tools touched.** Cheaper and wrong, for the one reason
+§6 exists: per-turn verification must cover "shell and tools we did not write". A changeset
+built from tool output inherits the tool layer's blind spot, which is the thing being defended
+against — both destructive `05_copy` incidents and every escape into the repository root came
+*through* file tools.
+
+**4. It fails closed.** An unreadable directory hides a subtree, and every file under it would
+appear deleted. A snapshot that cannot see the tree refuses rather than reporting a confident
+diff of what it managed to reach, and a run that asked for verification and cannot have it stops
+(`StopReason::VerificationFailed`) rather than continuing unverified while looking identical
+from outside.
+
+### What this deliberately does not decide
+
+**It answers "what changed". It does not answer "is the work done".** That needs a
+post-condition, and a free-text instruction does not carry one.
+
+A live run makes the gap concrete better than any argument. Asked to *"create report.md
+containing a one-line summary of notes.txt"*, `llama3.2-3b` created `report.md`, and the
+changeset correctly reports `created report.md` with a hash. The file contains:
+
+```
+grep -oP '(?<=^).*' notes.txt
+```
+
+A shell command, written as file content. Bytes moved, the changeset is accurate, the reply was
+confident, and the work is entirely wrong. Observation cannot close that gap — only a stated
+post-condition can.
+
+*(Provenance, flagged by review: this run was observed live at the terminal and no transcript
+was kept, so unlike the `05_copy` and sweep-1 figures it has no artifact under `bench/`. It is
+load-bearing -- it is the stated reason the judgment half stays open -- so it is marked as an
+unrecorded observation rather than dressed as a measurement. Re-running it under
+`bench/fsops` with the transcript saved is on the Phase 3 list.)*
+
+So two positions remain open, and the project has to pick one:
+
+1. **The supervisor is given post-conditions** — by a task definition, a caller, or a Tier 1
+   model asked to write them before work starts. R7's re-invocation then has something concrete
+   to re-state, which is what the tournament recommendation actually requires: *one concrete
+   remaining failure*, not "try again".
+2. **The supervisor reports rather than judges** — hands back the changeset and lets the caller
+   decide. Weaker, and it makes `bench/delta`'s reliability arm unmeasurable, because there is
+   no verdict to compare against.
+
+**What would overturn D13 itself.** Evidence that the walk's cost is material on a real tree —
+it is one `stat` per entry per turn, and nothing has yet run it against a large repository.
+`TreeVerifier` exposes `last_entries_walked()` and `last_hashed_bytes()` so that stays a
+measurement rather than an assumption.
+
+---
+
 ## Still open
 
 ### ~~Which chat endpoint~~ — settled as D8

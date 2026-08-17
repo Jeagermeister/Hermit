@@ -34,6 +34,7 @@ enum class SandboxError {
 enum class PathError {
   Empty,            // empty string is not a path
   EmbeddedNul,      // NUL byte -- would truncate at the syscall boundary
+  ControlCharacter, // newline, tab or other C0 -- legal to the kernel, forgeable in a report
   EscapesRoot,      // resolved outside the sandbox root; rejected, never rebased
   TooLong,          // longer than PATH_MAX; rejected before any allocation
   FilesystemError,  // symlink resolution failed, or a component could not be inspected

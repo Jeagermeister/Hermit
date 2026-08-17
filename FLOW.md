@@ -109,12 +109,17 @@ runs: `AgentLoop` in `src/hermes/supervisor/loop.cpp` starts a bounded session, 
 dispatches its calls and feeds the results back, all of it bounded by turn count and wall clock
 (R8). Verified end to end against a live local model on 2026-08-17.
 
-**The right side does not run, and it is the half that matters.** Today the loop stops when the
-model stops asking for tools — which is reading the model's answer, the exact thing R6 forbids.
-Nothing polls the filesystem, nothing compares state against what was asked, and nothing
-re-invokes with one concrete remaining failure. So `POLL`, the decision, `RE` **and `DONE`** are
-all dashed — `DONE` included, because a *verified* completion is precisely what does not exist:
-`StopReason::Answered` means "the model stopped asking" and not "the work is done".
+**`POLL` now runs too, as of 2026-08-17.** The tree is snapshotted before the run and after
+every turn, and the hash-verified changeset owes nothing to the reply ([D13](./DECISIONS.md)).
+So a model announcing success over an untouched tree is contradicted by evidence rather than
+merely doubted.
+
+**What is still dashed is the decision and everything after it.** Answering *"does state match
+what was asked"* needs a post-condition, and a free-text instruction does not carry one — so
+nothing yet compares the changeset to an intent, and nothing re-invokes with one concrete
+remaining failure. `Q`, `RE` and `DONE` stay dashed, `DONE` included, because a *verified*
+completion is precisely what does not exist: `StopReason::Answered` still means "the model
+stopped asking" and not "the work is done".
 
 The arithmetic it rests on — a task succeeding ~67% per attempt approaching ~96% under verified
 retries — is a claim computed from measured instability, not a measured outcome, and
@@ -139,7 +144,7 @@ flowchart LR
     RE --> M
 
     classDef pending stroke-dasharray:6
-    class POLL,Q,DONE,RE pending
+    class Q,DONE,RE pending
 ```
 
 The reason R6 polls rather than reads the model's answer: across the recorded runs, a model

@@ -635,3 +635,157 @@ TEST_F(LoopFixture, TheWallClockIsConsultedBeforeTheTurnCount) {
   EXPECT_EQ(outcome.reason, StopReason::TimeBudget)
       << "with both bounds spent, the clock is the one that must be reported";
 }
+
+// --- R6: per-turn state verification ------------------------------------------
+//
+// The loop's stop condition still reads the model's behaviour (it stopped asking for
+// tools). What these cover is the half that does not: what the filesystem shows, measured
+// without reference to anything the model said.
+
+namespace {
+
+using hermes::supervisor::ChangeKind;
+using hermes::supervisor::TreeVerifier;
+
+const hermes::supervisor::Change* change_for(const hermes::supervisor::Changeset& set,
+                                             std::string_view path) {
+  for (const auto& change : set.changes) {
+    if (change.path == path) return &change;
+  }
+  return nullptr;
+}
+
+}  // namespace
+
+TEST_F(LoopFixture, ATurnsChangesAreReportedWithoutReadingTheReply) {
+  TreeVerifier verifier{*sandbox_};
+  std::vector<TurnEvent> events;
+  LoopOptions options;
+  options.verifier = &verifier;
+  options.observer = [&events](const TurnEvent& e) { events.push_back(e); };
+
+  Script script{.replies = {call_reply({{"write", json{{"path", "made.txt"},
+                                                       {"content", "hello"}}}}),
+                            text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "make a file");
+
+  ASSERT_EQ(events.size(), 2u);
+  ASSERT_NE(change_for(events[0].changes, "made.txt"), nullptr);
+  EXPECT_EQ(change_for(events[0].changes, "made.txt")->kind, ChangeKind::Created);
+  EXPECT_TRUE(events[1].changes.empty()) << "the answering turn touched nothing";
+  EXPECT_EQ(outcome.reason, StopReason::Answered);
+}
+
+TEST_F(LoopFixture, TheNetChangesetIsTheWholeRunsEffectNotTheSumOfItsTurns) {
+  // Created then deleted must not appear: a caller deciding whether to re-invoke needs
+  // what the tree looks like now, not a transaction log.
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+
+  Script script{.replies = {call_reply({{"write", json{{"path", "temp.txt"},
+                                                       {"content", "scratch"}}}}),
+                            call_reply({{"move", json{{"from", "temp.txt"},
+                                                      {"to", "final.txt"}}}}),
+                            text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "make a file then rename it");
+
+  EXPECT_EQ(change_for(outcome.net_changes, "temp.txt"), nullptr)
+      << "a file created and then moved away should not appear in the net effect";
+  ASSERT_NE(change_for(outcome.net_changes, "final.txt"), nullptr);
+  EXPECT_EQ(change_for(outcome.net_changes, "final.txt")->kind, ChangeKind::Created);
+}
+
+TEST_F(LoopFixture, AConfidentAnswerOverAnUntouchedTreeProducesAnEmptyChangeset) {
+  // R6's own evidence, as an assertion: llama32-3b replied DONE on an untouched tree in 18
+  // of its 27 failed runs. The loop still reports Answered -- it has no basis to do
+  // otherwise -- and the changeset is what contradicts it.
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+
+  Script script{.replies = {text_reply("I have created the file and verified it. DONE.")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "create report.txt");
+
+  EXPECT_EQ(outcome.reason, StopReason::Answered);
+  EXPECT_FALSE(outcome.final_content.empty()) << "the model sounded certain";
+  EXPECT_TRUE(outcome.net_changes.empty()) << "and changed nothing";
+  EXPECT_EQ(outcome.net_changes.substantive(), 0u);
+}
+
+TEST_F(LoopFixture, SeesAChangeNoToolMadeAndNoReplyMentioned) {
+  // Verification must not depend on tool output either. Here the tree moves underneath the
+  // loop between turns, exactly as `shell` or an outside process would move it.
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+
+  const auto root = tmp_ / "root";
+  Script script;
+  script.replies = {call_reply({{"read", json{{"paths", json::array({"notes.txt"})}}}}),
+                    text_reply("done")};
+  // Mutate the tree as a side effect of serving the first reply.
+  auto raw = script.fn();
+  hermes::supervisor::ChatFn meddling =
+      [&raw, &root](const ChatRequest& request) {
+        auto reply = raw(request);
+        std::ofstream{root / "appeared.txt"} << "not via any tool\n";
+        return reply;
+      };
+
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+  AgentLoop loop{meddling, tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "read notes.txt");
+
+  ASSERT_NE(change_for(outcome.net_changes, "appeared.txt"), nullptr)
+      << "a change nothing reported must still be seen";
+  EXPECT_EQ(change_for(outcome.net_changes, "appeared.txt")->kind, ChangeKind::Created);
+}
+
+TEST_F(LoopFixture, WithoutAVerifierNothingIsReportedAndTheRunIsUnaffected) {
+  Script script{.replies = {call_reply({{"write", json{{"path", "made.txt"},
+                                                       {"content", "hello"}}}}),
+                            text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, LoopOptions{}};
+  const auto outcome = loop.run(*session, "make a file");
+
+  EXPECT_EQ(outcome.reason, StopReason::Answered);
+  EXPECT_TRUE(outcome.net_changes.empty());
+}
+
+TEST_F(LoopFixture, AnUnverifiableTreeStopsTheRunRatherThanRunningUnverified) {
+  if (::geteuid() == 0) GTEST_SKIP() << "root ignores the permission bits this test sets";
+  std::filesystem::create_directories(tmp_ / "root" / "locked");
+  ::chmod((tmp_ / "root" / "locked").c_str(), 0000);
+
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+  Script script{.replies = {text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "do something");
+  ::chmod((tmp_ / "root" / "locked").c_str(), 0755);
+
+  EXPECT_EQ(outcome.reason, StopReason::VerificationFailed);
+  EXPECT_EQ(outcome.turns, 0u) << "the baseline is taken before the first request";
+  EXPECT_TRUE(script.seen.empty()) << "and no request went out unverifiable";
+}

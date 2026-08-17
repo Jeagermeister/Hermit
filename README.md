@@ -86,11 +86,16 @@ merged and tested. **The loop that drives the local model is now built too**, so
 runs end to end: `hermes-cpp agent` takes one instruction, offers the eight tools to a local
 model, dispatches what it asks for, and stops on a turn or wall-clock bound.
 
-What is still missing is the part that makes it a *supervisor* rather than a tool runner. The loop
-stops when the model stops asking for tools — which is trusting a completion claim, and R6 exists
-because that claim is often false. Nothing yet polls the filesystem to check the work, and nothing
-re-invokes with one concrete remaining failure (R7). That is Phase 3, and it is the difference
-between "the model said it was done" and "the work is done". The MCP frontend is
+**Phase 3's observation half landed 2026-08-17**: the tree is snapshotted before the run and
+after every turn, and `agent` prints a hash-verified changeset that owes nothing to the reply
+([D13](./DECISIONS.md)). A model announcing success over an untouched tree is now contradicted by
+evidence rather than merely doubted.
+
+What is still missing is the *judgment* half. Deciding whether the changes are the right ones
+needs a post-condition, and a free-text instruction does not carry one — so nothing yet re-invokes
+with one concrete remaining failure (R7). The gap is easy to see: asked to write a summary into
+`report.md`, one model created the file containing the literal text `grep -oP '(?<=^).*' notes.txt`.
+Bytes moved, the changeset is accurate, the work is wrong. The MCP frontend is
 [ROUTING.md](./ROUTING.md) §12 step 6.
 
 So: the stories' mechanics run; their *guarantees* do not yet. §12 remains the honest odometer.
@@ -121,7 +126,7 @@ The evidence sits in two places, across two machines and two agent harnesses:
 | `src/hermes/core/` | Library code. `sandbox` (R1), `tool` (D4's interface), `fsio` (the one open primitive), `sha256` (R3's hash), `observed` (the staleness guard), `backup` (R4's archive) |
 | `src/hermes/core/tools/` | The eight Tier 0 tools — read, list, find, grep, hash, write, edit, move — [ROUTING.md](./ROUTING.md) §4's surface, verified per call |
 | `src/hermes/ollama/` | The only layer that speaks HTTP: client and R9 preflight |
-| `src/hermes/supervisor/` | The turn: `loop` (dispatch and the R8 bounds), `session` (history and the context budget), `wire` (the JSON bridge between `core`'s pure data and the model) — [D7](./DECISIONS.md)'s middle layer |
+| `src/hermes/supervisor/` | The turn: `loop` (dispatch and the R8 bounds), `session` (history and the context budget), `wire` (the JSON bridge between `core`'s pure data and the model), `verify` (R6's per-turn hash diff of the tree) — [D7](./DECISIONS.md)'s middle layer |
 | `src/hermes/app/` | `config` and `toolset` (composing the eight tools), shared by the CLI and the coming MCP frontend |
 | `src/main.cpp` | `hermes-cpp` — manual harness for the pieces that exist |
 | `tests/` | GoogleTest suite; run with `ctest` |
@@ -165,8 +170,11 @@ trace per turn and per call, and a summary that says which bound stopped it. Thr
 two: `--max-turns`, `--budget` wall-clock (R8), and a per-turn cap on how many calls one reply may
 make — the third is a runaway guard rather than a knob, and calls past it are refused rather than
 dropped, because a dropped call reads to the model as still outstanding. It prints, in so many
-words, that a clean stop is not evidence the work is correct — R6 is not satisfied yet, and a
-command that implied otherwise would be the more useful lie.
+words, what it did and did not check. After every turn it takes a hash diff of the whole tree and
+prints what actually moved, owing nothing to the model's reply (R6's observation half, `--no-verify`
+to skip it). What it still does not do is decide whether those were the *right* changes: that needs
+a post-condition a free-text instruction does not carry, so a clean stop plus an accurate changeset
+is evidence, not a verdict -- and a command that implied otherwise would be the more useful lie.
 
 ```bash
 hermes-cpp agent --root ~/scratch --model qwen35-agent --max-turns 8 \

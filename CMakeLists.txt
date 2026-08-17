@@ -186,6 +186,7 @@ add_library(hermes::ollama ALIAS hermes_ollama)
 add_library(hermes_supervisor
   src/hermes/supervisor/loop.cpp
   src/hermes/supervisor/session.cpp
+  src/hermes/supervisor/verify.cpp
   src/hermes/supervisor/wire.cpp)
 
 target_include_directories(hermes_supervisor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)

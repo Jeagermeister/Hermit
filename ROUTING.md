@@ -308,7 +308,7 @@ So the layering is:
 | Layer | Covers | Requirement |
 |---|---|---|
 | **Per-tool** | Only the tools the model actually chose to use | R5 read-back on `write` / `edit` |
-| **Per-turn** | Everything, including shell and tools we did not write | R4 snapshot, R3 hash-diff, R6 poll state |
+| **Per-turn** | Everything, including shell and tools we did not write | R3 hash-diff and R6's **observation** half — built 2026-08-17 in `supervisor/verify.cpp` ([D13](./DECISIONS.md)). R6's *completion decision* is not: the loop still stops on `tool_calls.empty()`. R4's recoverable snapshot is not here either — it lives in the tool layer, and a hash is not an undo |
 
 Per-turn is the one that holds unconditionally, and it is a **supervisor** concern
 ([Phase 3](./ROADMAP.md)), not a tool concern. Per-tool verification is worth having anyway —

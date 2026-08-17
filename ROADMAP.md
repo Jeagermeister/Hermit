@@ -552,14 +552,39 @@ model calling this as a tool.
 
 ## Phase 3 — The supervisor (the actual product)
 
-- [ ] **State verification.** After each turn, check what the model *claims* against what the
-      filesystem *shows*. **Now the one thing standing between the loop and the product**: the
-      loop stops when the model stops asking for tools, which is trusting a completion claim and
-      is exactly what R6 forbids. `StopReason::Answered` is documented as meaning only "stopped
-      asking", and the CLI prints that caveat rather than letting a zero exit status imply
-      success. A live example arrived unprompted while building the loop: handed a tool result
-      whose `content` was the four characters `aaaa`, `llama3.2-3b` reported *"a.txt is 1
-      character long"* — reading its own tool output wrong, in confident prose.
+- [x] ~~**State verification — the observation half**~~ — done 2026-08-17
+      ([D13](./DECISIONS.md)). `supervisor/verify.cpp` snapshots the tree before the run and
+      after every turn, and reports a hash-verified changeset: created, deleted, modified,
+      touched-but-identical, type-changed, readability-changed. It never reads the reply, which
+      is the design decision rather than an implementation detail — parsing what a model *says*
+      it did puts the reply back on the critical path, and the failure being defended against is
+      confident wrongness in fluent English, not a detectable grammar. Hashes carry forward
+      across snapshots, so a turn costs the walk plus the bytes that actually moved.
+- [ ] **Verifier gaps found by review 2026-08-17**, recorded so they are gates rather than
+      surprises. None is reachable through the current eight-tool surface; each becomes
+      reachable with `shell`, a hostile filesystem layout, or an operator mistake.
+      - The identity tuple does not detect a write made through a held `MAP_SHARED` mapping
+        (demonstrated; see [D13](./DECISIONS.md)'s amendment). Gates the `shell` tool.
+      - The walk crosses mount points — no `st_dev` check, no `RESOLVE_NO_XDEV` — so a bind
+        mount or a mounted share under `--root` is read, contradicting verify.h's "never opens
+        anything outside the root". Lands with D7's `openat2` gate.
+      - `hash_regular` has no byte cap and no deadline, while `read`/`grep`/`edit` are capped at
+        16 MiB. Hermes' SHA-256 is a portable software implementation (~60 MB/s, roughly 70x
+        slower than a hardware-accelerated `sha256sum`), so a large tree's baseline runs outside
+        the R8 bound entirely — the budget is only checked between turns.
+      - The walk opens every sibling directory of a level before descending, so fd use is
+        O(siblings), not O(depth). At the common 1024 soft limit that is ~1020 directories.
+      - `FileState` carries no `is_regular`, so regular↔FIFO/socket/device transitions are
+        reported as `Modified` or `TouchedOnly` rather than `TypeChanged`.
+      - A content change hidden behind a `chmod 000` reports as `ReadabilityChanged`, which
+        `substantive()` does not count.
+- [ ] **State verification — the judgment half.** Deciding whether the changes are the *right*
+      ones needs a post-condition, and a free-text instruction does not carry one. A live run
+      shows the gap exactly: asked to create `report.md` containing a summary, `llama3.2-3b`
+      created the file — changeset accurate, hash and all — containing the literal text
+      `grep -oP '(?<=^).*' notes.txt`. A shell command, written as content. Bytes moved, the
+      report is correct, the work is wrong. [D13](./DECISIONS.md) states the two open positions;
+      this bullet closes when one is chosen.
 - [ ] **Re-invocation** with one concrete remaining failure, per the tournament recommendation.
       **Measured support, 2026-08-17**: handed a refusal as a tool result, only `qwen3.5-9b` used
       it to correct itself. `llama3.2-3b`, `hermes3-8b` and `gemma4-e4b` all stopped calling tools

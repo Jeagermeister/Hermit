@@ -57,6 +57,8 @@ std::string_view to_string(PathError e) noexcept {
   switch (e) {
     case PathError::Empty:           return "path is empty";
     case PathError::EmbeddedNul:     return "path contains a NUL byte";
+    case PathError::ControlCharacter:
+      return "path contains a control character (a newline in a name forges report lines)";
     case PathError::EscapesRoot:     return "path resolves outside the sandbox root";
     case PathError::TooLong:         return "path exceeds PATH_MAX";
     case PathError::FilesystemError: return "path could not be resolved";
@@ -213,6 +215,16 @@ std::expected<SandboxPath, PathError> Sandbox::resolve(std::string_view raw) con
     // Would truncate silently at the syscall boundary: the path checked here and the
     // path opened later would differ.
     return std::unexpected(PathError::EmbeddedNul);
+  }
+  // Every other C0 control character, refused for a different reason than NUL: the kernel
+  // accepts them in a filename, but the supervisor's own reports are newline-delimited, so
+  // a model that can name a file can otherwise write lines into the changeset an operator
+  // reads as findings. Demonstrated 2026-08-17: `write` to `notes.txt\ntouched  config.ini`
+  // renders as two lines, the second indistinguishable from a real one (D13). Refusing at
+  // resolve time fixes it for every reader at once -- the CLI trace, `render()`, and any
+  // caller that formats a Changeset -- rather than escaping it at each of them.
+  if (std::ranges::any_of(raw, [](unsigned char c) { return c < 0x20 || c == 0x7f; })) {
+    return std::unexpected(PathError::ControlCharacter);
   }
 
   const fs::path input{std::string(raw)};
