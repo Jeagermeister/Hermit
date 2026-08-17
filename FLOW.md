@@ -31,7 +31,7 @@ flowchart TB
     RES["Sandbox::resolve<br/>R1 — a path becomes a SandboxPath, or is refused"]
     T{"which tier?"}
     T0["<b>Tier 0 — execute</b><br/>read · list · find · grep · hash<br/>write · edit · move"]
-    SH["shell<br/>the one tool R1 cannot type"]
+    SH["shell<br/>cannot be R1-correct by construction"]
     T1["<b>Tier 1 — reason locally</b><br/>triage · summarize"]
     T2["<b>Tier 2 — escalate</b><br/>decline, return context<br/>not an error branch"]
     OUT["result rows<br/>paths, hashes, identity tuples"]
@@ -41,8 +41,8 @@ flowchart TB
     MCP --> APP
     APP --> RES
     RES --> T
-    T -->|"one correct answer<br/>from the inputs"| T0
-    T -->|"needs judgement,<br/>tolerates latency"| T1
+    T -->|"one correct answer<br/>computable from the inputs"| T0
+    T -->|"choosing among<br/>defensible answers"| T1
     T -->|"anything else"| T2
     T0 --> OUT
     SH --> OUT
@@ -60,41 +60,56 @@ doing real work even when it declines.
 
 ---
 
-## 2. What one mutating call does
+## 2. What one overwriting call does
 
-`write`, `edit` and `move` are the tools that can destroy something, so they are the ones
-carrying [REQUIREMENTS.md](./REQUIREMENTS.md)'s R3, R4 and R5. All of this is built.
+The path below is `write` and `edit` **replacing existing bytes** — the only case that carries
+all of R3, R4 and R5 at once. All of it is built. The two neighbouring cases diverge, and the
+divergences are the interesting part; they are listed under the diagram.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant C as Caller
-    participant W as write / edit / move
+    participant W as write / edit
     participant B as Backup store
     participant FS as Filesystem
 
     C->>W: call, arguments already resolved to SandboxPath
     W->>FS: stat — dev:ino:size:mtime:ctime
-    Note over W,FS: edit fails closed if the tuple moved<br/>since the caller last observed it
-    W->>B: copy current bytes out of the root (R4)
-    W->>FS: perform the write
-    W->>FS: read the bytes back (R5)
-    W->>W: hash and compare (R3)
-    W-->>C: content hash, not "ok"
+    Note over W,FS: fails closed if the tuple moved since the<br/>caller last observed it — and records nothing
+    W->>B: one generation, outside the root (R4)
+    W->>FS: exclusive temp beside the target, then atomic rename
+    W->>FS: read the bytes back and compare (R5)
+    W-->>C: new content hash + fresh identity tuple
 ```
 
-The backup store lives **outside** the sandbox root, so the model cannot reach what it
-overwrote. And the return value is a hash rather than a success flag, because *"the file still
-exists"* once passed while the content had been destroyed — that lesson is load-bearing.
+**A create takes no backup generation.** It publishes by `link()`-no-replace, so a file that
+appeared after the check is preserved and the call is rejected. Nothing is destroyed, so there
+is nothing to preserve.
+
+**`move` does not appear above, and that is deliberate.** It is ungated by observed state, takes
+no backup generation, and verifies by hash at *both ends* (R3) rather than reading back. It can
+do that because `renameat2(RENAME_NOREPLACE)` means it structurally cannot replace a
+destination — so content is preserved byte-for-byte, only the name is at risk, and undo is
+moving it back. Gating it would force a full-body read just to rename.
+
+Two properties hold across all of them. The backup store lives **outside** the sandbox root, so
+the model can never list, read, edit or move its own undo data. And every successful mutation
+returns a content hash and a fresh identity tuple rather than a success flag — because *"the
+file still exists"* once passed while the content had been destroyed, and that lesson is
+load-bearing.
 
 ---
 
 ## 3. The supervisor turn
 
-This is the product, and it is the half not yet built. The arithmetic it rests on — a task
-succeeding ~67% per attempt approaching ~96% under verified retries — is a claim computed from
-measured instability, and [bench/delta](./bench/delta/DESIGN.md) exists to test it rather than
-assume it.
+This is the product, and it is the half not yet built. `Session` — history and the context
+budget — exists in `src/hermes/supervisor/`; it sits below the loop drawn here, and the loop is
+what Phase 2 adds. Nothing in this diagram runs today.
+
+The arithmetic it rests on — a task succeeding ~67% per attempt approaching ~96% under verified
+retries — is a claim computed from measured instability, not a measured outcome, and
+[bench/delta](./bench/delta/DESIGN.md) exists to test it rather than assume it.
 
 ```mermaid
 flowchart LR
