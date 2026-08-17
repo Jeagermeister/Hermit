@@ -420,3 +420,169 @@ TEST(ParseChatReply, NullContentIsAValidReplyNotAFailure) {
   ASSERT_TRUE(reply.has_value());
   EXPECT_TRUE(reply->content.empty());
 }
+
+// --- tool calls on the wire (Phase 2) ----------------------------------------
+//
+// The measurements these assertions stand on are recorded in D12 and in client.h:
+// `tools` alone is correct on 7 of 7 models probed; adding `format` breaks 4 of them.
+// So the type makes the combination unrepresentable, and these tests pin the two
+// halves it does allow.
+
+namespace {
+
+hermes::ollama::ChatRequest minimal_request() {
+  hermes::ollama::ChatRequest request;
+  request.model = "test-model";
+  request.messages.push_back({.role = "user", .content = "hello"});
+  request.num_ctx = 8192;
+  return request;
+}
+
+}  // namespace
+
+TEST(ChatToolCalls, ParsesNameAndStructuredArguments) {
+  const auto calls = hermes::ollama::parse_tool_calls(nlohmann::json::parse(R"([
+    {"id": "call_abc", "function": {"name": "write",
+     "arguments": {"path": "hello.txt", "content": "HERMES-OK"}}}
+  ])"));
+
+  ASSERT_EQ(calls.size(), 1u);
+  EXPECT_EQ(calls[0].id, "call_abc");
+  EXPECT_EQ(calls[0].name, "write");
+  EXPECT_EQ(calls[0].arguments["path"], "hello.txt");
+  EXPECT_EQ(calls[0].arguments["content"], "HERMES-OK");
+}
+
+TEST(ChatToolCalls, KeepsOrderAndDuplicatesBecauseModelsEmitBoth) {
+  // Measured: llama3.2-3b answered one prompt with `read a.txt`, `read b.txt`,
+  // `read a.txt` -- three calls, one repeated. Deduplicating or collapsing here would
+  // silently drop work the model asked for.
+  const auto calls = hermes::ollama::parse_tool_calls(nlohmann::json::parse(R"([
+    {"function": {"name": "read", "arguments": {"path": "a.txt"}}},
+    {"function": {"name": "read", "arguments": {"path": "b.txt"}}},
+    {"function": {"name": "read", "arguments": {"path": "a.txt"}}}
+  ])"));
+
+  ASSERT_EQ(calls.size(), 3u);
+  EXPECT_EQ(calls[0].arguments["path"], "a.txt");
+  EXPECT_EQ(calls[1].arguments["path"], "b.txt");
+  EXPECT_EQ(calls[2].arguments["path"], "a.txt");
+}
+
+TEST(ChatToolCalls, AbsentArgumentsBecomeAnEmptyObjectRatherThanNull) {
+  const auto calls = hermes::ollama::parse_tool_calls(
+      nlohmann::json::parse(R"([{"function": {"name": "list"}}])"));
+
+  ASSERT_EQ(calls.size(), 1u);
+  EXPECT_TRUE(calls[0].arguments.is_object());
+  EXPECT_TRUE(calls[0].arguments.empty());
+}
+
+TEST(ChatToolCalls, SkipsANamelessCallRatherThanPropagatingAHalfValue) {
+  const auto calls = hermes::ollama::parse_tool_calls(nlohmann::json::parse(R"([
+    {"function": {"name": "", "arguments": {}}},
+    {"function": {"arguments": {}}},
+    {"not_a_function": true},
+    "a bare string",
+    {"function": {"name": "read", "arguments": {"path": "a.txt"}}}
+  ])"));
+
+  ASSERT_EQ(calls.size(), 1u);
+  EXPECT_EQ(calls[0].name, "read");
+}
+
+TEST(ChatToolCalls, ANonArrayYieldsNothingRatherThanThrowing) {
+  EXPECT_TRUE(hermes::ollama::parse_tool_calls(nlohmann::json::object()).empty());
+  EXPECT_TRUE(hermes::ollama::parse_tool_calls(nlohmann::json()).empty());
+}
+
+TEST(ChatToolCalls, AReplyCarryingOnlyCallsHasEmptyContentAndIsNotAFailure) {
+  // The usual shape of a working agent turn: every correct call in D12's table came
+  // back with content empty.
+  const auto reply = hermes::ollama::parse_chat_reply(nlohmann::json::parse(R"({
+    "message": {"role": "assistant", "content": "",
+                "tool_calls": [{"function": {"name": "read", "arguments": {"path": "a.txt"}}}]},
+    "done_reason": "stop", "prompt_eval_count": 334, "eval_count": 99
+  })"));
+
+  ASSERT_TRUE(reply.has_value());
+  EXPECT_TRUE(reply->content.empty());
+  ASSERT_EQ(reply->tool_calls.size(), 1u);
+  EXPECT_EQ(reply->tool_calls[0].name, "read");
+  EXPECT_EQ(reply->prompt_tokens, 334u);
+}
+
+TEST(ChatPayload, SendsToolsAndNoFormatForTheToolsConstraint) {
+  auto request = minimal_request();
+  request.constraint = hermes::ollama::ChatRequest::Tools{
+      .definitions = {nlohmann::json{{"type", "function"},
+                                     {"function", {{"name", "read"}}}}}};
+
+  const auto payload = hermes::ollama::build_chat_payload(request, 65536);
+  ASSERT_TRUE(payload.contains("tools"));
+  EXPECT_EQ(payload["tools"].size(), 1u);
+  EXPECT_EQ(payload["tools"][0]["function"]["name"], "read");
+  EXPECT_FALSE(payload.contains("format"));
+}
+
+TEST(ChatPayload, SendsFormatAndNoToolsForTheSchemaConstraint) {
+  auto request = minimal_request();
+  request.constraint =
+      hermes::ollama::ChatRequest::Schema{.schema = nlohmann::json{{"type", "object"}}};
+
+  const auto payload = hermes::ollama::build_chat_payload(request, 65536);
+  ASSERT_TRUE(payload.contains("format"));
+  EXPECT_EQ(payload["format"]["type"], "object");
+  EXPECT_FALSE(payload.contains("tools"));
+}
+
+TEST(ChatPayload, SendsNeitherKeyWhenUnconstrained) {
+  const auto payload = hermes::ollama::build_chat_payload(minimal_request(), 65536);
+  EXPECT_FALSE(payload.contains("tools"));
+  EXPECT_FALSE(payload.contains("format"));
+}
+
+TEST(ChatPayload, OmitsAnEmptyToolListRatherThanSendingToolsColonEmptyArray) {
+  auto request = minimal_request();
+  request.constraint = hermes::ollama::ChatRequest::Tools{};
+
+  const auto payload = hermes::ollama::build_chat_payload(request, 65536);
+  EXPECT_FALSE(payload.contains("tools"));
+}
+
+TEST(ChatPayload, RebuildsAnAssistantTurnsCallsInTheShapeVerifiedToRoundTrip) {
+  // Verified 2026-08-17 against all five models: this shape renders a byte-identical
+  // prompt to the server's own verbatim object (equal prompt_eval_count), so nothing
+  // depends on the `function.index` field dropped here.
+  auto request = minimal_request();
+  hermes::ollama::ToolCall call;
+  call.id = "call_abc";
+  call.name = "read";
+  call.arguments = nlohmann::json{{"path", "a.txt"}};
+  request.messages.push_back(
+      {.role = "assistant", .content = "", .tool_calls = {call}});
+  request.messages.push_back(
+      {.role = "tool", .content = R"([{"path":"a.txt"}])", .tool_name = "read"});
+
+  const auto payload = hermes::ollama::build_chat_payload(request, 65536);
+  const auto& assistant = payload["messages"][1];
+  EXPECT_EQ(assistant["role"], "assistant");
+  ASSERT_TRUE(assistant.contains("tool_calls"));
+  EXPECT_EQ(assistant["tool_calls"][0]["id"], "call_abc");
+  EXPECT_EQ(assistant["tool_calls"][0]["type"], "function");
+  EXPECT_EQ(assistant["tool_calls"][0]["function"]["name"], "read");
+  EXPECT_EQ(assistant["tool_calls"][0]["function"]["arguments"]["path"], "a.txt");
+
+  const auto& result = payload["messages"][2];
+  EXPECT_EQ(result["role"], "tool");
+  EXPECT_EQ(result["tool_name"], "read");
+}
+
+TEST(ChatPayload, OmitsToolFieldsOnPlainTextMessages) {
+  // An empty tool_calls on every user turn is noise the template may or may not
+  // tolerate, and there is no reason to find out.
+  const auto payload = hermes::ollama::build_chat_payload(minimal_request(), 65536);
+  const auto& user = payload["messages"][0];
+  EXPECT_FALSE(user.contains("tool_calls"));
+  EXPECT_FALSE(user.contains("tool_name"));
+}
