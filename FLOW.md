@@ -8,10 +8,11 @@ disagree, the source is right and the diagram is a bug. That constraint is delib
 place stating the architecture is a second place for it to drift, which is the failure
 [tool.h](./src/hermes/core/tool.h) exists to make unrepresentable elsewhere.
 
-**Dashed = not built yet.** Status per [README](./README.md) as of 2026-08-16 — the sandbox, all
-eight Tier 0 tools with per-call verification, the staleness guard and the backup store are
-merged and tested; the loop that drives the local model and the MCP server are
-[ROUTING.md](./ROUTING.md) §12 steps 4–5, the next work.
+**Dashed = not built yet.** Status as of 2026-08-17 — the sandbox, all eight Tier 0 tools with
+per-call verification, the staleness guard, the backup store **and the agent loop that drives the
+local model** are merged and tested. What is left dashed is the MCP server
+([ROUTING.md](./ROUTING.md) §12 step 6), `shell` and Tier 1, and — in diagram 3 — the
+verify-and-re-invoke ring that makes the loop a supervisor.
 
 ---
 
@@ -103,9 +104,16 @@ load-bearing.
 
 ## 3. The supervisor turn
 
-This is the product, and it is the half not yet built. `Session` — history and the context
-budget — exists in `src/hermes/supervisor/`; it sits below the loop drawn here, and the loop is
-what Phase 2 adds. Nothing in this diagram runs today.
+This is the product, and **it is now half built rather than not built.** The left side of the ring
+runs: `AgentLoop` in `src/hermes/supervisor/loop.cpp` starts a bounded session, drives the model,
+dispatches its calls and feeds the results back, all of it bounded by turn count and wall clock
+(R8). Verified end to end against a live local model on 2026-08-17.
+
+**The right side does not run, and it is the half that matters.** Today the loop stops when the
+model stops asking for tools — which is reading the model's answer, the exact thing R6 forbids.
+Nothing polls the filesystem, nothing compares state against what was asked, and nothing
+re-invokes with one concrete remaining failure. So `POLL`, the decision and `RE` below are dashed,
+and `StopReason::Answered` means *"the model stopped asking"* and not *"the work is done"*.
 
 The arithmetic it rests on — a task succeeding ~67% per attempt approaching ~96% under verified
 retries — is a claim computed from measured instability, not a measured outcome, and
@@ -130,12 +138,18 @@ flowchart LR
     RE --> M
 
     classDef pending stroke-dasharray:6
-    class S,M,CALLS,POLL,Q,DONE,RE pending
+    class POLL,Q,DONE,RE pending
 ```
 
 The reason R6 polls rather than reads the model's answer: across the recorded runs, a model
 replying `DONE` on an untouched tree is a thing that actually happened, repeatedly. A harness
 that scored the reply would have called those runs successes.
+
+Building the loop produced a fresh instance of the same thing, and a sharper one, because the
+model was not even lying about the filesystem — it was misreading data it had just been handed.
+Given a tool result whose `content` field was the four characters `aaaa`, `llama3.2-3b` reported
+*"a.txt is 1 character long"*. Nothing about that reply looks wrong; only the filesystem, and the
+hash beside the content, say otherwise.
 
 ---
 

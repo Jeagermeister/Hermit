@@ -184,7 +184,9 @@ add_library(hermes::ollama ALIAS hermes_ollama)
 # accident. The edge turns that accident into a declared dependency; an out-of-tree
 # consumer of hermes::supervisor alone is who it would actually have broken.
 add_library(hermes_supervisor
-  src/hermes/supervisor/session.cpp)
+  src/hermes/supervisor/loop.cpp
+  src/hermes/supervisor/session.cpp
+  src/hermes/supervisor/wire.cpp)
 
 target_include_directories(hermes_supervisor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hermes_supervisor
@@ -201,7 +203,8 @@ add_library(hermes::supervisor ALIAS hermes_supervisor)
 # only the two final binaries did -- so composition code here would have leaned on
 # the binaries' link lines rather than a declared dependency.
 add_library(hermes_app
-  src/hermes/app/config.cpp)
+  src/hermes/app/config.cpp
+  src/hermes/app/toolset.cpp)
 
 target_include_directories(hermes_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hermes_app

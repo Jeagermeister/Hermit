@@ -259,6 +259,40 @@ void Session::add_user(std::string content) {
   outstanding_.reset();
 }
 
+void Session::add_tool_result(std::string tool_name, std::string content) {
+  const std::uint64_t tokens = estimate(content);
+  turns_.push_back(Turn{.message = {.role = "tool",
+                                    .content = std::move(content),
+                                    .tool_name = std::move(tool_name)},
+                        .estimated_tokens = tokens,
+                        .measured_tokens = std::nullopt,
+                        .pinned = false});
+  // Same reasoning as add_user: anything appended between prepare() and record() would
+  // reorder the conversation, so the outstanding request is given up rather than
+  // checked against a history it no longer describes.
+  outstanding_.reset();
+}
+
+namespace {
+
+/// How many turns belong to the group starting at `first`.
+///
+/// A group is an assistant turn carrying tool calls together with every `tool` turn
+/// immediately following it; anything else is a group of one. See prepare()'s header
+/// note for why the two halves cannot be separated.
+///
+/// A stray `tool` turn whose assistant is already gone is a group of one, which drops
+/// it. That should not arise -- the loop records the assistant turn before appending
+/// any result -- and if it ever does, an orphan is better removed than preserved.
+std::size_t group_size(const std::vector<Turn>& turns, std::size_t first) {
+  if (turns[first].message.tool_calls.empty()) return 1;
+  std::size_t last = first + 1;
+  while (last < turns.size() && turns[last].message.role == "tool") ++last;
+  return last - first;
+}
+
+}  // namespace
+
 SessionResult<ollama::ChatRequest> Session::prepare() {
   pin_latest_user();
 
@@ -277,8 +311,13 @@ SessionResult<ollama::ChatRequest> Session::prepare() {
               std::to_string(budget) + " are available in a window of " +
               std::to_string(window_)});
     }
-    turns_.erase(victim);
-    ++dropped_;
+    // The whole group goes, or none of it. A pinned turn cannot appear inside a group --
+    // pin_latest_user pins only `system` and the latest `user`, and a group is an
+    // assistant turn followed by `tool` turns -- so this never erases something pinned.
+    const auto first = static_cast<std::size_t>(std::distance(turns_.begin(), victim));
+    const std::size_t count = group_size(turns_, first);
+    dropped_ += count;
+    turns_.erase(victim, victim + static_cast<std::ptrdiff_t>(count));
   }
 
   ollama::ChatRequest request;
@@ -327,7 +366,9 @@ SessionResult<void> Session::record(const ollama::ChatReply& reply) {
   if (looks_truncated(sent.estimated_tokens, measured)) {
     // The reply still joins the history. The turn happened, and hiding it would leave
     // the caller unable to see what the model was answering when it went wrong.
-    turns_.push_back(Turn{.message = {.role = "assistant", .content = reply.content},
+    turns_.push_back(Turn{.message = {.role = "assistant",
+                                    .content = reply.content,
+                                    .tool_calls = reply.tool_calls},
                           .estimated_tokens = estimate(reply.content),
                           .measured_tokens = std::nullopt,
                           .pinned = false});
@@ -357,7 +398,9 @@ SessionResult<void> Session::record(const ollama::ChatReply& reply) {
   // `reasoning` is deliberately not carried into the history: it is the model's working
   // rather than its answer, Ollama returns it in its own field rather than in content,
   // and feeding it back would spend context on tokens the model did not ask to see again.
-  turns_.push_back(Turn{.message = {.role = "assistant", .content = reply.content},
+  turns_.push_back(Turn{.message = {.role = "assistant",
+                                    .content = reply.content,
+                                    .tool_calls = reply.tool_calls},
                         .estimated_tokens = estimate(reply.content),
                         .measured_tokens = std::nullopt,
                         .pinned = false});

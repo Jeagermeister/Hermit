@@ -482,10 +482,23 @@ These are hard to reverse and benefit from being argued out before code exists:
 
 ## Phase 2 — Core loop and minimal tools
 
-- [ ] Agent loop: history, tool dispatch, bounded turns
-- [ ] `read`, `write`, `list` — **the tools exist as of 2026-08-16** ([ROUTING.md](./ROUTING.md)
-      §12 step 3); the "prove the loop end to end" half of this bullet stays open with the
-      agent-loop bullet above, which is why the box is not ticked
+- [x] ~~Agent loop: history, tool dispatch, bounded turns~~ — done 2026-08-17.
+      `src/hermes/supervisor/loop.cpp` drives `prepare() -> chat() -> record()`, dispatches every
+      call in the order the model made it, and feeds each result back as a `tool` message.
+      Bounded by turn count **and** wall clock (R8), with the honest limit written down: a
+      blocking single-threaded loop (D1) cannot interrupt a request already in flight, so the
+      real worst case is the budget plus one `chat_timeout`. That gap is the open
+      bounded-execution question in [DECISIONS.md](./DECISIONS.md), not a flag.
+      Three things had to be built underneath it, none of which existed: tool calls on the wire
+      ([D12](./DECISIONS.md)), the JSON bridge in `supervisor/wire.cpp` that ROUTING.md §7
+      specified but nothing had needed yet, and `app/toolset.cpp` composing the eight tools.
+- [x] ~~`read`, `write`, `list`~~ — **proved end to end 2026-08-17** against
+      `fsops-qwen3.5-9b:64k` on this laptop, sanitizers on and clean. The run worth recording is
+      the one nobody scripted: asked to overwrite an existing file, the model's `write` was
+      *refused* by the observed-state gate — "exists but was never read this session" — so it
+      read the file and retried, and the second call succeeded. R4 preserved the old bytes to
+      generation `0000` outside the root. That is §4's staleness table, R4 and R5 all working
+      under a real model rather than under a test.
 - [x] ~~`edit`~~ — done 2026-08-16, with the exactly-once occurrence rule and the
       observed-state gate recorded in [ROUTING.md](./ROUTING.md) §4; "hardest to get right"
       held up, which is why its semantics were argued before its code
@@ -538,8 +551,21 @@ model calling this as a tool.
 ## Phase 3 — The supervisor (the actual product)
 
 - [ ] **State verification.** After each turn, check what the model *claims* against what the
-      filesystem *shows*.
+      filesystem *shows*. **Now the one thing standing between the loop and the product**: the
+      loop stops when the model stops asking for tools, which is trusting a completion claim and
+      is exactly what R6 forbids. `StopReason::Answered` is documented as meaning only "stopped
+      asking", and the CLI prints that caveat rather than letting a zero exit status imply
+      success. A live example arrived unprompted while building the loop: handed a tool result
+      whose `content` was the four characters `aaaa`, `llama3.2-3b` reported *"a.txt is 1
+      character long"* — reading its own tool output wrong, in confident prose.
 - [ ] **Re-invocation** with one concrete remaining failure, per the tournament recommendation.
+      **Measured support, 2026-08-17**: handed a refusal as a tool result, only `qwen3.5-9b` used
+      it to correct itself. `llama3.2-3b`, `hermes3-8b` and `gemma4-e4b` all stopped calling tools
+      and addressed the human instead — *"Please provide me with the path of the file"*. Stated at
+      its real width: the refusal injected in that probe was deliberately incoherent, so this
+      measures reaction to a confusing error rather than to a fair one. The direction is the
+      point — these models do not reliably self-correct, so re-invocation has to come from
+      outside them.
 - [ ] **Guardrails** — dry-run, backup-before-mutate, undo. The erased `tally.py` is the argument.
       *Where* backups live was settled 2026-08-15 — never granted to the confined child, per
       [D10](./DECISIONS.md) and [ROUTING.md](./ROUTING.md) §11 — so what remains here is

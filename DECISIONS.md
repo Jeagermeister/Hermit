@@ -109,6 +109,19 @@ be sold as doing more than it does.
 distribution the model samples from. Worth measuring on the fsops harness rather than assuming
 either way.
 
+> **⚠ Overturned in part, 2026-08-17, by the measurement this paragraph asked for. See
+> [D12](#d12--tool-calls-are-native-format-is-never-sent-alongside-tools).**
+>
+> It was measured on the fsops model set, and the degradation is not marginal: adding `format`
+> alongside `tools` takes four of seven models from a correct call to no usable call at all,
+> `llama3.2:3b` — the source of the evidence above — included.
+>
+> **What this decision got right** is that malformed tool arguments are a real failure class
+> worth a structural answer. **What it got wrong** is the mechanism: `format` is not how tool
+> arguments get constrained, because it is not composable with tool calling. D12 keeps the goal
+> and changes the means, and `format` keeps its job for structured *replies* with no tools
+> offered — Tier 1's shape — where it was re-measured working.
+
 ## D6 — The sandbox is a capability type, and resolution is POSIX-order
 
 `Sandbox::resolve` is the only way to construct a `SandboxPath`. Tools take `SandboxPath`, not
@@ -691,6 +704,75 @@ accepted in steady state.
 
 ---
 
+## D12 — Tool calls are native; `format` is never sent alongside `tools`
+
+**Decided 2026-08-17**, building Phase 2's agent loop, from measurement rather than reasoning.
+
+Tool calls go over Ollama's native `tools` array and come back in `message.tool_calls`. The
+`format` schema is **never** sent in the same request. On `ChatRequest` the two are a
+`std::variant`, so sending both is unrepresentable rather than merely discouraged.
+
+**Why, and this is the whole argument.** `format` and `tools` are not complementary. Measured on
+`cachyos-x8664` (RTX 5080 Laptop 16 GB), Ollama 0.32.9 — the same version every other figure in
+this file was taken on — temperature 0, two repeats each, one `write` tool offered against a
+`format` schema describing that very same call:
+
+| model | `tools` alone | `tools` + `format` |
+|---|---|---|
+| `qwen3.5-9b` | correct | correct — `format` ignored, `eval_count` identical |
+| `qwen3.5-4b` | correct | correct — `format` ignored, `eval_count` identical |
+| `gemma4-e4b` | correct | correct |
+| `llama3.2-3b` | correct | **corrupt arguments** |
+| `llama3.1-8b` | correct | **corrupt arguments** |
+| `hermes3-8b` | correct | **no call at all** |
+| `granite4-7b` | correct | **no call at all** |
+
+Seven of seven models emit a correct call with `tools` alone. **Four of seven break when `format`
+is added**, in two distinct ways:
+
+- **Corrupt arguments.** The model generates JSON conforming to the `format` schema, and Ollama's
+  template tool-parser then treats that whole object as the call's arguments — `{"tool": "write",
+  "path": "hello.txt", "content": "HERMES-OK"}`. Well-formed, dispatchable, and wrong. With a
+  schema *unrelated* to the tool the corruption is total: the arguments came back as
+  `{"quokka": 0, "verdict": "{\"name\":\"write\",\"parameters\":{...}"}` — the real call
+  buried inside a string.
+- **No call at all.** The schema-conforming JSON lands in `content` and `tool_calls` is empty.
+
+**The second failure is R2's own failure, reintroduced by R2's own mechanism.** R2 was written
+because `llama3.2:3b` *"emitted a whole tool call as plain prose that was never parsed as a call"*.
+That is precisely what `hermes3-8b` and `granite4-7b` do here when `format` is added. And the model
+whose misbehaviour supplied R2's evidence — `llama3.2:3b` — is itself one of the four that break.
+
+**So D5's stated overturn condition is met, by its own terms.** D5 asked for *"evidence that
+constraining `format` measurably degrades tool-call quality on the models actually used"*, and
+called that a real risk worth measuring on the fsops harness rather than assuming either way.
+Measured: 100% → 0% on four of the seven models in that harness.
+
+**What survives of D5, and it is not a consolation prize.** `format` works exactly as documented
+when no tools are offered — the same run confirmed a clean schema-constrained reply on every model
+probed. So D5 is *retargeted*, not overturned: `format` is the mechanism for a structured **reply**,
+which is what Tier 1's `triage` and `summarize` will want, and it has no business on the
+tool-argument path.
+
+**What replaces it there.** R2's intent — arguments that are structurally valid — is met by two
+things that do not fight the model:
+
+1. The model's own trained tool-call channel, which is what the 7-of-7 column measures.
+2. `parse_args` failing closed against the declaration, which is where the schema leakage above
+   is caught: `tool` is refused as an unknown argument, by name, in a message the model can act
+   on. There is a test asserting exactly that, so the D12 story stays executable.
+
+Note what is *not* claimed. This does not make arguments correct, only well-formed — the same
+limit D5 stated about itself. A well-formed call to delete the wrong file is untouched, and that
+is still what the supervisor is for.
+
+**What would overturn it.** A future Ollama that honours `format` and `tools` together coherently
+on every model in use — in which case the variant becomes one line, and the table above becomes
+the reason it existed. Re-measure before believing a release note; this behaviour is not
+documented either way, which is why it had to be probed.
+
+---
+
 ## Still open
 
 ### ~~Which chat endpoint~~ — settled as D8
@@ -717,7 +799,7 @@ and answers both halves, which is why this is no longer open:
 Revisit only if the threat model widens to an actor with prior filesystem access, which is a
 larger change than this entry.
 
-### The trim loop and tool results
+### ~~The trim loop and tool results~~ — closed 2026-08-17, when Phase 2 made it real
 
 **Noticed 2026-08-15**, from Prime Agent's compaction rules. Their cut-point selection never cuts
 at a tool result, because a result must stay with the call that produced it.
@@ -732,6 +814,27 @@ It bites the moment Phase 2 adds tool messages. A trim that drops a result while
 call leaves the model looking at an orphaned request, and the reliable response to that is to
 re-issue it — which is the repeat-call loop the supervisor exists to break. Recorded here rather
 than fixed, because there is nothing yet to fix.
+
+**Phase 2 arrived, and this is now fixed rather than noted.** The unit of dropping is a *group*:
+an assistant turn carrying `tool_calls` together with every `tool` turn immediately following it.
+`prepare()` erases groups, never turns, so neither half of the split can happen. `dropped()` still
+counts turns, so the number stays comparable with a tool-free session.
+
+Two things this entry did not anticipate, both found while fixing it:
+
+- **`record()` was dropping `reply.tool_calls` on the floor.** The assistant turn went into
+  history as `{role, content}` only, so the call was never *in* history to be orphaned — the
+  model would have seen results with no visible request from the very first turn, before any
+  trimming. Grouping alone would not have helped; the calls had to be carried too.
+- **An oversized tool result cannot be refused by the Session, and is silently dropped.**
+  `pin_latest_user` pins only `system` and the latest `user`, so a result is *always* droppable;
+  a result too large for the whole budget therefore takes its own call down with it, and the
+  model — seeing neither — re-issues the same call and gets the same result. Coherent history, no
+  progress. The loop substitutes a refusal naming the size before such a result reaches history
+  (`result_is_hopeless`), which converts it into one line the model can act on. The underlying
+  mismatch is left open and named: `read`'s cap is a 16 MB filesystem-safety limit with no
+  relation to any context window, and ROUTING.md §9 makes it configuration, so wiring the cap to
+  the window is a composition decision nobody has made yet.
 
 ### Test oracle
 
