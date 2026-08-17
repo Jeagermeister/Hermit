@@ -1,11 +1,11 @@
-#include <hermes/core/sha256.h>
+#include <hermit/core/sha256.h>
 
 #include <gtest/gtest.h>
 
 #include <string>
 #include <string_view>
 
-using hermes::sha256_hex;
+using hermit::sha256_hex;
 
 namespace {
 

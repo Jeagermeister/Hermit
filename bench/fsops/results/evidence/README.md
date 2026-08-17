@@ -1,7 +1,7 @@
 # Evidence
 
 **`count.sh`** — written by an agent at 17:34 on 2026-08-12, during the first sweep, into the
-**Hermes-Cpp repository root** rather than its own working directory. It is task
+**Hermit repository root** rather than its own working directory. It is task
 `08_write_and_run_script`'s artifact, and it is correct code: it counts `.txt` files under
 `./data`. It simply ran somewhere it was never given.
 
@@ -22,7 +22,7 @@ That would also explain `./check.sh: No such file or directory` in an early `07_
 where the script demonstrably existed and was executable.
 
 This is a **tool-design artifact, not a model failure**, and it is a hard requirement for
-Hermes-Cpp: *every* tool's path resolution — file tools and shell alike — must be pinned to the
+Hermit: *every* tool's path resolution — file tools and shell alike — must be pinned to the
 sandbox root, never inherited or inferred. Pinning only the shell would have missed the actual
 escape route. Relative paths are what models actually emit.
 

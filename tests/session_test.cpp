@@ -7,7 +7,7 @@
 // call, for the same reason D8's clamp is tested offline -- verifying it for real means
 // performing the failure.
 
-#include <hermes/supervisor/session.h>
+#include <hermit/supervisor/session.h>
 
 #include <gtest/gtest.h>
 
@@ -21,16 +21,16 @@
 
 namespace {
 
-using hermes::supervisor::calibrate;
-using hermes::supervisor::kInitialCharsPerToken;
-using hermes::supervisor::kPerMessageOverhead;
-using hermes::supervisor::looks_truncated;
-using hermes::supervisor::Session;
-using hermes::supervisor::SessionError;
-using hermes::supervisor::SessionOptions;
+using hermit::supervisor::calibrate;
+using hermit::supervisor::kInitialCharsPerToken;
+using hermit::supervisor::kPerMessageOverhead;
+using hermit::supervisor::looks_truncated;
+using hermit::supervisor::Session;
+using hermit::supervisor::SessionError;
+using hermit::supervisor::SessionOptions;
 
-hermes::ollama::ClientOptions client_with(std::uint64_t max_num_ctx) {
-  hermes::ollama::ClientOptions options;
+hermit::ollama::ClientOptions client_with(std::uint64_t max_num_ctx) {
+  hermit::ollama::ClientOptions options;
   options.max_num_ctx = max_num_ctx;
   return options;
 }
@@ -58,9 +58,9 @@ Session small_session(const std::string& system = "sys") {
   return std::move(*session);
 }
 
-hermes::ollama::ChatReply reply_with(std::string content, std::uint64_t prompt_tokens,
+hermit::ollama::ChatReply reply_with(std::string content, std::uint64_t prompt_tokens,
                                      std::uint64_t completion_tokens = 10) {
-  hermes::ollama::ChatReply reply;
+  hermit::ollama::ChatReply reply;
   reply.content = std::move(content);
   reply.prompt_tokens = prompt_tokens;
   reply.completion_tokens = completion_tokens;
@@ -546,7 +546,7 @@ TEST(SessionAttribution, IgnoresAPromptCountLargerThanTheWindowItWasSentIn) {
 
 TEST(SessionShareOut, DividesInProportionToWeight) {
   const std::vector<std::size_t> weights = {100, 300};
-  const auto shares = hermes::supervisor::share_out(weights, 400);
+  const auto shares = hermit::supervisor::share_out(weights, 400);
   ASSERT_EQ(shares.size(), 2u);
   EXPECT_EQ(shares[0], 100u);
   EXPECT_EQ(shares[1], 300u);
@@ -554,7 +554,7 @@ TEST(SessionShareOut, DividesInProportionToWeight) {
 
 TEST(SessionShareOut, RoundsUpSoALongHistoryDoesNotBleedTokens) {
   const std::vector<std::size_t> weights = {1, 1, 1};
-  const auto shares = hermes::supervisor::share_out(weights, 10);
+  const auto shares = hermit::supervisor::share_out(weights, 10);
   ASSERT_EQ(shares.size(), 3u);
   std::uint64_t total = 0;
   for (const std::uint64_t s : shares) total += s;
@@ -563,13 +563,13 @@ TEST(SessionShareOut, RoundsUpSoALongHistoryDoesNotBleedTokens) {
 
 TEST(SessionShareOut, GivesUpRatherThanDividingByNothing) {
   const std::vector<std::size_t> none;
-  EXPECT_TRUE(hermes::supervisor::share_out(none, 100).empty());
+  EXPECT_TRUE(hermit::supervisor::share_out(none, 100).empty());
 
   const std::vector<std::size_t> weightless = {0, 0};
-  EXPECT_TRUE(hermes::supervisor::share_out(weightless, 100).empty());
+  EXPECT_TRUE(hermit::supervisor::share_out(weightless, 100).empty());
 
   const std::vector<std::size_t> weights = {5, 5};
-  EXPECT_TRUE(hermes::supervisor::share_out(weights, 0).empty());
+  EXPECT_TRUE(hermit::supervisor::share_out(weights, 0).empty());
 }
 
 // --- the truncation predicate ------------------------------------------------
@@ -606,12 +606,12 @@ TEST(SessionTruncationPredicate, DoesNotWrapOnALargeMeasurement) {
 
 namespace {
 
-hermes::ollama::ChatReply reply_with_call(std::string name, std::uint64_t prompt_tokens) {
-  hermes::ollama::ChatReply reply;
+hermit::ollama::ChatReply reply_with_call(std::string name, std::uint64_t prompt_tokens) {
+  hermit::ollama::ChatReply reply;
   reply.finish_reason = "stop";
   reply.prompt_tokens = prompt_tokens;
   reply.completion_tokens = 20;
-  hermes::ollama::ToolCall call;
+  hermit::ollama::ToolCall call;
   call.id = "call_1";
   call.name = std::move(name);
   call.arguments = nlohmann::json{{"path", "a.txt"}};
@@ -862,7 +862,7 @@ TEST(SessionToolHistory, AddingAToolResultGivesUpAnOutstandingRequest) {
 
   const auto recorded = session->record(reply_with_call("read", 100));
   ASSERT_FALSE(recorded.has_value());
-  EXPECT_EQ(recorded.error().kind, hermes::supervisor::SessionError::NoRequestOutstanding);
+  EXPECT_EQ(recorded.error().kind, hermit::supervisor::SessionError::NoRequestOutstanding);
 }
 
 TEST(SessionToolHistory, ThePreparedRequestCarriesToolMessagesThroughToTheWire) {

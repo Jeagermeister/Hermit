@@ -7,7 +7,7 @@
 // one target) -- so the multi-turn behaviour was verified against live models instead,
 // and what those runs showed is recorded in loop.h and D12.
 
-#include <hermes/supervisor/loop.h>
+#include <hermit/supervisor/loop.h>
 
 #include <gtest/gtest.h>
 
@@ -23,24 +23,24 @@
 
 #include <nlohmann/json.hpp>
 
-#include <hermes/app/toolset.h>
+#include <hermit/app/toolset.h>
 
 namespace fs = std::filesystem;
-using hermes::Sandbox;
-using hermes::supervisor::AgentLoop;
-using hermes::supervisor::dispatch_call;
-using hermes::supervisor::LoopOptions;
-using hermes::supervisor::oversized_refusal;
-using hermes::supervisor::result_is_hopeless;
-using hermes::supervisor::Session;
-using hermes::supervisor::SessionOptions;
-using hermes::supervisor::StopReason;
+using hermit::Sandbox;
+using hermit::supervisor::AgentLoop;
+using hermit::supervisor::dispatch_call;
+using hermit::supervisor::LoopOptions;
+using hermit::supervisor::oversized_refusal;
+using hermit::supervisor::result_is_hopeless;
+using hermit::supervisor::Session;
+using hermit::supervisor::SessionOptions;
+using hermit::supervisor::StopReason;
 using json = nlohmann::json;
 
 namespace {
 
-hermes::ollama::ToolCall call_of(std::string name, json arguments) {
-  hermes::ollama::ToolCall call;
+hermit::ollama::ToolCall call_of(std::string name, json arguments) {
+  hermit::ollama::ToolCall call;
   call.id = "call_1";
   call.name = std::move(name);
   call.arguments = std::move(arguments);
@@ -50,7 +50,7 @@ hermes::ollama::ToolCall call_of(std::string name, json arguments) {
 class LoopFixture : public ::testing::Test {
  protected:
   void SetUp() override {
-    std::string tpl = (fs::temp_directory_path() / "hermes_loop_XXXXXX").string();
+    std::string tpl = (fs::temp_directory_path() / "hermit_loop_XXXXXX").string();
     std::vector<char> buf(tpl.begin(), tpl.end());
     buf.push_back('\0');
     ASSERT_NE(::mkdtemp(buf.data()), nullptr) << "could not create temp dir";
@@ -63,9 +63,9 @@ class LoopFixture : public ::testing::Test {
     ASSERT_TRUE(box.has_value());
     sandbox_ = std::make_unique<Sandbox>(std::move(*box));
 
-    auto tools = hermes::app::ToolSet::tier0(tmp_ / "backups");
+    auto tools = hermit::app::ToolSet::tier0(tmp_ / "backups");
     ASSERT_TRUE(tools.has_value());
-    tools_ = std::make_unique<hermes::app::ToolSet>(std::move(*tools));
+    tools_ = std::make_unique<hermit::app::ToolSet>(std::move(*tools));
   }
 
   void TearDown() override {
@@ -73,14 +73,14 @@ class LoopFixture : public ::testing::Test {
     fs::remove_all(tmp_, ec);
   }
 
-  hermes::supervisor::Dispatched run_call(std::string name, json arguments) {
+  hermit::supervisor::Dispatched run_call(std::string name, json arguments) {
     return dispatch_call(tools_->registry(), *sandbox_, call_of(std::move(name),
                                                                 std::move(arguments)));
   }
 
   fs::path tmp_;
   std::unique_ptr<Sandbox> sandbox_;
-  std::unique_ptr<hermes::app::ToolSet> tools_;
+  std::unique_ptr<hermit::app::ToolSet> tools_;
 };
 
 }  // namespace
@@ -188,8 +188,8 @@ namespace {
 
 /// A client that will never answer: nothing is listening on this port. Enough to reach
 /// the bound checks, which happen before any request goes out.
-hermes::ollama::ClientOptions dead_client() {
-  hermes::ollama::ClientOptions options;
+hermit::ollama::ClientOptions dead_client() {
+  hermit::ollama::ClientOptions options;
   options.base_url = "http://127.0.0.1:1";
   options.max_num_ctx = 8192;
   options.connect_timeout = std::chrono::seconds{1};
@@ -209,7 +209,7 @@ SessionOptions session_options() {
 }  // namespace
 
 TEST_F(LoopFixture, AZeroTurnBoundStopsBeforeAnyRequestGoesOut) {
-  const auto client = hermes::ollama::Client::open(dead_client());
+  const auto client = hermit::ollama::Client::open(dead_client());
   ASSERT_TRUE(client.has_value());
   auto session = Session::open(session_options(), *client, "sys");
   ASSERT_TRUE(session.has_value());
@@ -225,7 +225,7 @@ TEST_F(LoopFixture, AZeroTurnBoundStopsBeforeAnyRequestGoesOut) {
 
 TEST_F(LoopFixture, AZeroWallClockBudgetStopsBeforeTheTurnBoundIsConsidered) {
   // R8's point: the clock is the bound that matters, so it is checked first.
-  const auto client = hermes::ollama::Client::open(dead_client());
+  const auto client = hermit::ollama::Client::open(dead_client());
   ASSERT_TRUE(client.has_value());
   auto session = Session::open(session_options(), *client, "sys");
   ASSERT_TRUE(session.has_value());
@@ -239,7 +239,7 @@ TEST_F(LoopFixture, AZeroWallClockBudgetStopsBeforeTheTurnBoundIsConsidered) {
 }
 
 TEST_F(LoopFixture, AnUnreachableDaemonStopsAsTransportWithoutRetrying) {
-  const auto client = hermes::ollama::Client::open(dead_client());
+  const auto client = hermit::ollama::Client::open(dead_client());
   ASSERT_TRUE(client.has_value());
   auto session = Session::open(session_options(), *client, "sys");
   ASSERT_TRUE(session.has_value());
@@ -253,7 +253,7 @@ TEST_F(LoopFixture, AnUnreachableDaemonStopsAsTransportWithoutRetrying) {
 }
 
 TEST_F(LoopFixture, TheInstructionReachesHistoryEvenWhenTheFirstTurnFails) {
-  const auto client = hermes::ollama::Client::open(dead_client());
+  const auto client = hermit::ollama::Client::open(dead_client());
   ASSERT_TRUE(client.has_value());
   auto session = Session::open(session_options(), *client, "sys");
   ASSERT_TRUE(session.has_value());
@@ -267,7 +267,7 @@ TEST_F(LoopFixture, TheInstructionReachesHistoryEvenWhenTheFirstTurnFails) {
 }
 
 TEST_F(LoopFixture, OffersEveryRegisteredToolAsADefinition) {
-  const auto client = hermes::ollama::Client::open(dead_client());
+  const auto client = hermit::ollama::Client::open(dead_client());
   ASSERT_TRUE(client.has_value());
   AgentLoop loop{*client, tools_->registry(), *sandbox_, LoopOptions{}};
 
@@ -279,7 +279,7 @@ TEST_F(LoopFixture, OffersEveryRegisteredToolAsADefinition) {
 // --- the oversized-result guard ----------------------------------------------
 
 TEST_F(LoopFixture, AResultLargerThanTheWholePromptBudgetIsHopeless) {
-  const auto client = hermes::ollama::Client::open(dead_client());
+  const auto client = hermit::ollama::Client::open(dead_client());
   ASSERT_TRUE(client.has_value());
   auto session = Session::open(session_options(), *client, "sys");
   ASSERT_TRUE(session.has_value());
@@ -293,7 +293,7 @@ TEST_F(LoopFixture, AResultLargerThanTheWholePromptBudgetIsHopeless) {
 TEST_F(LoopFixture, AResultMerelyLargeIsTrimmedAroundRatherThanRefused) {
   // The boundary that matters: only the case nothing can be dropped to fix is refused.
   // A large-but-fitting result is the Session's normal business.
-  const auto client = hermes::ollama::Client::open(dead_client());
+  const auto client = hermit::ollama::Client::open(dead_client());
   ASSERT_TRUE(client.has_value());
   auto session = Session::open(session_options(), *client, "sys");
   ASSERT_TRUE(session.has_value());
@@ -319,7 +319,7 @@ TEST(LoopStopReason, EveryReasonHasItsOwnSentence) {
                            StopReason::SessionRefused, StopReason::Transport};
   std::vector<std::string> sentences;
   for (const auto reason : reasons) {
-    const std::string text{hermes::supervisor::to_string(reason)};
+    const std::string text{hermit::supervisor::to_string(reason)};
     EXPECT_FALSE(text.empty());
     EXPECT_EQ(text.find("unknown"), std::string::npos);
     sentences.push_back(text);
@@ -337,11 +337,11 @@ TEST(LoopStopReason, EveryReasonHasItsOwnSentence) {
 
 namespace {
 
-using hermes::ollama::ChatReply;
-using hermes::ollama::ChatRequest;
-using hermes::ollama::ToolCall;
-using hermes::supervisor::ChatFn;
-using hermes::supervisor::TurnEvent;
+using hermit::ollama::ChatReply;
+using hermit::ollama::ChatRequest;
+using hermit::ollama::ToolCall;
+using hermit::supervisor::ChatFn;
+using hermit::supervisor::TurnEvent;
 
 ChatReply text_reply(std::string content, std::uint64_t prompt_tokens = 200) {
   ChatReply reply;
@@ -376,11 +376,11 @@ struct Script {
   std::vector<ChatRequest> seen{};
 
   ChatFn fn() {
-    return [this](const ChatRequest& request) -> hermes::ollama::Result<ChatReply> {
+    return [this](const ChatRequest& request) -> hermit::ollama::Result<ChatReply> {
       seen.push_back(request);
       if (served >= replies.size()) {
-        return std::unexpected(hermes::ollama::Failure{
-            hermes::ollama::TransportError::Unreachable, "script exhausted"});
+        return std::unexpected(hermit::ollama::Failure{
+            hermit::ollama::TransportError::Unreachable, "script exhausted"});
       }
       return replies[served++];
     };
@@ -644,10 +644,10 @@ TEST_F(LoopFixture, TheWallClockIsConsultedBeforeTheTurnCount) {
 
 namespace {
 
-using hermes::supervisor::ChangeKind;
-using hermes::supervisor::TreeVerifier;
+using hermit::supervisor::ChangeKind;
+using hermit::supervisor::TreeVerifier;
 
-const hermes::supervisor::Change* change_for(const hermes::supervisor::Changeset& set,
+const hermit::supervisor::Change* change_for(const hermit::supervisor::Changeset& set,
                                              std::string_view path) {
   for (const auto& change : set.changes) {
     if (change.path == path) return &change;
@@ -738,7 +738,7 @@ TEST_F(LoopFixture, SeesAChangeNoToolMadeAndNoReplyMentioned) {
                     text_reply("done")};
   // Mutate the tree as a side effect of serving the first reply.
   auto raw = script.fn();
-  hermes::supervisor::ChatFn meddling =
+  hermit::supervisor::ChatFn meddling =
       [&raw, &root](const ChatRequest& request) {
         auto reply = raw(request);
         std::ofstream{root / "appeared.txt"} << "not via any tool\n";

@@ -1,4 +1,4 @@
-# Flow — how a request moves through Hermes-Cpp
+# Flow — how a request moves through Hermit
 
 Three diagrams: the request path, what one mutating call actually does, and the supervisor turn.
 
@@ -6,7 +6,7 @@ Three diagrams: the request path, what one mutating call actually does, and the 
 does not restate a claim from those documents — it points at them. If a diagram and its source
 disagree, the source is right and the diagram is a bug. That constraint is deliberate: a second
 place stating the architecture is a second place for it to drift, which is the failure
-[tool.h](./src/hermes/core/tool.h) exists to make unrepresentable elsewhere.
+[tool.h](./src/hermit/core/tool.h) exists to make unrepresentable elsewhere.
 
 **Dashed = not built yet.** Status as of 2026-08-17 — the sandbox, all eight Tier 0 tools with
 per-call verification, the staleness guard, the backup store **and the agent loop that drives the
@@ -28,7 +28,7 @@ flowchart TB
     P["Person<br/>CLI session"]
     K["Larger model<br/>Kiro, or any MCP client"]
     MCP["mcp.cpp<br/>JSON-RPC over stdio"]
-    APP["hermes-cpp<br/>tool menu travels with every request"]
+    APP["hermit<br/>tool menu travels with every request"]
     RES["Sandbox::resolve<br/>R1 — a path becomes a SandboxPath, or is refused"]
     T{"which tier?"}
     T0["<b>Tier 0 — execute</b><br/>read · list · find · grep · hash<br/>write · edit · move"]
@@ -105,7 +105,7 @@ load-bearing.
 ## 3. The supervisor turn
 
 This is the product, and **it is now half built rather than not built.** The left side of the ring
-runs: `AgentLoop` in `src/hermes/supervisor/loop.cpp` starts a bounded session, drives the model,
+runs: `AgentLoop` in `src/hermit/supervisor/loop.cpp` starts a bounded session, drives the model,
 dispatches its calls and feeds the results back, all of it bounded by turn count and wall clock
 (R8). Verified end to end against a live local model on 2026-08-17.
 

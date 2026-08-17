@@ -1,18 +1,18 @@
-#include <hermes/ollama/client.h>
+#include <hermit/ollama/client.h>
 
 #include <gtest/gtest.h>
 
 #include <limits>
 #include <string>
 
-using hermes::ollama::ChatReply;
-using hermes::ollama::ModelCard;
-using hermes::ollama::parse_chat_reply;
-using hermes::ollama::parse_model_card;
-using hermes::ollama::parse_num_ctx;
-using hermes::ollama::parse_tags;
-using hermes::ollama::strip_latest;
-using hermes::ollama::TransportError;
+using hermit::ollama::ChatReply;
+using hermit::ollama::ModelCard;
+using hermit::ollama::parse_chat_reply;
+using hermit::ollama::parse_model_card;
+using hermit::ollama::parse_num_ctx;
+using hermit::ollama::parse_tags;
+using hermit::ollama::strip_latest;
+using hermit::ollama::TransportError;
 using json = nlohmann::json;
 
 namespace {
@@ -102,7 +102,7 @@ TEST(StripLatest, ADegenerateNameIsLeftAlone) {
 TEST(ValidateBaseUrl, AcceptsLoopbackForms) {
   for (const char* url : {"http://localhost:11434", "http://127.0.0.1:11434", "http://[::1]:11434",
                           "http://localhost", "http://127.1.2.3:11434", "http://localhost:11434/"}) {
-    EXPECT_TRUE(hermes::ollama::validate_base_url(url).has_value()) << url;
+    EXPECT_TRUE(hermit::ollama::validate_base_url(url).has_value()) << url;
   }
 }
 
@@ -112,7 +112,7 @@ TEST(ValidateBaseUrl, RejectsNonLoopbackHosts) {
   // so the host has to be refused before any of that can happen.
   for (const char* url : {"http://192.0.2.55:11434", "http://ollama.example.com:11434",
                           "http://[2001:db8::1]:11434", "http://10.0.0.5"}) {
-    EXPECT_FALSE(hermes::ollama::validate_base_url(url).has_value()) << url;
+    EXPECT_FALSE(hermit::ollama::validate_base_url(url).has_value()) << url;
   }
 }
 
@@ -125,40 +125,40 @@ TEST(ValidateBaseUrl, RejectsHostnamesThatMerelyLookLikeLoopback) {
                           "http://127.0.0.1.:11434", "http://127.0.0:11434",
                           "http://127.0.0.1.5:11434", "http://127.0.0.999:11434",
                           "http://localhost.evil.com:11434"}) {
-    EXPECT_FALSE(hermes::ollama::validate_base_url(url).has_value()) << url;
+    EXPECT_FALSE(hermit::ollama::validate_base_url(url).has_value()) << url;
   }
 }
 
 TEST(ValidateBaseUrl, RejectsUserinfoThatHidesTheRealHost) {
   // Talks to example.com while the report prints a string beginning 127.0.0.1.
   EXPECT_FALSE(
-      hermes::ollama::validate_base_url("http://127.0.0.1:11434@example.com/").has_value());
-  EXPECT_FALSE(hermes::ollama::validate_base_url("http://localhost@evil.com").has_value());
+      hermit::ollama::validate_base_url("http://127.0.0.1:11434@example.com/").has_value());
+  EXPECT_FALSE(hermit::ollama::validate_base_url("http://localhost@evil.com").has_value());
 }
 
 TEST(ValidateBaseUrl, AcceptsTheWholeLoopbackRangeNotJust127001) {
   // 127.0.0.0/8 is loopback in its entirety, so a real address anywhere in it is fine.
   for (const char* url : {"http://127.0.0.1", "http://127.1.2.3:11434", "http://127.255.255.255"}) {
-    EXPECT_TRUE(hermes::ollama::validate_base_url(url).has_value()) << url;
+    EXPECT_TRUE(hermit::ollama::validate_base_url(url).has_value()) << url;
   }
 }
 
 TEST(ValidateBaseUrl, RejectsSchemesHttplibWouldThrowOn) {
   // The likeliest typo for this flag. It used to abort the process.
-  EXPECT_FALSE(hermes::ollama::validate_base_url("https://localhost:11434").has_value());
-  EXPECT_FALSE(hermes::ollama::validate_base_url("localhost:11434").has_value());
-  EXPECT_FALSE(hermes::ollama::validate_base_url("").has_value());
+  EXPECT_FALSE(hermit::ollama::validate_base_url("https://localhost:11434").has_value());
+  EXPECT_FALSE(hermit::ollama::validate_base_url("localhost:11434").has_value());
+  EXPECT_FALSE(hermit::ollama::validate_base_url("").has_value());
 }
 
 TEST(ValidateBaseUrl, RejectsAPathBecauseHttplibDiscardsIt) {
   // Accepting one means printing a URL in the report that is not the one used.
-  EXPECT_FALSE(hermes::ollama::validate_base_url("http://localhost:11434/wrong").has_value());
+  EXPECT_FALSE(hermit::ollama::validate_base_url("http://localhost:11434/wrong").has_value());
 }
 
 TEST(ValidateBaseUrl, ClientOpenSurfacesTheRejectionAsAFailure) {
-  hermes::ollama::ClientOptions options;
+  hermit::ollama::ClientOptions options;
   options.base_url = "https://localhost:11434";
-  const auto client = hermes::ollama::Client::open(options);
+  const auto client = hermit::ollama::Client::open(options);
   EXPECT_FALSE(client.has_value());
 }
 
@@ -171,34 +171,34 @@ TEST(ValidateBaseUrl, ClientOpenSurfacesTheRejectionAsAFailure) {
 // the thing it guards against.
 
 TEST(BuildChatOptions, ClampsNumCtxToTheCeiling) {
-  hermes::ollama::ChatRequest request;
+  hermit::ollama::ChatRequest request;
   request.num_ctx = 262144;  // the value that took the machine down
-  const auto options = hermes::ollama::build_chat_options(request, 65536);
+  const auto options = hermit::ollama::build_chat_options(request, 65536);
   EXPECT_EQ(options.at("num_ctx").get<std::uint64_t>(), 65536u);
 }
 
 TEST(BuildChatOptions, LeavesAValueUnderTheCeilingAlone) {
-  hermes::ollama::ChatRequest request;
+  hermit::ollama::ChatRequest request;
   request.num_ctx = 32768;
-  EXPECT_EQ(hermes::ollama::build_chat_options(request, 65536).at("num_ctx").get<std::uint64_t>(),
+  EXPECT_EQ(hermit::ollama::build_chat_options(request, 65536).at("num_ctx").get<std::uint64_t>(),
             32768u);
 }
 
 TEST(BuildChatOptions, ExactlyTheCeilingIsUnchanged) {
-  hermes::ollama::ChatRequest request;
+  hermit::ollama::ChatRequest request;
   request.num_ctx = 65536;
-  EXPECT_EQ(hermes::ollama::build_chat_options(request, 65536).at("num_ctx").get<std::uint64_t>(),
+  EXPECT_EQ(hermit::ollama::build_chat_options(request, 65536).at("num_ctx").get<std::uint64_t>(),
             65536u);
 }
 
 TEST(BuildChatOptions, ClampHoldsAtAbsurdValues) {
   // A config typo or an overflowed computation must not become a request the driver
   // dies on. There is no input that produces a num_ctx above the ceiling.
-  hermes::ollama::ChatRequest request;
+  hermit::ollama::ChatRequest request;
   for (const std::uint64_t requested :
        {std::uint64_t{1} << 40, std::numeric_limits<std::uint64_t>::max()}) {
     request.num_ctx = requested;
-    EXPECT_EQ(hermes::ollama::build_chat_options(request, 8192).at("num_ctx").get<std::uint64_t>(),
+    EXPECT_EQ(hermit::ollama::build_chat_options(request, 8192).at("num_ctx").get<std::uint64_t>(),
               8192u);
   }
 }
@@ -207,15 +207,15 @@ TEST(BuildChatOptions, AnAbsentNumCtxSendsNoKeyAtAll) {
   // Sending nothing leaves the server default in force. That is the undetermined
   // state R9 refuses, but it is the caller's to fix -- inventing a value here would
   // hide it.
-  hermes::ollama::ChatRequest request;
-  EXPECT_FALSE(hermes::ollama::build_chat_options(request, 65536).contains("num_ctx"));
+  hermit::ollama::ChatRequest request;
+  EXPECT_FALSE(hermit::ollama::build_chat_options(request, 65536).contains("num_ctx"));
 }
 
 TEST(BuildChatOptions, CarriesTemperatureAndPredictBudget) {
-  hermes::ollama::ChatRequest request;
+  hermit::ollama::ChatRequest request;
   request.temperature = 0.0;
   request.max_tokens = 16;
-  const auto options = hermes::ollama::build_chat_options(request, 65536);
+  const auto options = hermit::ollama::build_chat_options(request, 65536);
   EXPECT_EQ(options.at("num_predict").get<int>(), 16);
   EXPECT_DOUBLE_EQ(options.at("temperature").get<double>(), 0.0);
   EXPECT_FALSE(options.contains("max_tokens")) << "that is the OpenAI name, not Ollama's";
@@ -430,8 +430,8 @@ TEST(ParseChatReply, NullContentIsAValidReplyNotAFailure) {
 
 namespace {
 
-hermes::ollama::ChatRequest minimal_request() {
-  hermes::ollama::ChatRequest request;
+hermit::ollama::ChatRequest minimal_request() {
+  hermit::ollama::ChatRequest request;
   request.model = "test-model";
   request.messages.push_back({.role = "user", .content = "hello"});
   request.num_ctx = 8192;
@@ -441,23 +441,23 @@ hermes::ollama::ChatRequest minimal_request() {
 }  // namespace
 
 TEST(ChatToolCalls, ParsesNameAndStructuredArguments) {
-  const auto calls = hermes::ollama::parse_tool_calls(nlohmann::json::parse(R"([
+  const auto calls = hermit::ollama::parse_tool_calls(nlohmann::json::parse(R"([
     {"id": "call_abc", "function": {"name": "write",
-     "arguments": {"path": "hello.txt", "content": "HERMES-OK"}}}
+     "arguments": {"path": "hello.txt", "content": "HERMIT-OK"}}}
   ])"));
 
   ASSERT_EQ(calls.size(), 1u);
   EXPECT_EQ(calls[0].id, "call_abc");
   EXPECT_EQ(calls[0].name, "write");
   EXPECT_EQ(calls[0].arguments["path"], "hello.txt");
-  EXPECT_EQ(calls[0].arguments["content"], "HERMES-OK");
+  EXPECT_EQ(calls[0].arguments["content"], "HERMIT-OK");
 }
 
 TEST(ChatToolCalls, KeepsOrderAndDuplicatesBecauseModelsEmitBoth) {
   // Measured: llama3.2-3b answered one prompt with `read a.txt`, `read b.txt`,
   // `read a.txt` -- three calls, one repeated. Deduplicating or collapsing here would
   // silently drop work the model asked for.
-  const auto calls = hermes::ollama::parse_tool_calls(nlohmann::json::parse(R"([
+  const auto calls = hermit::ollama::parse_tool_calls(nlohmann::json::parse(R"([
     {"function": {"name": "read", "arguments": {"path": "a.txt"}}},
     {"function": {"name": "read", "arguments": {"path": "b.txt"}}},
     {"function": {"name": "read", "arguments": {"path": "a.txt"}}}
@@ -470,7 +470,7 @@ TEST(ChatToolCalls, KeepsOrderAndDuplicatesBecauseModelsEmitBoth) {
 }
 
 TEST(ChatToolCalls, AbsentArgumentsBecomeAnEmptyObjectRatherThanNull) {
-  const auto calls = hermes::ollama::parse_tool_calls(
+  const auto calls = hermit::ollama::parse_tool_calls(
       nlohmann::json::parse(R"([{"function": {"name": "list"}}])"));
 
   ASSERT_EQ(calls.size(), 1u);
@@ -479,7 +479,7 @@ TEST(ChatToolCalls, AbsentArgumentsBecomeAnEmptyObjectRatherThanNull) {
 }
 
 TEST(ChatToolCalls, SkipsANamelessCallRatherThanPropagatingAHalfValue) {
-  const auto calls = hermes::ollama::parse_tool_calls(nlohmann::json::parse(R"([
+  const auto calls = hermit::ollama::parse_tool_calls(nlohmann::json::parse(R"([
     {"function": {"name": "", "arguments": {}}},
     {"function": {"arguments": {}}},
     {"not_a_function": true},
@@ -492,14 +492,14 @@ TEST(ChatToolCalls, SkipsANamelessCallRatherThanPropagatingAHalfValue) {
 }
 
 TEST(ChatToolCalls, ANonArrayYieldsNothingRatherThanThrowing) {
-  EXPECT_TRUE(hermes::ollama::parse_tool_calls(nlohmann::json::object()).empty());
-  EXPECT_TRUE(hermes::ollama::parse_tool_calls(nlohmann::json()).empty());
+  EXPECT_TRUE(hermit::ollama::parse_tool_calls(nlohmann::json::object()).empty());
+  EXPECT_TRUE(hermit::ollama::parse_tool_calls(nlohmann::json()).empty());
 }
 
 TEST(ChatToolCalls, AReplyCarryingOnlyCallsHasEmptyContentAndIsNotAFailure) {
   // The usual shape of a working agent turn: every correct call in D12's table came
   // back with content empty.
-  const auto reply = hermes::ollama::parse_chat_reply(nlohmann::json::parse(R"({
+  const auto reply = hermit::ollama::parse_chat_reply(nlohmann::json::parse(R"({
     "message": {"role": "assistant", "content": "",
                 "tool_calls": [{"function": {"name": "read", "arguments": {"path": "a.txt"}}}]},
     "done_reason": "stop", "prompt_eval_count": 334, "eval_count": 99
@@ -514,11 +514,11 @@ TEST(ChatToolCalls, AReplyCarryingOnlyCallsHasEmptyContentAndIsNotAFailure) {
 
 TEST(ChatPayload, SendsToolsAndNoFormatForTheToolsConstraint) {
   auto request = minimal_request();
-  request.constraint = hermes::ollama::ChatRequest::Tools{
+  request.constraint = hermit::ollama::ChatRequest::Tools{
       .definitions = {nlohmann::json{{"type", "function"},
                                      {"function", {{"name", "read"}}}}}};
 
-  const auto payload = hermes::ollama::build_chat_payload(request, 65536);
+  const auto payload = hermit::ollama::build_chat_payload(request, 65536);
   ASSERT_TRUE(payload.contains("tools"));
   EXPECT_EQ(payload["tools"].size(), 1u);
   EXPECT_EQ(payload["tools"][0]["function"]["name"], "read");
@@ -528,25 +528,25 @@ TEST(ChatPayload, SendsToolsAndNoFormatForTheToolsConstraint) {
 TEST(ChatPayload, SendsFormatAndNoToolsForTheSchemaConstraint) {
   auto request = minimal_request();
   request.constraint =
-      hermes::ollama::ChatRequest::Schema{.schema = nlohmann::json{{"type", "object"}}};
+      hermit::ollama::ChatRequest::Schema{.schema = nlohmann::json{{"type", "object"}}};
 
-  const auto payload = hermes::ollama::build_chat_payload(request, 65536);
+  const auto payload = hermit::ollama::build_chat_payload(request, 65536);
   ASSERT_TRUE(payload.contains("format"));
   EXPECT_EQ(payload["format"]["type"], "object");
   EXPECT_FALSE(payload.contains("tools"));
 }
 
 TEST(ChatPayload, SendsNeitherKeyWhenUnconstrained) {
-  const auto payload = hermes::ollama::build_chat_payload(minimal_request(), 65536);
+  const auto payload = hermit::ollama::build_chat_payload(minimal_request(), 65536);
   EXPECT_FALSE(payload.contains("tools"));
   EXPECT_FALSE(payload.contains("format"));
 }
 
 TEST(ChatPayload, OmitsAnEmptyToolListRatherThanSendingToolsColonEmptyArray) {
   auto request = minimal_request();
-  request.constraint = hermes::ollama::ChatRequest::Tools{};
+  request.constraint = hermit::ollama::ChatRequest::Tools{};
 
-  const auto payload = hermes::ollama::build_chat_payload(request, 65536);
+  const auto payload = hermit::ollama::build_chat_payload(request, 65536);
   EXPECT_FALSE(payload.contains("tools"));
 }
 
@@ -555,7 +555,7 @@ TEST(ChatPayload, RebuildsAnAssistantTurnsCallsInTheShapeVerifiedToRoundTrip) {
   // prompt to the server's own verbatim object (equal prompt_eval_count), so nothing
   // depends on the `function.index` field dropped here.
   auto request = minimal_request();
-  hermes::ollama::ToolCall call;
+  hermit::ollama::ToolCall call;
   call.id = "call_abc";
   call.name = "read";
   call.arguments = nlohmann::json{{"path", "a.txt"}};
@@ -564,7 +564,7 @@ TEST(ChatPayload, RebuildsAnAssistantTurnsCallsInTheShapeVerifiedToRoundTrip) {
   request.messages.push_back(
       {.role = "tool", .content = R"([{"path":"a.txt"}])", .tool_name = "read"});
 
-  const auto payload = hermes::ollama::build_chat_payload(request, 65536);
+  const auto payload = hermit::ollama::build_chat_payload(request, 65536);
   const auto& assistant = payload["messages"][1];
   EXPECT_EQ(assistant["role"], "assistant");
   ASSERT_TRUE(assistant.contains("tool_calls"));
@@ -581,7 +581,7 @@ TEST(ChatPayload, RebuildsAnAssistantTurnsCallsInTheShapeVerifiedToRoundTrip) {
 TEST(ChatPayload, OmitsToolFieldsOnPlainTextMessages) {
   // An empty tool_calls on every user turn is noise the template may or may not
   // tolerate, and there is no reason to find out.
-  const auto payload = hermes::ollama::build_chat_payload(minimal_request(), 65536);
+  const auto payload = hermit::ollama::build_chat_payload(minimal_request(), 65536);
   const auto& user = payload["messages"][0];
   EXPECT_FALSE(user.contains("tool_calls"));
   EXPECT_FALSE(user.contains("tool_name"));

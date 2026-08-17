@@ -3,7 +3,7 @@
 // Split like the code: `diff` is pure over two snapshots, so the whole classification
 // table is exercised without a filesystem; the walk needs a real tree and gets one.
 
-#include <hermes/supervisor/verify.h>
+#include <hermit/supervisor/verify.h>
 
 #include <gtest/gtest.h>
 
@@ -19,15 +19,15 @@
 #include <unistd.h>
 
 namespace fs = std::filesystem;
-using hermes::IdentityTuple;
-using hermes::Sandbox;
-using hermes::supervisor::Change;
-using hermes::supervisor::ChangeKind;
-using hermes::supervisor::Changeset;
-using hermes::supervisor::diff;
-using hermes::supervisor::FileState;
-using hermes::supervisor::TreeSnapshot;
-using hermes::supervisor::TreeVerifier;
+using hermit::IdentityTuple;
+using hermit::Sandbox;
+using hermit::supervisor::Change;
+using hermit::supervisor::ChangeKind;
+using hermit::supervisor::Changeset;
+using hermit::supervisor::diff;
+using hermit::supervisor::FileState;
+using hermit::supervisor::TreeSnapshot;
+using hermit::supervisor::TreeVerifier;
 
 namespace {
 
@@ -188,7 +188,7 @@ namespace {
 class VerifyFixture : public ::testing::Test {
  protected:
   void SetUp() override {
-    std::string tpl = (fs::temp_directory_path() / "hermes_verify_XXXXXX").string();
+    std::string tpl = (fs::temp_directory_path() / "hermit_verify_XXXXXX").string();
     std::vector<char> buf(tpl.begin(), tpl.end());
     buf.push_back('\0');
     ASSERT_NE(::mkdtemp(buf.data()), nullptr);
@@ -377,7 +377,7 @@ TEST_F(VerifyFixture, RefusesTheWholeSnapshotWhenADirectoryCannotBeRead) {
   ::chmod((root_ / "locked").c_str(), 0755);  // restore so TearDown can clean up
 
   ASSERT_FALSE(snap.has_value());
-  EXPECT_EQ(snap.error().kind, hermes::supervisor::VerifyErrorKind::DirectoryUnreadable);
+  EXPECT_EQ(snap.error().kind, hermit::supervisor::VerifyErrorKind::DirectoryUnreadable);
   EXPECT_NE(snap.error().message().find("locked"), std::string::npos);
   EXPECT_NE(snap.error().message().find("no snapshot"), std::string::npos);
 }

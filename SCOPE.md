@@ -87,7 +87,7 @@ something here it is worth knowing.
 ## Discard — everything else in `agent/` and `tools/`
 
 The single largest win is **`auxiliary_client.py`, 10,306 lines** — the biggest file in `agent/`,
-and almost entirely multi-provider client plumbing. Hermes-Cpp talks to one OpenAI-compatible
+and almost entirely multi-provider client plumbing. Hermit talks to one OpenAI-compatible
 endpoint. Note `providers/` is only **452 lines**, which tells you where upstream's provider
 complexity actually lives.
 
@@ -167,7 +167,7 @@ unit that keeps the report answerable.
 
 ## Platforms — Linux is the product, Windows is a separate package
 
-**Decided 2026-08-16.** Hermes-Cpp targets **Linux**. That is not a placeholder for "portable
+**Decided 2026-08-16.** Hermit targets **Linux**. That is not a placeholder for "portable
 eventually": it is the substrate [D6](./DECISIONS.md#d6--the-sandbox-is-a-capability-type-and-resolution-is-posix-order),
 [D10](./DECISIONS.md#d10--kernel-confinement-for-shell-landlock-vendored-one-writable-root) and R1
 were designed against, and the only one where the guarantees have been measured.

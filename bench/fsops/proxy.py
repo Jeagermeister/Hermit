@@ -5,7 +5,7 @@ Why this exists: the default run log captures only Hermes' final reply. When
 `DONE` and nothing else - there was no way to tell whether the `5|` was a rendered
 line-number prefix echoed back as literal content (a tool-design bug, fixable) or the
 model inventing it (a model defect, must be designed around). Those need very
-different responses from Hermes-Cpp, and guessing between them is not acceptable.
+different responses from Hermit, and guessing between them is not acceptable.
 
 Hermes' own `request_dump_*.json` files do not help: that path fires only on API
 errors, so a successful-but-wrong run produces nothing.

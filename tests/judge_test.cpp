@@ -1,4 +1,4 @@
-#include <hermes/supervisor/judge.h>
+#include <hermit/supervisor/judge.h>
 
 #include <gtest/gtest.h>
 
@@ -8,13 +8,13 @@
 
 namespace {
 
-using hermes::supervisor::Expectation;
-using hermes::supervisor::ExpectationSet;
-using hermes::supervisor::FileState;
-using hermes::supervisor::judge;
-using hermes::supervisor::Outcome;
-using hermes::supervisor::TreeSnapshot;
-using hermes::supervisor::Verdict;
+using hermit::supervisor::Expectation;
+using hermit::supervisor::ExpectationSet;
+using hermit::supervisor::FileState;
+using hermit::supervisor::judge;
+using hermit::supervisor::Outcome;
+using hermit::supervisor::TreeSnapshot;
+using hermit::supervisor::Verdict;
 
 /// A plausible-looking distinct digest. The judge only ever compares hashes for equality
 /// and emptiness, so the bytes do not matter -- the width does, because a 64-character hex

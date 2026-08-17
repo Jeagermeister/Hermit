@@ -10,7 +10,7 @@ document exists so neither happens again.
 (the agent loop and `mcp.cpp`) — which is deliberate: this suite is those steps' first
 real workout, and the proof gate for shipping them.
 
-**What this measures in one line:** the same tasks, with and without the Hermes-Cpp layer —
+**What this measures in one line:** the same tasks, with and without the Hermit layer —
 wall time, completeness graded from the filesystem, and tokens — reported as *paired
 deltas*, never as a leaderboard.
 
@@ -24,7 +24,7 @@ requirements. Conflating them would weaken both.
 ### E2 — Economics (the delegation delta)
 
 **Question:** what does a large model spend doing filesystem work *itself*, versus
-delegating the hands to Hermes-Cpp over MCP?
+delegating the hands to Hermit over MCP?
 
 **Requires no local model.** Tier 0 is inference-free (§2 of ROUTING.md): the delegation
 win comes from verified tools keeping file bodies, tree dumps and retries out of paid
@@ -35,7 +35,7 @@ environment the workplace case describes.
 | | arm A — direct | arm B — delegated |
 |---|---|---|
 | the model | one large cloud model | the same model, same version, pinned |
-| its tools | a good-faith naive file toolset (read/write/list as plain schemas, results verbatim in context) | the Hermes-Cpp MCP surface |
+| its tools | a good-faith naive file toolset (read/write/list as plain schemas, results verbatim in context) | the Hermit MCP surface |
 | what flows through paid context | every file body, every listing, every retry | tool rows: paths, hashes, tuples, refusals |
 
 **Token accounting:** drive both arms through an API that reports exact usage per call
@@ -57,7 +57,7 @@ so the local suite can be extracted to its own public repository intact.
 | | arm A — bare | arm B — supervised |
 |---|---|---|
 | the model | `qwen3.5:9b` via Ollama, pinned tag | the same |
-| the harness | upstream Hermes Agent as shipped — the good-faith baseline, and literally the documented origin of the evidence base | the Hermes-Cpp loop |
+| the harness | upstream Hermes Agent as shipped — the good-faith baseline, and literally the documented origin of the evidence base | the Hermit loop |
 | tokens | exact both sides: Ollama reports `prompt_eval_count` / `eval_count` per request | same |
 
 The one column that *is* the product: **pass@1 versus pass-after-retries**, reported
@@ -93,7 +93,7 @@ model, same machine, collected once, used twice.
    as shipped, or a naive toolset a reasonable engineer would actually write.
 7. **Publish the losses.** Tasks where the layer costs more — a trivial single-file write
    paying supervision overhead — go in the report with the wins. Expected, and honest.
-8. **Versions pinned in the report**: model tags, Ollama version, Hermes-Cpp commit,
+8. **Versions pinned in the report**: model tags, Ollama version, Hermit commit,
    task-set hash. A number nobody can reproduce is a rumor.
 
 ## What would overturn the thesis

@@ -1,4 +1,4 @@
-# Hermes-Cpp
+# Hermit
 
 ## Start here
 
@@ -53,26 +53,26 @@ a larger model calls it as a tool.
 chaos:
 
 ```
-hermes-cpp session --root ~/notes --prompt "Find every note that mentions
+hermit session --root ~/notes --prompt "Find every note that mentions
 'Project Falcon' and create falcon-index.md listing each one with its date."
 ```
 
-Hermes sends the prompt to a small model on John's own GPU (`qwen3.5:9b` through Ollama —
+Hermit sends the prompt to a small model on John's own GPU (`qwen3.5:9b` through Ollama —
 nothing leaves the machine), **with the tool menu attached**: `find`, `grep`, `read`, `write`,
 each with a description. That menu is the whole trick — there is no magic by which a model
 "knows" tools exist; the menu travels with every request, and models are trained to answer with
 "call tool X" when a task needs hands. The model calls `grep`, reads the matches, writes the
 index — and every call runs inside `~/notes` only, every write is read back byte-for-byte, and
 anything overwritten is backed up first to an archive the model cannot touch. When the model
-says "done," Hermes does not believe it: it inspects the folder. Index present and verified?
+says "done," Hermit does not believe it: it inspects the folder. Index present and verified?
 Done. Model claimed done on an untouched tree — a thing the 259 runs actually recorded? Re-run,
 with the one concrete failure: *falcon-index.md does not exist.*
 
 **An assistant that delegates.** John works in an agentic IDE (Kiro is the named first caller —
-[ROUTING.md](./ROUTING.md) §8; any MCP client fits the same socket). Hermes-Cpp is registered
+[ROUTING.md](./ROUTING.md) §8; any MCP client fits the same socket). Hermit is registered
 there as an MCP server over stdio, so the IDE's cloud model sees the same tool menu at the
 assistant level. John types *"clean up the reports folder — everything from 2025 goes into an
-archive subfolder."* The big model does the thinking and calls Hermes for the hands: `find`,
+archive subfolder."* The big model does the thinking and calls Hermit for the hands: `find`,
 then `move` per file, each hash-verified at both ends, none able to overwrite what already
 exists. Ask for a file outside `~/reports` and the request is refused before any tool runs —
 not a rule the model follows, the only door it has. The pitch is sharper than "another MCP
@@ -83,7 +83,7 @@ inheriting it.
 **Status, honestly** (2026-08-17): the second half of these stories is built — the sandbox, all
 eight Tier 0 tools with per-call verification, the staleness guard, and the backup store are
 merged and tested. **The loop that drives the local model is now built too**, so a whole story
-runs end to end: `hermes-cpp agent` takes one instruction, offers the eight tools to a local
+runs end to end: `hermit agent` takes one instruction, offers the eight tools to a local
 model, dispatches what it asks for, and stops on a turn or wall-clock bound.
 
 **Phase 3's observation half landed 2026-08-17**: the tree is snapshotted before the run and
@@ -123,12 +123,12 @@ The evidence sits in two places, across two machines and two agent harnesses:
 
 | Path | What |
 |---|---|
-| `src/hermes/core/` | Library code. `sandbox` (R1), `tool` (D4's interface), `fsio` (the one open primitive), `sha256` (R3's hash), `observed` (the staleness guard), `backup` (R4's archive) |
-| `src/hermes/core/tools/` | The eight Tier 0 tools — read, list, find, grep, hash, write, edit, move — [ROUTING.md](./ROUTING.md) §4's surface, verified per call |
-| `src/hermes/ollama/` | The only layer that speaks HTTP: client and R9 preflight |
-| `src/hermes/supervisor/` | The turn: `loop` (dispatch and the R8 bounds), `session` (history and the context budget), `wire` (the JSON bridge between `core`'s pure data and the model), `verify` (R6's per-turn hash diff of the tree) — [D7](./DECISIONS.md)'s middle layer |
-| `src/hermes/app/` | `config` and `toolset` (composing the eight tools), shared by the CLI and the coming MCP frontend |
-| `src/main.cpp` | `hermes-cpp` — manual harness for the pieces that exist |
+| `src/hermit/core/` | Library code. `sandbox` (R1), `tool` (D4's interface), `fsio` (the one open primitive), `sha256` (R3's hash), `observed` (the staleness guard), `backup` (R4's archive) |
+| `src/hermit/core/tools/` | The eight Tier 0 tools — read, list, find, grep, hash, write, edit, move — [ROUTING.md](./ROUTING.md) §4's surface, verified per call |
+| `src/hermit/ollama/` | The only layer that speaks HTTP: client and R9 preflight |
+| `src/hermit/supervisor/` | The turn: `loop` (dispatch and the R8 bounds), `session` (history and the context budget), `wire` (the JSON bridge between `core`'s pure data and the model), `verify` (R6's per-turn hash diff of the tree) — [D7](./DECISIONS.md)'s middle layer |
+| `src/hermit/app/` | `config` and `toolset` (composing the eight tools), shared by the CLI and the coming MCP frontend |
+| `src/main.cpp` | `hermit` — manual harness for the pieces that exist |
 | `tests/` | GoogleTest suite; run with `ctest` |
 | `DECISIONS.md` | The hard-to-reverse choices, and what would overturn each |
 | `ROADMAP.md` | Scope, phases, and what has to be settled before code |
@@ -151,18 +151,18 @@ ctest --test-dir build --output-on-failure
 With sanitizers:
 
 ```bash
-cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DHERMES_SANITIZE=ON
-cmake --build build-asan && ./build-asan/tests/hermes_tests
+cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DHERMIT_SANITIZE=ON
+cmake --build build-asan && ./build-asan/tests/hermit_tests
 ```
 
 The binary is a manual harness for the pieces that exist, not the product's CLI:
 
 ```bash
-hermes-cpp resolve   --root DIR <path>...   # R1 path resolution
-hermes-cpp preflight --model NAME           # R9 model gates, against a live daemon
-hermes-cpp session   --model NAME           # context accounting, against a live model
-hermes-cpp agent     --root DIR --model NAME <instruction>   # the loop, end to end
-hermes-cpp config                           # every setting in force, and where it came from
+hermit resolve   --root DIR <path>...   # R1 path resolution
+hermit preflight --model NAME           # R9 model gates, against a live daemon
+hermit session   --model NAME           # context accounting, against a live model
+hermit agent     --root DIR --model NAME <instruction>   # the loop, end to end
+hermit config                           # every setting in force, and where it came from
 ```
 
 `agent` is the whole turn: one instruction, the eight tools offered to a local model, one line of
@@ -177,7 +177,7 @@ a post-condition a free-text instruction does not carry, so a clean stop plus an
 is evidence, not a verdict -- and a command that implied otherwise would be the more useful lie.
 
 ```bash
-hermes-cpp agent --root ~/scratch --model qwen35-agent --max-turns 8 \
+hermit agent --root ~/scratch --model qwen35-agent --max-turns 8 \
   'Read notes.txt and tell me how many lines it has.'
 ```
 
@@ -185,7 +185,7 @@ hermes-cpp agent --root ~/scratch --model qwen35-agent --max-turns 8 \
 the R1 failure made visible:
 
 ```bash
-cd /tmp && "$OLDPWD/build/hermes-cpp" resolve --root ~/some/root note.txt ../../etc/passwd
+cd /tmp && "$OLDPWD/build/hermit" resolve --root ~/some/root note.txt ../../etc/passwd
 ```
 
 `session` exists because the token estimate is the one thing no unit test can settle — there is
@@ -196,16 +196,16 @@ whole point: left to itself the server discards the middle of an over-long promp
 system message, and says nothing.
 
 ```bash
-hermes-cpp session --model gemma31-agent --max-num-ctx 2048
+hermit session --model gemma31-agent --max-num-ctx 2048
 ```
 
 Settings come from four places, in increasing precedence: **defaults < `--config` file <
 environment < flags**. There is deliberately no default sandbox root and no implicit search for
-a config file — either one would be an inferred root, which is R1's original bug. `hermes-cpp
+a config file — either one would be an inferred root, which is R1's original bug. `hermit
 config` prints the resolved set with the origin of each value:
 
 ```bash
-hermes-cpp config --config ./hermes.json --model qwen35-agent
+hermit config --config ./hermit.json --model qwen35-agent
 ```
 
 ## Working with upstream
@@ -219,11 +219,11 @@ tools/parity              # what has drifted in the modules we care about
 tools/parity conversation_loop   # the specific commits behind one module
 ```
 
-Set `$HERMES_REF_REPO` if the reference lives elsewhere.
+Set `$HERMIT_REF_REPO` if the reference lives elsewhere.
 
 ## Where this lives
 
-Gitea (`git@gitea:Jeagermeister/Hermes-Cpp.git`) is authoritative, mirrored to GitHub — see the
+Gitea (`git@gitea:Jeagermeister/Hermit.git`) is authoritative, mirrored to GitHub — see the
 `gitea-selfhost` repo. The reference clone deliberately does **not** live there: it is a pure
 function of upstream, so backing it up would be storing something freely regenerable.
 

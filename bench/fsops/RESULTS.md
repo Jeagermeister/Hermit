@@ -2,7 +2,7 @@
 
 > ### ⚠ These scores are lower bounds
 >
-> Agents were later found writing correct output into the **Hermes-Cpp repo root**
+> Agents were later found writing correct output into the **Hermit repo root**
 > instead of `--in` — see [`results/evidence/escaped-to-repo-root/`](./results/evidence/escaped-to-repo-root/).
 > `llama32-3b` scored 0/3 on `01_create_file` while having produced the exactly-correct
 > file, in the wrong place. The penalty is uneven: models emitting absolute paths were

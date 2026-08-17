@@ -1,4 +1,4 @@
-#include <hermes/ollama/preflight.h>
+#include <hermit/ollama/preflight.h>
 
 #include <gtest/gtest.h>
 
@@ -8,12 +8,12 @@
 #include <utility>
 #include <vector>
 
-using hermes::ollama::Check;
-using hermes::ollama::CheckId;
-using hermes::ollama::evaluate_card;
-using hermes::ollama::kMinimumContext;
-using hermes::ollama::ModelCard;
-using hermes::ollama::Policy;
+using hermit::ollama::Check;
+using hermit::ollama::CheckId;
+using hermit::ollama::evaluate_card;
+using hermit::ollama::kMinimumContext;
+using hermit::ollama::ModelCard;
+using hermit::ollama::Policy;
 
 namespace {
 

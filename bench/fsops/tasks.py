@@ -5,7 +5,7 @@ the OpenCode baseline and must stay that way; this file is free to change, becau
 there is no external baseline to stay comparable with.
 
 What these measure: can a 3B-9B model reliably perform the *primitive filesystem
-work* Hermes-Cpp is being built to supervise - create, mkdir, move, rename, copy,
+work* Hermit is being built to supervise - create, mkdir, move, rename, copy,
 delete, append, and run shell scripts - without collateral damage.
 
 Task schema

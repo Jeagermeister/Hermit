@@ -1,12 +1,12 @@
 # fsops — filesystem primitives for small models under Hermes
 
-**This is not Phase 0.** [`../run_hermes_diagnostic.py`](../run_hermes_diagnostic.py) replays the
+**This is not Phase 0.** [`../run_hermit_diagnostic.py`](../run_hermit_diagnostic.py) replays the
 OpenCode stages byte-for-byte to isolate harness effects, and `../stages.py` must never change.
 This suite is independent, has no external baseline, and is free to evolve.
 
 ## The question
 
-> Which small models can be trusted with the primitive filesystem operations the Hermes-Cpp
+> Which small models can be trusted with the primitive filesystem operations the Hermit
 > supervisor will hand them — and **what do they break when they fail?**
 
 Twelve tasks: create a file, make nested directories, move, rename, copy, selectively delete,
@@ -66,7 +66,7 @@ every run, so this table cannot silently rot.
 **`llama32-3b` stays even though it fails.** It is the floor, and more importantly it fails in the
 exact way the supervisor exists to catch — on `11_append_preserve` it replied `DONE` having
 changed nothing. If every model in the field passes, the collateral-damage detector and the
-canary never fire, and the benchmark cannot demonstrate the problem Hermes-Cpp is being built to
+canary never fire, and the benchmark cannot demonstrate the problem Hermit is being built to
 solve. Do not read its scores as a verdict on the model; read them as the guardrail test.
 
 **`qwen-4b` vs `qwen-9b` is a controlled size comparison.** Same family, same tokenizer, both

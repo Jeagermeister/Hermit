@@ -1,4 +1,4 @@
-#include <hermes/supervisor/wire.h>
+#include <hermit/supervisor/wire.h>
 
 #include <gtest/gtest.h>
 
@@ -10,20 +10,20 @@
 
 #include <nlohmann/json.hpp>
 
-using hermes::ArgSpec;
-using hermes::ArgType;
-using hermes::Field;
-using hermes::ToolError;
-using hermes::ToolOutput;
-using hermes::ToolRegistry;
-using hermes::ToolRow;
-using hermes::ToolSpec;
-using hermes::supervisor::DecodeErrorKind;
-using hermes::supervisor::raw_args_from;
-using hermes::supervisor::render_error;
-using hermes::supervisor::render_output;
-using hermes::supervisor::tool_definition;
-using hermes::supervisor::tool_definitions;
+using hermit::ArgSpec;
+using hermit::ArgType;
+using hermit::Field;
+using hermit::ToolError;
+using hermit::ToolOutput;
+using hermit::ToolRegistry;
+using hermit::ToolRow;
+using hermit::ToolSpec;
+using hermit::supervisor::DecodeErrorKind;
+using hermit::supervisor::raw_args_from;
+using hermit::supervisor::render_error;
+using hermit::supervisor::render_output;
+using hermit::supervisor::tool_definition;
+using hermit::supervisor::tool_definitions;
 using json = nlohmann::json;
 
 namespace {
@@ -38,13 +38,13 @@ constexpr ToolSpec kSpec{
     .name = "sample", .description = "A tool for testing.", .args = kSpecArgs};
 
 /// Registration-order test needs two real tools; neither is ever invoked here.
-class Stub : public hermes::Tool {
+class Stub : public hermit::Tool {
  public:
   explicit Stub(const ToolSpec& spec) : spec_(spec) {}
   const ToolSpec& spec() const noexcept override { return spec_; }
 
  private:
-  std::expected<ToolOutput, ToolError> run(const hermes::ToolArgs&) override {
+  std::expected<ToolOutput, ToolError> run(const hermit::ToolArgs&) override {
     return ToolOutput{};
   }
   const ToolSpec& spec_;
@@ -206,7 +206,7 @@ TEST(WireDecode, RefusesTheSchemaLeakageD12Measured) {
   // so nothing here rejects it -- it is parse_args that refuses `tool` as UnknownArg.
   // Asserted so the D12 story stays testable: this layer passes it through intact.
   const auto raw = raw_args_from(
-      json{{"tool", "write"}, {"path", "hello.txt"}, {"content", "HERMES-OK"}});
+      json{{"tool", "write"}, {"path", "hello.txt"}, {"content", "HERMIT-OK"}});
   ASSERT_TRUE(raw.has_value());
   EXPECT_EQ(raw->size(), 3u);
 }

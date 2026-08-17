@@ -1,4 +1,4 @@
-#include <hermes/core/tool.h>
+#include <hermit/core/tool.h>
 
 #include <gtest/gtest.h>
 
@@ -14,23 +14,23 @@
 #include <unistd.h>
 
 namespace fs = std::filesystem;
-using hermes::ArgErrorKind;
-using hermes::ArgSpec;
-using hermes::ArgType;
-using hermes::parse_args;
-using hermes::PathError;
-using hermes::RawArg;
-using hermes::RawArgs;
-using hermes::RegistryErrorKind;
-using hermes::Sandbox;
-using hermes::SpecError;
-using hermes::Tool;
-using hermes::ToolArgs;
-using hermes::ToolError;
-using hermes::ToolOutput;
-using hermes::ToolRegistry;
-using hermes::ToolSpec;
-using hermes::validate;
+using hermit::ArgErrorKind;
+using hermit::ArgSpec;
+using hermit::ArgType;
+using hermit::parse_args;
+using hermit::PathError;
+using hermit::RawArg;
+using hermit::RawArgs;
+using hermit::RegistryErrorKind;
+using hermit::Sandbox;
+using hermit::SpecError;
+using hermit::Tool;
+using hermit::ToolArgs;
+using hermit::ToolError;
+using hermit::ToolOutput;
+using hermit::ToolRegistry;
+using hermit::ToolSpec;
+using hermit::validate;
 
 namespace {
 
@@ -86,7 +86,7 @@ class NoopTool final : public Tool {
 class ToolTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    std::string tpl = (fs::temp_directory_path() / "hermes_tool_XXXXXX").string();
+    std::string tpl = (fs::temp_directory_path() / "hermit_tool_XXXXXX").string();
     std::vector<char> buf(tpl.begin(), tpl.end());
     buf.push_back('\0');
     ASSERT_NE(::mkdtemp(buf.data()), nullptr) << "could not create temp dir";
@@ -619,7 +619,7 @@ TEST_F(ToolTest, InvokeRefusesAMovedFromToolArgs) {
   auto parsed = parse_args(kEchoSpec, raw, *box_);
   ASSERT_TRUE(parsed.has_value());
 
-  hermes::ToolArgs taken = std::move(*parsed);
+  hermit::ToolArgs taken = std::move(*parsed);
 
   EchoTool echo;
   auto refused = echo.invoke(*parsed);

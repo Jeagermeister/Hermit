@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)  # SYSTEM on FetchContent_Declare
 
-project(hermes-cpp
+project(hermit
   VERSION 0.0.1
   DESCRIPTION "Supervisor for local models doing bounded filesystem work"
   LANGUAGES CXX)
@@ -27,17 +27,17 @@ endif()
 # std::expected is GCC's; a version check on the compiler alone would be asking the
 # wrong component. try_compile asks the toolchain that will actually build this,
 # whatever combination it turns out to be.
-set(HERMES_MIN_GNU   12 CACHE STRING "Minimum g++ (libstdc++ std::expected)")
-set(HERMES_MIN_CLANG 16 CACHE STRING "Minimum clang++ (libc++ std::expected)")
+set(HERMIT_MIN_GNU   12 CACHE STRING "Minimum g++ (libstdc++ std::expected)")
+set(HERMIT_MIN_CLANG 16 CACHE STRING "Minimum clang++ (libc++ std::expected)")
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
-   CMAKE_CXX_COMPILER_VERSION VERSION_LESS HERMES_MIN_GNU)
+   CMAKE_CXX_COMPILER_VERSION VERSION_LESS HERMIT_MIN_GNU)
   message(FATAL_ERROR
-    "g++ ${CMAKE_CXX_COMPILER_VERSION} is too old; ${HERMES_MIN_GNU}+ is required for <expected>.")
+    "g++ ${CMAKE_CXX_COMPILER_VERSION} is too old; ${HERMIT_MIN_GNU}+ is required for <expected>.")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND
-       CMAKE_CXX_COMPILER_VERSION VERSION_LESS HERMES_MIN_CLANG)
+       CMAKE_CXX_COMPILER_VERSION VERSION_LESS HERMIT_MIN_CLANG)
   message(FATAL_ERROR
-    "clang++ ${CMAKE_CXX_COMPILER_VERSION} is too old; ${HERMES_MIN_CLANG}+ is required.")
+    "clang++ ${CMAKE_CXX_COMPILER_VERSION} is too old; ${HERMIT_MIN_CLANG}+ is required.")
 endif()
 
 include(CheckCXXSourceCompiles)
@@ -57,32 +57,32 @@ int main() {
   (void)std::from_chars(sv.data(), sv.data() + sv.size(), value);
   int items[] = {3, 1, 2};
   return std::ranges::find_if(items, [](int i) { return i == 2; }) == std::end(items);
-}" HERMES_HAS_REQUIRED_CXX23)
+}" HERMIT_HAS_REQUIRED_CXX23)
 unset(CMAKE_REQUIRED_FLAGS)
 
-if(NOT HERMES_HAS_REQUIRED_CXX23)
+if(NOT HERMIT_HAS_REQUIRED_CXX23)
   message(FATAL_ERROR
-    "This toolchain cannot build hermes-cpp: the C++23 standard library pieces it needs "
+    "This toolchain cannot build hermit: the C++23 standard library pieces it needs "
     "(std::expected, std::ranges, std::from_chars) are missing or incomplete.\n"
     "  compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} (${CMAKE_CXX_COMPILER})\n"
     "Note that clang may be using libstdc++ rather than libc++, in which case the "
     "limiting component is the installed GCC, not clang.")
 endif()
 
-option(HERMES_BUILD_TESTS "Build the test suite" ${PROJECT_IS_TOP_LEVEL})
-option(HERMES_SANITIZE    "Build with ASan + UBSan"             OFF)
+option(HERMIT_BUILD_TESTS "Build the test suite" ${PROJECT_IS_TOP_LEVEL})
+option(HERMIT_SANITIZE    "Build with ASan + UBSan"             OFF)
 
 # --- warning/sanitizer policy, applied via link rather than globally ----------
 # Two targets, not one: warnings are our business and stay PRIVATE, while sanitizer
-# flags are a usage requirement -- anything linking hermes_core must be built and
+# flags are a usage requirement -- anything linking hermit_core must be built and
 # linked with them too, or it fails with undefined __asan_* references.
-add_library(hermes_warnings INTERFACE)
-target_compile_options(hermes_warnings INTERFACE
+add_library(hermit_warnings INTERFACE)
+target_compile_options(hermit_warnings INTERFACE
   -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor
   -Wold-style-cast -Woverloaded-virtual -Wdouble-promotion)
 
-add_library(hermes_sanitizers INTERFACE)
-if(HERMES_SANITIZE)
+add_library(hermit_sanitizers INTERFACE)
+if(HERMIT_SANITIZE)
   # Applied globally as well as through the interface target, and deliberately so:
   # instrumenting our code but not googletest mixes instrumented and uninstrumented
   # std::string/std::vector across the test boundary, which produces ASan
@@ -91,10 +91,10 @@ if(HERMES_SANITIZE)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)
 
-  # The interface target still carries them for anything consuming hermes::core from
+  # The interface target still carries them for anything consuming hermit::core from
   # another project, where the global flags above do not apply.
-  target_compile_options(hermes_sanitizers INTERFACE -fsanitize=address,undefined -fno-omit-frame-pointer)
-  target_link_options(hermes_sanitizers    INTERFACE -fsanitize=address,undefined)
+  target_compile_options(hermit_sanitizers INTERFACE -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(hermit_sanitizers    INTERFACE -fsanitize=address,undefined)
 endif()
 
 # --- dependencies ------------------------------------------------------------
@@ -141,86 +141,86 @@ FetchContent_MakeAvailable(nlohmann_json httplib)
 # core knows nothing about models or the network (D7's layering table). The Ollama
 # client is a separate target for that reason, and it is the only one that links
 # httplib -- if core ever needs it, the layering has been broken.
-add_library(hermes_core
-  src/hermes/core/backup.cpp
-  src/hermes/core/fsio.cpp
-  src/hermes/core/observed.cpp
-  src/hermes/core/sandbox.cpp
-  src/hermes/core/sha256.cpp
-  src/hermes/core/tool.cpp
-  src/hermes/core/tools/edit.cpp
-  src/hermes/core/tools/find.cpp
-  src/hermes/core/tools/grep.cpp
-  src/hermes/core/tools/hash.cpp
-  src/hermes/core/tools/list.cpp
-  src/hermes/core/tools/move.cpp
-  src/hermes/core/tools/read.cpp
-  src/hermes/core/tools/write.cpp)
+add_library(hermit_core
+  src/hermit/core/backup.cpp
+  src/hermit/core/fsio.cpp
+  src/hermit/core/observed.cpp
+  src/hermit/core/sandbox.cpp
+  src/hermit/core/sha256.cpp
+  src/hermit/core/tool.cpp
+  src/hermit/core/tools/edit.cpp
+  src/hermit/core/tools/find.cpp
+  src/hermit/core/tools/grep.cpp
+  src/hermit/core/tools/hash.cpp
+  src/hermit/core/tools/list.cpp
+  src/hermit/core/tools/move.cpp
+  src/hermit/core/tools/read.cpp
+  src/hermit/core/tools/write.cpp)
 
-target_include_directories(hermes_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(hermes_core
-  PRIVATE hermes_warnings
-  PUBLIC  hermes_sanitizers)
-add_library(hermes::core ALIAS hermes_core)
+target_include_directories(hermit_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(hermit_core
+  PRIVATE hermit_warnings
+  PUBLIC  hermit_sanitizers)
+add_library(hermit::core ALIAS hermit_core)
 
-add_library(hermes_ollama
-  src/hermes/ollama/client.cpp
-  src/hermes/ollama/preflight.cpp)
+add_library(hermit_ollama
+  src/hermit/ollama/client.cpp
+  src/hermit/ollama/preflight.cpp)
 
-target_include_directories(hermes_ollama PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(hermes_ollama
-  PRIVATE hermes_warnings httplib::httplib
-  PUBLIC  hermes_sanitizers nlohmann_json::nlohmann_json)
-add_library(hermes::ollama ALIAS hermes_ollama)
+target_include_directories(hermit_ollama PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(hermit_ollama
+  PRIVATE hermit_warnings httplib::httplib
+  PUBLIC  hermit_sanitizers nlohmann_json::nlohmann_json)
+add_library(hermit::ollama ALIAS hermit_ollama)
 
 # The supervisor layer of D7's table: it drives the model, so it sits above the
-# transport and below the frontends. It links hermes_ollama for the request and reply
+# transport and below the frontends. It links hermit_ollama for the request and reply
 # types but opens no socket itself -- every policy decision in it is meant to be
 # testable without a daemon.
 #
-# hermes_core is the first of the two edges ROUTING.md section 7 recorded missing.
+# hermit_core is the first of the two edges ROUTING.md section 7 recorded missing.
 # In-tree the gap was masked -- every target shares one include dir and the final
 # binaries link all four archives, so a Tier 1 tool here would have compiled by
 # accident. The edge turns that accident into a declared dependency; an out-of-tree
-# consumer of hermes::supervisor alone is who it would actually have broken.
-add_library(hermes_supervisor
-  src/hermes/supervisor/judge.cpp
-  src/hermes/supervisor/loop.cpp
-  src/hermes/supervisor/session.cpp
-  src/hermes/supervisor/verify.cpp
-  src/hermes/supervisor/wire.cpp)
+# consumer of hermit::supervisor alone is who it would actually have broken.
+add_library(hermit_supervisor
+  src/hermit/supervisor/judge.cpp
+  src/hermit/supervisor/loop.cpp
+  src/hermit/supervisor/session.cpp
+  src/hermit/supervisor/verify.cpp
+  src/hermit/supervisor/wire.cpp)
 
-target_include_directories(hermes_supervisor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(hermes_supervisor
-  PRIVATE hermes_warnings
-  PUBLIC  hermes_core hermes_ollama hermes_sanitizers)
-add_library(hermes::supervisor ALIAS hermes_supervisor)
+target_include_directories(hermit_supervisor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(hermit_supervisor
+  PRIVATE hermit_warnings
+  PUBLIC  hermit_core hermit_ollama hermit_sanitizers)
+add_library(hermit::supervisor ALIAS hermit_supervisor)
 
 # The frontend layer of D7's table. It names a model and a base URL, so it cannot be
 # core; it is a library rather than code inside main() because the CLI and the eventual
 # MCP-over-stdio server are supposed to compose themselves from the same settings.
 #
-# hermes_supervisor is the second of ROUTING.md section 7's missing edges: registry
+# hermit_supervisor is the second of ROUTING.md section 7's missing edges: registry
 # composition happens in this layer, and before it no library target saw all four --
 # only the two final binaries did -- so composition code here would have leaned on
 # the binaries' link lines rather than a declared dependency.
-add_library(hermes_app
-  src/hermes/app/config.cpp
-  src/hermes/app/toolset.cpp)
+add_library(hermit_app
+  src/hermit/app/config.cpp
+  src/hermit/app/toolset.cpp)
 
-target_include_directories(hermes_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(hermes_app
-  PRIVATE hermes_warnings
-  PUBLIC  hermes_core hermes_ollama hermes_sanitizers hermes_supervisor
+target_include_directories(hermit_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(hermit_app
+  PRIVATE hermit_warnings
+  PUBLIC  hermit_core hermit_ollama hermit_sanitizers hermit_supervisor
           nlohmann_json::nlohmann_json)
-add_library(hermes::app ALIAS hermes_app)
+add_library(hermit::app ALIAS hermit_app)
 
 # --- the binary --------------------------------------------------------------
-add_executable(hermes-cpp src/main.cpp)
-target_link_libraries(hermes-cpp PRIVATE hermes_app hermes_core hermes_ollama hermes_supervisor hermes_warnings)
+add_executable(hermit src/main.cpp)
+target_link_libraries(hermit PRIVATE hermit_app hermit_core hermit_ollama hermit_supervisor hermit_warnings)
 
 # --- tests -------------------------------------------------------------------
-if(HERMES_BUILD_TESTS)
+if(HERMIT_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
 endif()

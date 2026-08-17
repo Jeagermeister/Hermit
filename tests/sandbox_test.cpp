@@ -1,4 +1,4 @@
-#include <hermes/core/sandbox.h>
+#include <hermit/core/sandbox.h>
 
 #include <gtest/gtest.h>
 
@@ -12,9 +12,9 @@
 #include <unistd.h>
 
 namespace fs = std::filesystem;
-using hermes::PathError;
-using hermes::Sandbox;
-using hermes::SandboxError;
+using hermit::PathError;
+using hermit::Sandbox;
+using hermit::SandboxError;
 
 namespace {
 
@@ -31,7 +31,7 @@ namespace {
 class SandboxTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    std::string tpl = (fs::temp_directory_path() / "hermes_sbx_XXXXXX").string();
+    std::string tpl = (fs::temp_directory_path() / "hermit_sbx_XXXXXX").string();
     std::vector<char> buf(tpl.begin(), tpl.end());
     buf.push_back('\0');
     ASSERT_NE(::mkdtemp(buf.data()), nullptr) << "could not create temp dir";

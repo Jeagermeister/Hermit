@@ -1,6 +1,6 @@
-#include <hermes/core/tools/edit.h>
-#include <hermes/core/tools/move.h>
-#include <hermes/core/tools/write.h>
+#include <hermit/core/tools/edit.h>
+#include <hermit/core/tools/move.h>
+#include <hermit/core/tools/write.h>
 
 #include <gtest/gtest.h>
 
@@ -16,32 +16,32 @@
 
 #include <sys/stat.h>
 
-#include <hermes/core/backup.h>
-#include <hermes/core/observed.h>
-#include <hermes/core/sha256.h>
-#include <hermes/core/tool.h>
-#include <hermes/core/tools/find.h>
-#include <hermes/core/tools/grep.h>
-#include <hermes/core/tools/hash.h>
-#include <hermes/core/tools/list.h>
-#include <hermes/core/tools/read.h>
+#include <hermit/core/backup.h>
+#include <hermit/core/observed.h>
+#include <hermit/core/sha256.h>
+#include <hermit/core/tool.h>
+#include <hermit/core/tools/find.h>
+#include <hermit/core/tools/grep.h>
+#include <hermit/core/tools/hash.h>
+#include <hermit/core/tools/list.h>
+#include <hermit/core/tools/read.h>
 
 namespace fs = std::filesystem;
-using hermes::BackupStore;
-using hermes::EditTool;
-using hermes::Field;
-using hermes::ListTool;
-using hermes::MoveTool;
-using hermes::ObservedState;
-using hermes::parse_args;
-using hermes::RawArgs;
-using hermes::ReadTool;
-using hermes::Sandbox;
-using hermes::sha256_hex;
-using hermes::Tool;
-using hermes::ToolOutput;
-using hermes::ToolRow;
-using hermes::WriteTool;
+using hermit::BackupStore;
+using hermit::EditTool;
+using hermit::Field;
+using hermit::ListTool;
+using hermit::MoveTool;
+using hermit::ObservedState;
+using hermit::parse_args;
+using hermit::RawArgs;
+using hermit::ReadTool;
+using hermit::Sandbox;
+using hermit::sha256_hex;
+using hermit::Tool;
+using hermit::ToolOutput;
+using hermit::ToolRow;
+using hermit::WriteTool;
 
 namespace {
 
@@ -54,7 +54,7 @@ namespace {
 class MutateToolsTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    std::string tpl = (fs::temp_directory_path() / "hermes_mut_XXXXXX").string();
+    std::string tpl = (fs::temp_directory_path() / "hermit_mut_XXXXXX").string();
     std::vector<char> buf(tpl.begin(), tpl.end());
     buf.push_back('\0');
     ASSERT_NE(::mkdtemp(buf.data()), nullptr) << "could not create temp dir";
@@ -99,9 +99,9 @@ class MutateToolsTest : public ::testing::Test {
     return nullptr;
   }
 
-  std::expected<ToolOutput, hermes::ToolError> call(Tool& tool, const RawArgs& raw) {
+  std::expected<ToolOutput, hermit::ToolError> call(Tool& tool, const RawArgs& raw) {
     auto parsed = parse_args(tool.spec(), raw, *box_);
-    if (!parsed) return std::unexpected{hermes::ToolError{to_string(parsed.error())}};
+    if (!parsed) return std::unexpected{hermit::ToolError{to_string(parsed.error())}};
     return tool.invoke(*parsed);
   }
 
@@ -606,7 +606,7 @@ TEST_F(MutateToolsTest, NoTempOrphansRemainAfterWrites) {
                   .has_value());
 
   for (const auto& entry : fs::recursive_directory_iterator(tmp_ / "root")) {
-    EXPECT_EQ(entry.path().filename().string().find("hermes-tmp"),
+    EXPECT_EQ(entry.path().filename().string().find("hermit-tmp"),
               std::string::npos)
         << "orphaned temp file: " << entry.path();
   }
@@ -765,12 +765,12 @@ TEST_F(MutateToolsTest, WriteAndEditCarryNulBytes) {
 // --- the full surface --------------------------------------------------------
 
 TEST_F(MutateToolsTest, AllEightToolsComposeIntoOneRegistry) {
-  hermes::ToolRegistry registry;
+  hermit::ToolRegistry registry;
   ASSERT_TRUE(registry.add(std::make_unique<ReadTool>(state_)).has_value());
   ASSERT_TRUE(registry.add(std::make_unique<ListTool>(state_)).has_value());
-  ASSERT_TRUE(registry.add(std::make_unique<hermes::FindTool>()).has_value());
-  ASSERT_TRUE(registry.add(std::make_unique<hermes::GrepTool>()).has_value());
-  ASSERT_TRUE(registry.add(std::make_unique<hermes::HashTool>()).has_value());
+  ASSERT_TRUE(registry.add(std::make_unique<hermit::FindTool>()).has_value());
+  ASSERT_TRUE(registry.add(std::make_unique<hermit::GrepTool>()).has_value());
+  ASSERT_TRUE(registry.add(std::make_unique<hermit::HashTool>()).has_value());
   ASSERT_TRUE(registry.add(std::make_unique<WriteTool>(state_, *store_)).has_value());
   ASSERT_TRUE(registry.add(std::make_unique<EditTool>(state_, *store_)).has_value());
   ASSERT_TRUE(registry.add(std::make_unique<MoveTool>(state_)).has_value());

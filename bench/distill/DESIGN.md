@@ -58,7 +58,7 @@ re-running it is worth more than assuming either direction.
 | # | Gate | Why it blocks | Cleared by |
 |---|---|---|---|
 | 1 | A base model is chosen | Adapters do not transfer across bases; training before selection trains a fork of a model that may be dropped | ROUTING §12 step 8 → step 7 |
-| 2 | The recorder speaks this project's vocabulary | `proxy.py` records **upstream Hermes Agent** over `/v1/chat/completions` — tools `write_file`/`terminal`/`read_file`, and a `read_file` that decorates content with `N\|` prefixes. Hermes-Cpp uses native `/api/chat` and eight different tools. A corpus recorded today teaches tools that will never exist and a rendering [ROUTING §5](../../ROUTING.md) bans | ROUTING §12 steps 5–6 (the agent loop itself landed 2026-08-17) |
+| 2 | The recorder speaks this project's vocabulary | `proxy.py` records **upstream Hermes Agent** over `/v1/chat/completions` — tools `write_file`/`terminal`/`read_file`, and a `read_file` that decorates content with `N\|` prefixes. Hermit uses native `/api/chat` and eight different tools. A corpus recorded today teaches tools that will never exist and a rendering [ROUTING §5](../../ROUTING.md) bans | ROUTING §12 steps 5–6 (the agent loop itself landed 2026-08-17) |
 | 3 | A task generator exists | Twelve task shapes is one to two orders of magnitude short of a LoRA corpus | new work, ~1 day |
 | 4 | The grader is frozen | delta's guardrail 5; the tournament's rubric was reachable from the spec alone | before any sampling |
 | 5 | E1 is collected | §1. Unrecoverable if skipped | ROUTING §12 step 8 + steps 5–6 |
@@ -160,7 +160,7 @@ much wider. Re-derive from the deterministic re-run before anyone budgets agains
    likelihood of the preferred response. An NLL term on the chosen sequence is required, not
    optional.
 9. **Pin everything in the report**: base tag, adapter hash, dataset hash, sampling config,
-   Ollama version, Hermes-Cpp commit. A number nobody can reproduce is a rumor.
+   Ollama version, Hermit commit. A number nobody can reproduce is a rumor.
 
 ---
 
@@ -173,7 +173,7 @@ Recorded now, so the result cannot be argued into the conclusion later.
 - **D5's renderer removes most of the failure mass.** The largest measurable gap in the suite is
   tool-call *formatting* — a 3B emitting a call as prose, a list where a string belongs.
   Constrained decoding removes that class at decode time, for free, once
-  [tool.h](../../src/hermes/core/tool.h)'s schema actually renders. Measure after that lands, not
+  [tool.h](../../src/hermit/core/tool.h)'s schema actually renders. Measure after that lands, not
   before.
 - **The corpus cannot reach ~1,000 instances** without synthesizing tasks so far from real usage
   that they measure the generator instead of the model.
