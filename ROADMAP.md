@@ -598,6 +598,13 @@ Upstream is ~870k lines of non-test Python. A wholesale port is not the goal and
   Hermes 4 70B. Whether a supervisor architecture is still the right answer when the model is
   6× larger is an open question, not a settled one: the bounded-session finding came from
   watching *small* models drift.
+  **One concrete criterion arrived 2026-08-17**, where this question previously had only
+  size and speed: on the two stock Meta llama3.x instruct templates the tool definitions
+  are not rendered once a tool result is the last message, so the model is not told its
+  tools exist on the turn it must decide whether to call one. Two of seven models tested,
+  and template-specific rather than architectural — `hermes3-8b` is llama3.1 underneath
+  and is unaffected. Table and the three candidate responses are in
+  [DECISIONS.md](./DECISIONS.md) under "Still open".
 - **Whether to train a worker model at all.** Design recorded in
   [bench/distill/DESIGN.md](./bench/distill/DESIGN.md) — gated, not scheduled, and deliberately
   filed here rather than as a Phase item. The blocking issue is measurement order, not

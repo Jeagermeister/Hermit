@@ -43,6 +43,47 @@
 // loop continues. ROUTING.md section 3 asks for one loud line the model can act on, and
 // R9's fail-closed rule wants the refusal to be data rather than an abort.
 //
+// --- A per-model hazard the loop cannot fix, measured 2026-08-17 --------------
+//
+// **On some chat templates the tool definitions are not rendered when the last message
+// is a tool result** -- which is precisely the turn on which the model has to decide
+// whether to call another tool. Ollama 0.32.9, one `read` tool offered, comparing the
+// prompt with and without the `tools` array so the difference is the definitions
+// themselves:
+//
+//   model         tools cost, user last   tools cost, tool result last
+//   qwen3.5-9b            +267                    +267    kept
+//   qwen3.5-4b            +267                    +267    kept
+//   hermes3-8b            +208                    +208    kept
+//   granite4-7b           +162                    +162    kept
+//   gemma4-e4b             +55                     +55    kept
+//   llama3.2-3b           +133                     +31    LOST
+//   llama3.1-8b           +146                     +42    LOST
+//
+// It is a property of the **template, not the architecture**: hermes3-8b is llama3.1
+// underneath and keeps its definitions, because Nous ships its own template. So this is
+// two of seven models, and the two are the stock Meta llama3.x instruct templates.
+//
+// The consequence is the failure it produces, which was observed before it was
+// explained. On `llama3.2-3b`, turn 1 sent a 832-token prompt and turn 2 sent 160 --
+// *smaller*, while the history had grown -- and the model answered turn 2 with a tool
+// call written as prose in `content`: `{"name": "read", "parameters": {"paths":
+// "['colors.txt', 'count.txt']"}}`. A Python-style list inside a string, which is
+// verbatim the failure R2 was written about. The 672-token drop is about eight tool
+// definitions, which is exactly what was being offered.
+//
+// Note what this means for D5, and it is worth stating: `format` could not have fixed
+// that call either. It was not a constrained generation gone wrong -- it was prose, on a
+// turn where the model had not been told any tools existed.
+//
+// **Not worked around here, deliberately.** The obvious mitigation -- append a synthetic
+// user turn after the results, which restores the definitions (measured: +133 returns) --
+// would put words in the user's mouth in the history, and `pin_latest_user` would then
+// pin that synthetic turn instead of the real instruction, so the one message the trim
+// must never drop would become a fabricated nudge. That is a worse failure than the one
+// it fixes. The honest options are to select models by this property or to detect it in
+// R9's preflight, and neither is decided; see DECISIONS.md.
+//
 // Measured, and it is the reason Phase 3 exists rather than being an upgrade: on the
 // fsops set, only qwen3.5-9b reliably *used* a refusal to correct itself. Handed an
 // error, llama3.2-3b, hermes3-8b and gemma4-e4b all stopped calling tools and addressed

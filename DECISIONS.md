@@ -836,6 +836,58 @@ Two things this entry did not anticipate, both found while fixing it:
   relation to any context window, and ROUTING.md §9 makes it configuration, so wiring the cap to
   the window is a composition decision nobody has made yet.
 
+### Tool definitions vanish from some templates after a tool result
+
+**Measured 2026-08-17**, building the agent loop, and it is a model-selection criterion
+rather than a bug in anything this repo owns.
+
+Ollama 0.32.9, one `read` tool offered, comparing the prompt with and without the `tools`
+array so the difference is the definitions themselves:
+
+| model | tools cost, user last | tools cost, tool result last | |
+|---|---|---|---|
+| `qwen3.5-9b` | +267 | +267 | kept |
+| `qwen3.5-4b` | +267 | +267 | kept |
+| `hermes3-8b` | +208 | +208 | kept |
+| `granite4-7b` | +162 | +162 | kept |
+| `gemma4-e4b` | +55 | +55 | kept |
+| `llama3.2-3b` | +133 | **+31** | **lost** |
+| `llama3.1-8b` | +146 | **+42** | **lost** |
+
+On the two stock Meta llama3.x instruct templates the definitions are not rendered when
+the last message is a `tool` result — exactly the turn on which the model must decide
+whether to call another tool. It is a property of the **template, not the architecture**:
+`hermes3-8b` is llama3.1 underneath and keeps its definitions, because Nous ships its own
+template.
+
+**The failure it produces was seen before it was explained.** A live `hermes-cpp agent`
+run on `llama3.2-3b` sent an 832-token prompt on turn 1 and a **160**-token prompt on turn
+2 — smaller, while history had grown — and the model answered with a tool call written as
+prose: `{"name": "read", "parameters": {"paths": "['colors.txt', 'count.txt']"}}`. A
+Python-style list inside a string, which is verbatim the failure R2 was written about. The
+672-token drop is about eight tool definitions, which is what was being offered.
+
+Worth noting against [D5](#d5--constrained-decoding-on-from-the-start): `format` could not
+have fixed that call. It was not a constrained generation gone wrong — it was prose, on a
+turn where the model had not been told any tools existed.
+
+**Three options, none chosen:**
+
+1. **Select models by this property.** Cheapest, and it folds into the open
+   "which models, on which machines" question in ROADMAP.md — this is a concrete criterion
+   where that question previously had only size and speed.
+2. **Detect it in R9's preflight.** Two requests per model at startup, differing only in
+   whether a tool result is last, comparing the token delta. That is the shape of the
+   measurement above, so it is known to work; the cost is two extra generations per run
+   and a gate that refuses models the fsops harness has real scores for.
+3. **Append a synthetic user turn after the results**, which restores the definitions
+   (measured: the +133 returns). **Rejected on inspection, not deferred**: it puts words in
+   the user's mouth in history, and `pin_latest_user` would then pin the synthetic nudge
+   instead of the real instruction — so the one message the trim must never drop becomes a
+   fabricated one. A worse failure than the one it fixes.
+
+Revisit when model selection is settled, which is where this belongs.
+
 ### Test oracle
 
 Upstream ships 2,889 test files. Whether any are worth adapting as a behavioural spec is still
