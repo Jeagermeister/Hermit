@@ -3,12 +3,19 @@
 // D4 --- Tool interface: virtual dispatch, declarative arguments.
 //
 // One descriptor list per tool feeds everything that must agree about its
-// arguments: the JSON Schema sent to Ollama as `format` (D5), the MCP tool
-// definition a programmatic caller reads (D7), and the parser that turns a
-// model-supplied call into typed values. Hand-maintained copies of that
+// arguments: the tool definition offered to Ollama in its `tools` array (D12),
+// the MCP tool definition a programmatic caller reads (D7), and the parser that
+// turns a model-supplied call into typed values. Hand-maintained copies of that
 // information disagree eventually -- a field added to one and not the other
 // fails silently -- so R2 drift is made unrepresentable instead: there is one
 // declaration, and everything else is derived from it (ROUTING.md section 7).
+//
+// The first of those renderers exists as of 2026-08-17, in
+// `supervisor/wire.cpp`. Until then this paragraph said the descriptors became
+// "the JSON Schema sent to Ollama as `format` (D5)", which D12 falsified:
+// `format` cannot be sent beside `tools` -- it breaks tool calling outright on
+// four of the seven models measured. The destination was wrong, not the
+// guarantee.
 //
 // Everything in this header is JSON-free on purpose. D2 put nlohmann in the
 // build with the Ollama client, and hermes_core links no JSON library.
@@ -57,11 +64,12 @@ struct ArgSpec {
   std::string_view doc;
 };
 
-/// A tool, declared: the single source the schema generators will render and
-/// the parser enforces today. ROUTING.md section 7 extends D4's guarantee
-/// through this struct -- the Ollama `format` schema and the MCP tool
-/// definition both derive from here once those layers exist (nothing renders
-/// yet), so there is no second copy to fall out of sync.
+/// A tool, declared: the single source the schema generators render and the
+/// parser enforces. ROUTING.md section 7 extends D4's guarantee through this
+/// struct -- the Ollama `tools` entry and the MCP tool definition both derive
+/// from here, so there is no second copy to fall out of sync. The first of those
+/// renderers exists as of 2026-08-17: `supervisor/wire.cpp`'s
+/// `tool_definition()`. The second, MCP's, is still to come and will call it.
 ///
 /// `args` is a view: it must reference storage that outlives the spec, in
 /// practice a static array beside the tool. C++23 span will happily bind a
@@ -91,9 +99,15 @@ std::string_view to_string(SpecError e) noexcept;
 // It translates each argument into one of these before calling parse_args.
 // Two shapes only, because the three ArgTypes above only need two: scalars
 // arrive as a string, lists as a vector of strings. Anything else in the
-// incoming JSON is the decoder's problem to reject -- with D5's constrained
-// decoding it should not arise, but "should not" is that layer's claim to
-// verify, not this one's assumption.
+// incoming JSON is the decoder's problem to reject.
+//
+// This said such input "should not arise" under D5's constrained decoding.
+// After D12 there is no decode-time constraint on tool arguments at all -- the
+// model's own tool-call channel is what shapes them -- so the decoder's
+// rejection is the only thing standing there, and `wire.cpp`'s `raw_args_from`
+// refuses a number, a boolean or a null rather than coercing it. Measured, that
+// input does arise: llama3.2-3b sent `paths` as a scalar where a list belongs,
+// and a Python-style list inside a string before that.
 
 struct RawArg {
   std::string name;

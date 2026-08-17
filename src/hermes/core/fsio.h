@@ -1,6 +1,6 @@
 #pragma once
 
-// The one open primitive -- ROUTING.md section 12 step 4, settled 2026-08-16:
+// The one open primitive -- ROUTING.md section 12 step 5, settled 2026-08-16:
 // allow the semantics, funnel the spelling. Tools never spell ::open
 // themselves; every open of a SandboxPath goes through open_in_root, so when
 // D7's gate lands, the openat(O_NOFOLLOW) component walk replaces this one

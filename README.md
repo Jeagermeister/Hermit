@@ -161,7 +161,10 @@ hermes-cpp config                           # every setting in force, and where 
 ```
 
 `agent` is the whole turn: one instruction, the eight tools offered to a local model, one line of
-trace per turn and per call, and a summary that says which bound stopped it. It prints, in so many
+trace per turn and per call, and a summary that says which bound stopped it. Three bounds, not
+two: `--max-turns`, `--budget` wall-clock (R8), and a per-turn cap on how many calls one reply may
+make — the third is a runaway guard rather than a knob, and calls past it are refused rather than
+dropped, because a dropped call reads to the model as still outstanding. It prints, in so many
 words, that a clean stop is not evidence the work is correct — R6 is not satisfied yet, and a
 command that implied otherwise would be the more useful lie.
 

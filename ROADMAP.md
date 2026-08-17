@@ -485,7 +485,9 @@ These are hard to reverse and benefit from being argued out before code exists:
 - [x] ~~Agent loop: history, tool dispatch, bounded turns~~ — done 2026-08-17.
       `src/hermes/supervisor/loop.cpp` drives `prepare() -> chat() -> record()`, dispatches every
       call in the order the model made it, and feeds each result back as a `tool` message.
-      Bounded by turn count **and** wall clock (R8), with the honest limit written down: a
+      Bounded by turn count, wall clock (R8), **and** a per-turn cap on calls from one reply
+      (a runaway guard; calls past it are refused, never dropped), with the honest limit
+      written down: a
       blocking single-threaded loop (D1) cannot interrupt a request already in flight, so the
       real worst case is the budget plus one `chat_timeout`. That gap is the open
       bounded-execution question in [DECISIONS.md](./DECISIONS.md), not a flag.
@@ -527,7 +529,7 @@ model calling this as a tool.
       component-walking for in-root correctness. D6 accepted the race against a "confused 3B
       model" threat model; a callable frontend changes that model, so both are a gate rather
       than cleanup. Confinement alone is not enough — an in-root redirection is invisible to
-      the kernel and is D6's own worked example. [ROUTING.md](./ROUTING.md) §12 step 4 carries
+      the kernel and is D6's own worked example. [ROUTING.md](./ROUTING.md) §12 step 5 carries
       the implementation detail, including the grant set and the denied-write probe.
 - [x] ~~**Decide the hardlink answer**~~ — decided with D10, recorded under "Still open" in
       [DECISIONS.md](./DECISIONS.md): creation is blocked by the one-writable-root rule; a link

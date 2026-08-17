@@ -45,36 +45,26 @@
 //
 // --- A per-model hazard the loop cannot fix, measured 2026-08-17 --------------
 //
-// **On some chat templates the tool definitions are not rendered when the last message
-// is a tool result** -- which is precisely the turn on which the model has to decide
-// whether to call another tool. Ollama 0.32.9, one `read` tool offered, comparing the
-// prompt with and without the `tools` array so the difference is the definitions
-// themselves:
+// **On the two stock Meta llama3.x instruct templates the tool definitions are not
+// rendered when the last message is a tool result** -- precisely the turn on which the
+// model has to decide whether to call another tool. Two of seven models measured; it is a
+// property of the template, not the architecture, so hermes3-8b is llama3.1 underneath and
+// unaffected. The measured table, the ruled-out alternatives and the three candidate
+// responses live in DECISIONS.md under "Still open" -- **there** rather than duplicated
+// here, because model selection is where the decision belongs and one copy of a table is
+// this project's whole position on drift.
 //
-//   model         tools cost, user last   tools cost, tool result last
-//   qwen3.5-9b            +267                    +267    kept
-//   qwen3.5-4b            +267                    +267    kept
-//   hermes3-8b            +208                    +208    kept
-//   granite4-7b           +162                    +162    kept
-//   gemma4-e4b             +55                     +55    kept
-//   llama3.2-3b           +133                     +31    LOST
-//   llama3.1-8b           +146                     +42    LOST
+// What matters at this layer is the failure it produces, which was seen before it was
+// explained: on `llama3.2-3b` a run's second turn sent a *smaller* prompt than its first
+// while history had grown, and the model answered with a tool call written as prose in
+// `content` -- a Python-style list inside a string, verbatim the failure R2 was written
+// about. A loop cannot detect this from a reply, and cannot work around it without
+// fabricating a user turn (see below), so it is a model-selection constraint that the loop
+// merely suffers.
 //
-// It is a property of the **template, not the architecture**: hermes3-8b is llama3.1
-// underneath and keeps its definitions, because Nous ships its own template. So this is
-// two of seven models, and the two are the stock Meta llama3.x instruct templates.
-//
-// The consequence is the failure it produces, which was observed before it was
-// explained. On `llama3.2-3b`, turn 1 sent a 832-token prompt and turn 2 sent 160 --
-// *smaller*, while the history had grown -- and the model answered turn 2 with a tool
-// call written as prose in `content`: `{"name": "read", "parameters": {"paths":
-// "['colors.txt', 'count.txt']"}}`. A Python-style list inside a string, which is
-// verbatim the failure R2 was written about. The 672-token drop is about eight tool
-// definitions, which is exactly what was being offered.
-//
-// Note what this means for D5, and it is worth stating: `format` could not have fixed
-// that call either. It was not a constrained generation gone wrong -- it was prose, on a
-// turn where the model had not been told any tools existed.
+// Note what it means for D5: `format` could not have fixed that call either. It was not a
+// constrained generation gone wrong -- it was prose, on a turn where the model had not been
+// told any tools existed.
 //
 // **Not worked around here, deliberately.** The obvious mitigation -- append a synthetic
 // user turn after the results, which restores the definitions (measured: +133 returns) --
@@ -249,6 +239,22 @@ struct LoopOutcome {
   }
 };
 
+/// How the loop reaches a model: one request in, one reply or failure out.
+///
+/// A callable rather than the `Client` itself, and the reason is this project's own stated
+/// value -- policy must be testable without a daemon, which is why `Session` takes a
+/// ChatReply and why the client's parsers are exposed. `run()` calls exactly one method on
+/// a Client, so everything interesting about a *multi-turn* run -- a stalled reply, a
+/// discarded prompt, the per-turn call cap, the oversized-result substitution, the observer,
+/// any sequence longer than one turn -- was reachable only through a live model until this
+/// existed. That is a large amount of policy verified by hand and by nothing else.
+///
+/// Costs nothing against the layering: D7 keeps HTTP behind the pimpl in `client.cpp` and
+/// this never touches it, and D1's blocking single thread means a `std::function` call is
+/// indistinguishable from the direct one it replaces. Same idiom as `LoopOptions::observer`,
+/// for the same reason.
+using ChatFn = std::function<ollama::Result<ollama::ChatReply>(const ollama::ChatRequest&)>;
+
 /// One instruction, driven to a bound.
 ///
 /// Holds references, and outlives none of them: the Client, the registry and the
@@ -269,6 +275,15 @@ class AgentLoop {
   AgentLoop(const ollama::Client& client, ToolRegistry& registry, const Sandbox& sandbox,
             LoopOptions options = {});
 
+  /// Testing seam: the same loop against any reply source.
+  ///
+  /// Production callers should prefer the overload above -- it binds the loop to the very
+  /// Client whose `max_num_ctx` the Session planned against, which is the pairing
+  /// `Session::open(options, client, ...)` exists to enforce. This one cannot check that,
+  /// because it has not been given a Client; it takes the honest name instead.
+  AgentLoop(ChatFn chat, ToolRegistry& registry, const Sandbox& sandbox,
+            LoopOptions options = {});
+
   /// Add `instruction` as the user turn and run until a bound is reached.
   ///
   /// `session` is driven, not owned -- the caller keeps it, so its history and token
@@ -283,7 +298,7 @@ class AgentLoop {
   }
 
  private:
-  const ollama::Client* client_;
+  ChatFn chat_;
   ToolRegistry* registry_;
   const Sandbox* sandbox_;
   LoopOptions options_;

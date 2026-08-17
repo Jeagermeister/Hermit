@@ -371,6 +371,20 @@ class Client {
 // missing keys, a model that was never pinned, an unparseable parameter block --
 // without a live daemon and without the mocking machinery it would otherwise take.
 
+/// Serialise JSON without throwing on bytes that are not valid UTF-8.
+///
+/// **Use this, never `json::dump()`, for anything carrying file content or a path.**
+/// nlohmann's default dump handler throws `type_error.316` on the first invalid byte, and
+/// this project's whole job is feeding file contents and tool output back to a model: one
+/// latin-1 or binary file takes the process down with an uncaught exception. Invalid bytes
+/// become U+FFFD instead, which the model can see and reason about.
+///
+/// Lives here, in the layer D2 put nlohmann in, because two layers need it -- the request
+/// body and `supervisor/wire.cpp`'s tool results. It was private to client.cpp until
+/// 2026-08-17, when `wire.cpp` was written with a bare `dump()` and crashed on a `read` of
+/// a two-byte binary file. Duplicating the helper would have let that happen a third time.
+[[nodiscard]] std::string dump_lossy(const nlohmann::json& value);
+
 /// The whole /api/chat request body, as it goes on the wire.
 ///
 /// Exposed for the same reason the parsers are: what this renders is where D12 is

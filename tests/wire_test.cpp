@@ -274,3 +274,76 @@ TEST(WireOutput, EscapesAQuoteInContentSoTheResultStaysParseable) {
   const json parsed = json::parse(render_output(output));
   EXPECT_EQ(parsed[0]["content"].get<std::string>(), awkward);
 }
+
+// --- invalid UTF-8 must not take the process down -----------------------------
+//
+// These exist because it did. `render_output` was written with a bare `json::dump()`, which
+// uses nlohmann's throwing UTF-8 handler; a `read` of a two-byte binary file aborted the
+// whole agent with an uncaught `type_error.316`. The project had already met and fixed this
+// one file over -- `ollama::dump_lossy` in client.cpp carries the comment "one latin-1 or
+// binary file would take the process down" -- and `wire.cpp` reintroduced it in the exact
+// function that renders file bytes back to a model. The fix is one definition shared by
+// both layers; these are the tests that keep it shared.
+
+namespace {
+
+std::string invalid_utf8() {
+  std::string bytes;
+  bytes.push_back(static_cast<char>(0xFF));
+  bytes.push_back(static_cast<char>(0xFE));
+  bytes.push_back(static_cast<char>(0x00));
+  bytes.push_back(static_cast<char>(0x80));
+  return bytes;
+}
+
+}  // namespace
+
+TEST(WireEncoding, RendersABinaryFilesContentWithoutThrowing) {
+  ToolOutput output;
+  output.rows.push_back(
+      ToolRow{.fields = {Field{.name = "path", .value = std::string{"blob.bin"}},
+                         Field{.name = "content", .value = invalid_utf8()}}});
+
+  std::string rendered;
+  ASSERT_NO_THROW(rendered = render_output(output));
+  // And the result must still be parseable, or the model receives nothing usable.
+  json parsed;
+  ASSERT_NO_THROW(parsed = json::parse(rendered));
+  EXPECT_EQ(parsed[0]["path"], "blob.bin");
+}
+
+TEST(WireEncoding, RendersARefusalNamingAPathWithInvalidBytesWithoutThrowing) {
+  // A refused `read` names the file it would not read, and that name is OS bytes.
+  std::string reason = "read: ";
+  reason += invalid_utf8();
+  reason += ": No such file or directory";
+
+  std::string rendered;
+  ASSERT_NO_THROW(rendered = render_error(reason));
+  json parsed;
+  ASSERT_NO_THROW(parsed = json::parse(rendered));
+  EXPECT_TRUE(parsed.contains("error"));
+}
+
+TEST(WireEncoding, ReplacesInvalidBytesRatherThanDroppingTheField) {
+  // U+FFFD, which the model can see and reason about -- not a silently empty field, which
+  // would read as "this file is empty" and is the kind of confident wrong answer R6 is about.
+  ToolOutput output;
+  output.rows.push_back(
+      ToolRow{.fields = {Field{.name = "content", .value = invalid_utf8()}}});
+
+  const json parsed = json::parse(render_output(output));
+  ASSERT_TRUE(parsed[0].contains("content"));
+  EXPECT_FALSE(parsed[0]["content"].get<std::string>().empty());
+}
+
+TEST(WireEncoding, LeavesValidMultibyteUtf8Intact) {
+  // The replacement handler must not mangle legitimate non-ASCII: a source file full of
+  // accented identifiers or CJK comments has to survive a read byte-for-byte.
+  const std::string text = "café — 日本語 — αβγ\n";
+  ToolOutput output;
+  output.rows.push_back(ToolRow{.fields = {Field{.name = "content", .value = text}}});
+
+  const json parsed = json::parse(render_output(output));
+  EXPECT_EQ(parsed[0]["content"].get<std::string>(), text);
+}

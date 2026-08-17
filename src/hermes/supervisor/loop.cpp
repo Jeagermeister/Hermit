@@ -58,7 +58,14 @@ std::string oversized_refusal(std::string_view tool, std::size_t content_chars,
 
 AgentLoop::AgentLoop(const ollama::Client& client, ToolRegistry& registry,
                      const Sandbox& sandbox, LoopOptions options)
-    : client_(&client),
+    // Captures by reference: the Client must outlive the loop, which is the contract stated
+    // on the class and the same one Session::open already has.
+    : AgentLoop([&client](const ollama::ChatRequest& request) { return client.chat(request); },
+                registry, sandbox, std::move(options)) {}
+
+AgentLoop::AgentLoop(ChatFn chat, ToolRegistry& registry, const Sandbox& sandbox,
+                     LoopOptions options)
+    : chat_(std::move(chat)),
       registry_(&registry),
       sandbox_(&sandbox),
       options_(std::move(options)),
@@ -129,14 +136,27 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     // D12: the tool surface, never a `format` schema alongside it.
     request->constraint = ollama::ChatRequest::Tools{.definitions = definitions_};
 
-    const auto reply = client_->chat(*request);
+    const auto reply = chat_(*request);
     if (!reply) return finish(StopReason::Transport, reply.error().message());
 
     // record() appends the assistant turn -- tool calls included, so the results
     // appended below are never orphaned -- and verifies the prompt was not discarded.
     const auto recorded = session.record(*reply);
     ++outcome.turns;
-    if (!recorded) return finish(StopReason::SessionRefused, recorded.error().message());
+    if (!recorded) {
+      // record() appends the assistant turn -- tool calls included -- and *then* reports
+      // failure on the truncation path. Returning here would leave those calls in history
+      // with no results: the orphaned-call shape the grouped trim exists to prevent,
+      // arriving by a route the trim never sees. Session reuse across instructions is
+      // explicitly anticipated above, and a model shown its own unanswered call re-issues
+      // it. So answer them before stopping.
+      for (const auto& call : reply->tool_calls) {
+        session.add_tool_result(
+            call.name, render_error(call.name + ": the run stopped before this call ran: " +
+                                    recorded.error().message()));
+      }
+      return finish(StopReason::SessionRefused, recorded.error().message());
+    }
 
     TurnEvent event;
     event.turn = outcome.turns;

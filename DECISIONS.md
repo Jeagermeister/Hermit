@@ -75,9 +75,16 @@ template-heavy diagnostics for no additional safety.
 - **R1 becomes structural.** Parsing an argument produces a `SandboxPath`, which only
   `Sandbox::resolve` can construct. A tool physically cannot name a file outside the root, so
   the check cannot be forgotten at tool #37.
-- **R2 drift becomes unrepresentable.** The schema sent to Ollama as `format` and the parser
-  that reads the reply come from one declaration. Hand-maintained, they disagree eventually —
-  a field added to one and not the other fails silently, which is the worst way to fail.
+- **R2 drift becomes unrepresentable.** The schema sent to Ollama and the parser that reads
+  the reply come from one declaration. Hand-maintained, they disagree eventually — a field
+  added to one and not the other fails silently, which is the worst way to fail.
+
+  > **Corrected 2026-08-17.** This said *"the schema sent to Ollama as `format`"*, which
+  > [D12](#d12--tool-calls-are-native-format-is-never-sent-alongside-tools) has since
+  > falsified: descriptors render into the **`tools`** array, and `format` is never sent
+  > beside it. The guarantee itself is unchanged and now has a second consumer rather than
+  > one — `supervisor/wire.cpp` renders the same descriptors to both the `tools` entry and
+  > the MCP definition. Only the destination was wrong.
 
 **What would overturn it.** A toolchain with working static reflection; the descriptor lists
 would then be deletable, and D4 collapses into the simpler full-generation design.
@@ -833,8 +840,9 @@ Two things this entry did not anticipate, both found while fixing it:
   progress. The loop substitutes a refusal naming the size before such a result reaches history
   (`result_is_hopeless`), which converts it into one line the model can act on. The underlying
   mismatch is left open and named: `read`'s cap is a 16 MB filesystem-safety limit with no
-  relation to any context window, and ROUTING.md §9 makes it configuration, so wiring the cap to
-  the window is a composition decision nobody has made yet.
+  relation to any context window. Both it and the window are supervisor-supplied configuration
+  in the sense ROUTING.md §9 describes — §9 itself is about per-machine settings and names
+  neither — so wiring the cap to the window is a composition decision nobody has made yet.
 
 ### Tool definitions vanish from some templates after a tool result
 
@@ -865,7 +873,9 @@ run on `llama3.2-3b` sent an 832-token prompt on turn 1 and a **160**-token prom
 2 — smaller, while history had grown — and the model answered with a tool call written as
 prose: `{"name": "read", "parameters": {"paths": "['colors.txt', 'count.txt']"}}`. A
 Python-style list inside a string, which is verbatim the failure R2 was written about. The
-672-token drop is about eight tool definitions, which is what was being offered.
+672-token drop is consistent with eight tool definitions going missing, which is what was
+being offered — an inference from one before/after pair, not a repeat of the controlled
+single-tool measurement above.
 
 Worth noting against [D5](#d5--constrained-decoding-on-from-the-start): `format` could not
 have fixed that call. It was not a constrained generation gone wrong — it was prose, on a

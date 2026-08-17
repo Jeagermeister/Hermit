@@ -112,8 +112,9 @@ dispatches its calls and feeds the results back, all of it bounded by turn count
 **The right side does not run, and it is the half that matters.** Today the loop stops when the
 model stops asking for tools — which is reading the model's answer, the exact thing R6 forbids.
 Nothing polls the filesystem, nothing compares state against what was asked, and nothing
-re-invokes with one concrete remaining failure. So `POLL`, the decision and `RE` below are dashed,
-and `StopReason::Answered` means *"the model stopped asking"* and not *"the work is done"*.
+re-invokes with one concrete remaining failure. So `POLL`, the decision, `RE` **and `DONE`** are
+all dashed — `DONE` included, because a *verified* completion is precisely what does not exist:
+`StopReason::Answered` means "the model stopped asking" and not "the work is done".
 
 The arithmetic it rests on — a task succeeding ~67% per attempt approaching ~96% under verified
 retries — is a claim computed from measured instability, not a measured outcome, and
@@ -145,11 +146,10 @@ The reason R6 polls rather than reads the model's answer: across the recorded ru
 replying `DONE` on an untouched tree is a thing that actually happened, repeatedly. A harness
 that scored the reply would have called those runs successes.
 
-Building the loop produced a fresh instance of the same thing, and a sharper one, because the
-model was not even lying about the filesystem — it was misreading data it had just been handed.
-Given a tool result whose `content` field was the four characters `aaaa`, `llama3.2-3b` reported
-*"a.txt is 1 character long"*. Nothing about that reply looks wrong; only the filesystem, and the
-hash beside the content, say otherwise.
+Building the loop produced a fresh instance of the same thing, and a sharper one — the model was
+not even lying about the filesystem, it was misreading data it had just been handed. That run is
+recorded where it is owned, in [ROADMAP.md](./ROADMAP.md)'s Phase 3 entry; repeating it here would
+make this the second place it can drift from, which the preamble above forbids.
 
 ---
 

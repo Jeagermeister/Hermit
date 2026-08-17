@@ -236,7 +236,7 @@ content hash and the fresh identity tuple, in `list`'s currency, so the result i
 usable as the next expected value. Durability is deliberately unclaimed: no fsync — R5 verifies
 content and R4 keeps the old bytes recoverable, and a crash-durability guarantee would be a
 DECISIONS.md entry, not a flag. Publication — parent creation, `link`, `rename` — is path-based
-until §12 step 4 widens the funnel to it; the interior-component window that leaves open, and
+until §12 step 5 widens the funnel to it; the interior-component window that leaves open, and
 why D10 does not backstop it, is recorded there.
 
 ### `shell` — kept, and it is a special case
@@ -359,9 +359,14 @@ that already has `nlohmann`. D4's one-declaration guarantee survives intact — 
 is not in `core`.
 
 That guarantee then extends further than D4 claimed. One descriptor list emits **both** the
-schema sent to Ollama as `format` (D5's constrained decoding) **and** the MCP tool definition the
+tool definitions offered to Ollama in its `tools` array **and** the MCP tool definition the
 programmatic caller reads. There is no second schema to keep in sync, so R2 drift stays
 unrepresentable across the MCP surface too.
+
+(Both said *"as `format`"* until 2026-08-17. [D12](./DECISIONS.md) settled that `format` cannot
+be sent beside `tools` at all, so the destination named here was wrong — not the guarantee.
+`supervisor/wire.cpp` is the renderer, and `tool_definitions()` is the one function both
+surfaces go through.)
 
 ---
 

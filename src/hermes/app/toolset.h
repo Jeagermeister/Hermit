@@ -18,7 +18,7 @@
 // referring to where it used to be.
 //
 // `shell` is deliberately not here. It waits on D7's gate -- kernel confinement plus
-// the `openat` component walk -- per ROUTING.md section 12 step 4.
+// the `openat` component walk -- per ROUTING.md section 12 step 5.
 
 #include <cstdint>
 #include <expected>

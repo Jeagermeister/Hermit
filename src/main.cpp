@@ -27,6 +27,7 @@
 #include <hermes/supervisor/session.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -74,6 +75,28 @@ int usage(std::ostream& to = std::cerr) {
       "environment: HERMES_CONFIG (absolute), HERMES_SANDBOX_ROOT (absolute), HERMES_MODEL,\n"
       "             HERMES_OLLAMA_URL, HERMES_MAX_NUM_CTX\n";
   return 2;
+}
+
+/// A whole non-negative number, or nothing.
+///
+/// `std::strtoull` is the wrong tool and was the bug: it *negates and wraps*, so `-1`
+/// parses cleanly as UINT64_MAX, and it reports overflow only through `errno`, which is
+/// easy to forget to read. `--max-turns -1` therefore became a bound of 2^64-1 -- no bound
+/// at all -- and `--budget -1` wrapped back to a negative `long`, making the loop's first
+/// wall-clock check fire immediately and report a spent budget after zero seconds. Both
+/// silently turned a bound into its opposite, which is the failure direction this project
+/// keeps refusing.
+///
+/// `from_chars` has none of those properties: the unsigned grammar has no sign, so `-1` is
+/// `invalid_argument`; overflow is `result_out_of_range`; and requiring `ptr == end` is
+/// what rejects `5abc`, which `strtoull` would have read as 5.
+std::optional<std::uint64_t> whole_number(std::string_view text, std::uint64_t max) {
+  std::uint64_t value = 0;
+  const auto* const end = text.data() + text.size();
+  const auto [stopped, ec] = std::from_chars(text.data(), end, value);
+  if (ec != std::errc{} || stopped != end) return std::nullopt;
+  if (value == 0 || value > max) return std::nullopt;
+  return value;
 }
 
 int report(const hermes::app::ConfigProblem& problem) {
@@ -317,19 +340,27 @@ int agent_command(std::span<const std::string_view> args) {
     std::string_view value;
     if (malformed) break;
     if (takes_value("--max-turns", value)) {
-      max_turns = std::strtoull(std::string{value}.c_str(), nullptr, 10);
-      if (max_turns == 0) {
-        std::cerr << "error: --max-turns needs a positive number, got: " << value << '\n';
+      // 10000 turns is far past anything a bounded session means, and keeps the figure
+      // printable and the arithmetic obviously safe.
+      const auto parsed = whole_number(value, 10000);
+      if (!parsed) {
+        std::cerr << "error: --max-turns needs a whole number from 1 to 10000, got: " << value
+                  << '\n';
         return 2;
       }
+      max_turns = *parsed;
       continue;
     }
     if (takes_value("--budget", value)) {
-      budget_seconds = std::strtoull(std::string{value}.c_str(), nullptr, 10);
-      if (budget_seconds == 0) {
-        std::cerr << "error: --budget needs a positive number of seconds, got: " << value << '\n';
+      // A day. Bounded well inside `long` so the chrono::seconds cast below cannot wrap a
+      // budget into a negative one, which is how a bound becomes its own opposite.
+      const auto parsed = whole_number(value, 86400);
+      if (!parsed) {
+        std::cerr << "error: --budget needs a whole number of seconds from 1 to 86400, got: "
+                  << value << '\n';
         return 2;
       }
+      budget_seconds = *parsed;
       continue;
     }
     if (takes_value("--backups", value)) {
@@ -380,13 +411,20 @@ int agent_command(std::span<const std::string_view> args) {
     // makes `/tmp/sandbox-backups` look "inside" `/tmp/sandbox`, which would refuse the
     // most natural place to put the store -- right beside the root, which is where this
     // command's own default puts it.
+    constexpr char kSep = std::filesystem::path::preferred_separator;
     std::string root = box->root().lexically_normal().string();
-    while (root.size() > 1 && root.back() == std::filesystem::path::preferred_separator) {
-      root.pop_back();
-    }
+    while (root.size() > 1 && root.back() == kSep) root.pop_back();
     const std::string store =
         std::filesystem::absolute(*backup_dir).lexically_normal().string();
-    if (store == root || store.starts_with(root + std::filesystem::path::preferred_separator)) {
+
+    // `--root /` needs its own arm, and getting it wrong is worse than it looks: the strip
+    // loop leaves root as "/", so the general test degrades to `starts_with("//")`, which
+    // no normalised path matches -- every location would have been accepted as "outside"
+    // the one root that contains everything.
+    const bool inside = (root == std::string{kSep})
+                            ? store.starts_with(kSep)
+                            : (store == root || store.starts_with(root + kSep));
+    if (inside) {
       std::cerr << "error: --backups must be outside --root (R4): " << store << " is inside "
                 << root << '\n';
       return 2;

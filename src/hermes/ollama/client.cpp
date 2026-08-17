@@ -36,13 +36,6 @@ Failure transport_failure(httplib::Error error, std::string_view what) {
 /// nlohmann's dump() throws on any byte that is not valid UTF-8, and this API returns
 /// std::expected rather than throwing -- so an un-replaced dump() is not an error
 /// path, it is std::terminate. That matters here more than in most codebases: the
-/// supervisor's whole job is feeding file contents and tool output back to a model,
-/// and one latin-1 or binary file would take the process down. Invalid bytes become
-/// U+FFFD, which the model can see and reason about.
-std::string dump_lossy(const json& value) {
-  return value.dump(-1, ' ', /*ensure_ascii=*/false, json::error_handler_t::replace);
-}
-
 /// Restores the client's timeouts however the scope is left.
 ///
 /// chat() raises them for the length of one generation. Without this, an exception
@@ -118,6 +111,13 @@ std::string string_or_empty(const json& object, std::string_view key) {
 }
 
 }  // namespace
+
+/// See client.h. Declared there rather than kept private here because `wire.cpp` renders
+/// the same untrusted bytes -- tool output -- and reintroduced this exact crash by
+/// spelling `dump()` itself. One definition is the only way that stops recurring.
+std::string dump_lossy(const json& value) {
+  return value.dump(-1, ' ', /*ensure_ascii=*/false, json::error_handler_t::replace);
+}
 
 std::string_view to_string(TransportError e) noexcept {
   switch (e) {

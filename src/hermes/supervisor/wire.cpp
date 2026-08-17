@@ -1,5 +1,7 @@
 #include <hermes/supervisor/wire.h>
 
+#include <hermes/ollama/client.h>
+
 #include <utility>
 #include <variant>
 
@@ -148,11 +150,14 @@ std::string render_output(const ToolOutput& output) {
     rows.push_back(std::move(rendered));
   }
 
-  return rows.dump();
+  // Never a bare dump(): these rows carry raw file bytes. See ollama::dump_lossy.
+  return ollama::dump_lossy(rows);
 }
 
 std::string render_error(std::string_view reason) {
-  return json{{"error", std::string{reason}}}.dump();
+  // Refusals quote paths and a tool's own message, both of which can carry invalid
+  // UTF-8 -- a refused `read` names the file it would not read.
+  return ollama::dump_lossy(json{{"error", std::string{reason}}});
 }
 
 }  // namespace hermes::supervisor
