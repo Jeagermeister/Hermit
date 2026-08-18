@@ -1,0 +1,73 @@
+root    : "~/.cache/hermit-fsops/runs/delta-B3-10_bulk_move-r3"
+backups : "~/.cache/hermit-fsops/runs/delta-backups/B3-10_bulk_move-r3"  (outside the root, R4)
+model   : fsops-qwen3.5-9b:64k
+window  : 65536 tokens, 49152 for the prompt
+tools   : 8 offered
+bounds  : 12 turns, 240s, 8 calls/turn
+verify  : per-turn hash diff of the tree (R6)
+expect  : 8 post-conditions, 0 unjudged, up to 3 attempts (R7)
+
+instruction: Move every file ending in .log into the existing logs directory. Files that do not end in .log must stay exactly where they are. Reply DONE when finished.
+
+  turn 1  prompt 1139  generated 473  thinking 1847ch
+        ok      find  [{"path":"app.log"},{"path":"db.log"},{"path":"sys.log"}]
+  turn 2  prompt 1211  generated 69  thinking 145ch
+        REFUSED hash  {"error":"hash: hash: logs: not a regular file"}
+  turn 3  prompt 1270  generated 64  thinking 175ch
+        ok      list  [{"ctime_ns":1787094130016595052,"dev":54,"ino":1185035,"mtime_ns":1787094130016595052,"path":"app.l...
+  turn 4  prompt 1761  generated 108  thinking 282ch
+        ok      move  [{"ctime_ns":1787094139134936430,"dev":54,"from":"app.log","hash":"8a8f60ecb09b7e64c6d5214a8043865e6...
+        ~ deleted  app.log
+        ~ touched  logs
+        ~ created  logs/app.log
+  turn 5  prompt 1962  generated 59  thinking 60ch
+        ok      move  [{"ctime_ns":1787094140019952603,"dev":54,"from":"db.log","hash":"52a3e7b3c482975f3458eb42e89c24922a...
+        ~ deleted  db.log
+        ~ touched  logs
+        ~ created  logs/db.log
+  turn 6  prompt 2162  generated 58  thinking 62ch
+        ok      move  [{"ctime_ns":1787094140905968796,"dev":54,"from":"sys.log","hash":"0fb8c55748424ee983a91b6c50bd2f2dd...
+        ~ touched  logs
+        ~ created  logs/sys.log
+        ~ deleted  sys.log
+  turn 7  prompt 2358  generated 55  thinking 141ch
+        ok      list  [{"ctime_ns":1787094130016713864,"dev":54,"ino":1185041,"mtime_ns":1787094130016713864,"path":"logs/...
+  turn 8  prompt 2702  generated 57  thinking 146ch
+        ok      list  [{"ctime_ns":1787094140905968796,"dev":54,"ino":1185040,"mtime_ns":1787094140905968796,"path":"logs"...
+  turn 9  prompt 2971  generated 86  thinking 347ch
+        answered in 4 characters
+
+stopped : the model answered without asking for a tool
+turns   : 9 of 12
+calls   : 8 (1 refused)
+dropped : 0 turns of history
+elapsed : 13962 ms
+
+reply:
+DONE
+
+what actually changed (hash-verified, R6):
+  deleted  app.log  8a8f60ecb09b -> -
+  deleted  db.log  52a3e7b3c482 -> -
+  touched  logs
+  created  logs/app.log  - -> 8a8f60ecb09b
+  created  logs/db.log  - -> 52a3e7b3c482
+  created  logs/sys.log  - -> 0fb8c5574842
+  deleted  sys.log  0fb8c5574842 -> -
+  (6 of 7 are substantive)
+
+what was asked for (structural post-conditions, R6):
+  met  logs/app.log has the bytes app.log had
+  met  app.log is absent
+  met  logs/db.log has the bytes db.log had
+  met  db.log is absent
+  met  logs/sys.log has the bytes sys.log had
+  met  sys.log is absent
+  met  readme.txt is unchanged
+  met  notes.txt is unchanged
+
+note: the model stopped asking for tools, and the structure you stated was
+      checked against the tree rather than against the reply. Structure is
+      not meaning: a file can exist, hash correctly, and hold the wrong
+      thing -- which is a real recorded run, not a caveat (DECISIONS.md,
+      D13). What is claimed here is exactly what is printed above.

@@ -1158,3 +1158,28 @@ TEST_F(LoopFixture, TheVerdictIsJudgedAgainstASuppliedBaselineNotTheRunsOwn) {
   EXPECT_TRUE(outcome.net_changes.empty())
       << "a previous attempt's residue was attributed to this run";
 }
+
+TEST_F(LoopFixture, AnAnswerLeftInTheThinkingChannelIsCarriedNotLost) {
+  // Measured, not hypothetical: fsops-qwen3.5-9b under this loop's request shape ended
+  // every bench/delta marker-task run with empty content and the literal answer as the
+  // last line of thinking (10 of 10, 2026-08-18). A run like that is Answered -- the
+  // model chose to stop -- and the channel its answer went to must reach the outcome,
+  // or the frontend reports the model as having said nothing.
+  ChatReply thought;
+  thought.finish_reason = "stop";
+  thought.prompt_tokens = 200;
+  thought.completion_tokens = 40;
+  thought.reasoning = "counted five files.\n\nFILECOUNT=5";
+
+  Script script{.replies = {thought}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, {}};
+  const auto outcome = loop.run(*session, "count the files");
+
+  EXPECT_EQ(outcome.reason, StopReason::Answered);
+  EXPECT_TRUE(outcome.final_content.empty());
+  EXPECT_NE(outcome.final_reasoning.find("FILECOUNT=5"), std::string::npos)
+      << "the answer was in the thinking channel and the loop dropped it";
+}

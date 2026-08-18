@@ -1,0 +1,31 @@
+root    : "~/.cache/hermit-fsops/runs/delta-B1-05_copy-r2"
+backups : "~/.cache/hermit-fsops/runs/delta-backups/B1-05_copy-r2"  (outside the root, R4)
+model   : fsops-qwen3.5-9b:64k
+window  : 65536 tokens, 49152 for the prompt
+tools   : 8 offered
+bounds  : 12 turns, 240s, 8 calls/turn
+verify  : per-turn hash diff of the tree (R6)
+expect  : 2 post-conditions, 0 unjudged, up to 1 attempts (R7)
+
+instruction: Make a copy of config.ini named config.ini.bak. This is a COPY: config.ini must still exist afterwards with its original content. Reply DONE when finished.
+
+  turn 1  prompt 1139  generated 471  thinking 1941ch
+        ok      read  [{"content":"[main]\nmode = production\nretries = 3\n","hash":"c42dc9214c97ce646d005af00f89cf78028b8...
+  turn 2  prompt 1269  generated 91  thinking 150ch
+        ok      write  [{"created":true,"ctime_ns":1787093179631194096,"dev":54,"hash":"c42dc9214c97ce646d005af00f89cf78028...
+        ~ created  config.ini.bak
+
+stopped : the request to Ollama failed
+turns   : 2 of 12
+calls   : 2 (0 refused)
+dropped : 0 turns of history
+elapsed : 7804 ms
+detail  : Ollama returned an error status (/api/chat: HTTP 500 -- {"error":"XML syntax error on line 2: element \u003cfunction\u003e closed by \u003c/parameter\u003e"})
+
+what actually changed (hash-verified, R6):
+  created  config.ini.bak  - -> c42dc9214c97
+  (1 of 1 are substantive)
+
+what was asked for (structural post-conditions, R6):
+  met  config.ini.bak has the bytes config.ini had
+  met  config.ini is unchanged

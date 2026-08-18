@@ -1,0 +1,57 @@
+root    : "~/.cache/hermit-fsops/runs/delta-B3-01_create_file-r4"
+backups : "~/.cache/hermit-fsops/runs/delta-backups/B3-01_create_file-r4"  (outside the root, R4)
+model   : fsops-qwen3.5-9b:64k
+window  : 65536 tokens, 49152 for the prompt
+tools   : 8 offered
+bounds  : 12 turns, 240s, 8 calls/turn
+verify  : per-turn hash diff of the tree (R6)
+expect  : 2 post-conditions, 1 unjudged, up to 3 attempts (R7)
+
+instruction: Create a new file named hello.txt in this directory. Its only content must be the single line: HERMES-OK
+Do not change any other file. Reply DONE when finished.
+
+  turn 1  prompt 1143  generated 122  thinking 318ch
+        ok      write  [{"created":true,"ctime_ns":1787093769567422000,"dev":54,"hash":"cc91af4b2965416e3614835b7be8ee27b8f...
+        ~ created  hello.txt
+  turn 2  prompt 1336  generated 62  thinking 90ch
+        ok      write  [{"created":false,"ctime_ns":1787093770490441003,"dev":54,"hash":"cc91af4b2965416e3614835b7be8ee27b8...
+        ~ touched  hello.txt
+  turn 3  prompt 1529  generated 63  thinking 87ch
+        ok      write  [{"created":false,"ctime_ns":1787093771418460109,"dev":54,"hash":"cc91af4b2965416e3614835b7be8ee27b8...
+        ~ touched  hello.txt
+  turn 4  prompt 1722  generated 64  thinking 86ch
+        ok      write  [{"created":false,"ctime_ns":1787093772381479934,"dev":54,"hash":"cc91af4b2965416e3614835b7be8ee27b8...
+        ~ touched  hello.txt
+  turn 5  prompt 1915  generated 68  thinking 110ch
+        ok      write  [{"created":false,"ctime_ns":1787093773386500625,"dev":54,"hash":"cc91af4b2965416e3614835b7be8ee27b8...
+        ~ touched  hello.txt
+  turn 6  prompt 2108  generated 73  thinking 147ch
+        ok      write  [{"created":false,"ctime_ns":1787093774461522755,"dev":54,"hash":"cc91af4b2965416e3614835b7be8ee27b8...
+        ~ touched  hello.txt
+  turn 7  prompt 2301  generated 128  thinking 352ch
+        answered in 4 characters
+
+stopped : the model answered without asking for a tool
+turns   : 7 of 12
+calls   : 6 (0 refused)
+dropped : 0 turns of history
+elapsed : 8169 ms
+
+reply:
+DONE
+
+what actually changed (hash-verified, R6):
+  created  hello.txt  - -> cc91af4b2965
+  (1 of 1 are substantive)
+
+what was asked for (structural post-conditions, R6):
+  met  hello.txt exists
+  met  README.md is unchanged
+  (1 requirement was declared unjudgeable and was never examined
+   here at all -- "all met" above does not cover it)
+
+note: the model stopped asking for tools, and the structure you stated was
+      checked against the tree rather than against the reply. Structure is
+      not meaning: a file can exist, hash correctly, and hold the wrong
+      thing -- which is a real recorded run, not a caveat (DECISIONS.md,
+      D13). What is claimed here is exactly what is printed above.

@@ -1,0 +1,39 @@
+root    : "~/.cache/hermit-fsops/runs/delta-B1-05_copy-r4"
+backups : "~/.cache/hermit-fsops/runs/delta-backups/B1-05_copy-r4"  (outside the root, R4)
+model   : fsops-qwen3.5-9b:64k
+window  : 65536 tokens, 49152 for the prompt
+tools   : 8 offered
+bounds  : 12 turns, 240s, 8 calls/turn
+verify  : per-turn hash diff of the tree (R6)
+expect  : 2 post-conditions, 0 unjudged, up to 1 attempts (R7)
+
+instruction: Make a copy of config.ini named config.ini.bak. This is a COPY: config.ini must still exist afterwards with its original content. Reply DONE when finished.
+
+  turn 1  prompt 1139  generated 94  thinking 286ch
+        ok      read  [{"content":"[main]\nmode = production\nretries = 3\n","hash":"c42dc9214c97ce646d005af00f89cf78028b8...
+  turn 2  prompt 1269  generated 78  thinking 106ch
+        ok      write  [{"created":true,"ctime_ns":1787093189063391487,"dev":54,"hash":"c42dc9214c97ce646d005af00f89cf78028...
+        ~ created  config.ini.bak
+  turn 3  prompt 1477  generated 73  thinking 170ch
+        ok      hash  [{"hash":"c42dc9214c97ce646d005af00f89cf78028b89f0089fc67588dcbf75ba264529","path":"config.ini"},{"h...
+  turn 4  prompt 1663  generated 6
+
+stopped : the model answered without asking for a tool
+turns   : 4 of 12
+calls   : 3 (0 refused)
+dropped : 0 turns of history
+elapsed : 3760 ms
+
+what actually changed (hash-verified, R6):
+  created  config.ini.bak  - -> c42dc9214c97
+  (1 of 1 are substantive)
+
+what was asked for (structural post-conditions, R6):
+  met  config.ini.bak has the bytes config.ini had
+  met  config.ini is unchanged
+
+note: the model stopped asking for tools, and the structure you stated was
+      checked against the tree rather than against the reply. Structure is
+      not meaning: a file can exist, hash correctly, and hold the wrong
+      thing -- which is a real recorded run, not a caveat (DECISIONS.md,
+      D13). What is claimed here is exactly what is printed above.

@@ -275,7 +275,9 @@ struct SessionOptions {
   /// content with no error (see ChatReply::completion_tokens).
   std::optional<int> max_tokens = 4096;
 
-  double temperature = 0.0;
+  /// Unset means the model's own default sampling -- see ChatRequest::temperature for
+  /// why unpinned is the default and what the 0.0 default silently did to R7.
+  std::optional<double> temperature{};
 };
 
 /// One bounded conversation against one model.

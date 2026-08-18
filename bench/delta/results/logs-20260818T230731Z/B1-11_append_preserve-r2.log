@@ -1,0 +1,60 @@
+root    : "~/.cache/hermit-fsops/runs/delta-B1-11_append_preserve-r2"
+backups : "~/.cache/hermit-fsops/runs/delta-backups/B1-11_append_preserve-r2"  (outside the root, R4)
+model   : fsops-qwen3.5-9b:64k
+window  : 65536 tokens, 49152 for the prompt
+tools   : 8 offered
+bounds  : 12 turns, 240s, 8 calls/turn
+verify  : per-turn hash diff of the tree (R6)
+expect  : 1 post-conditions, 1 unjudged, up to 1 attempts (R7)
+
+instruction: Append this line to the END of tally.txt:
+2026-08-12 shipped
+The three lines already in the file must remain, unchanged and in the same order. Do not rewrite the file from scratch. Reply DONE when finished.
+
+  turn 1  prompt 1159  generated 134  thinking 415ch
+        ok      read  [{"content":"2026-08-09 opened\n2026-08-10 reviewed\n2026-08-11 merged\n","hash":"913f893c4268c124fd...
+  turn 2  prompt 1313  generated 957  thinking 3245ch
+        ok      edit  [{"ctime_ns":1787093380642976259,"dev":54,"hash":"1c59fe92a2e415dd4ddc486fb74c34d6d449d8b0fe09c022fe...
+        ~ modified  tally.txt
+  turn 3  prompt 1528  generated 402  thinking 1437ch
+        ok      read  [{"content":"2026-08-09 opened\n2026-08-10 reviewed\n2026-08-11 merged\nnewline\n2026-08-12 shipped\...
+  turn 4  prompt 1696  generated 186  thinking 478ch
+        ok      write  [{"created":false,"ctime_ns":1787093387818533184,"dev":54,"hash":"90877b720acf4b417c502d40b3a5b4361a...
+        ~ modified  tally.txt
+  turn 5  prompt 1941  generated 657  thinking 2119ch
+        ok      read  [{"content":"2026-08-09 opened\n2026-08-10 reviewed\n2026-08-11 merged\n\n\n2026-08-12 shipped\n","h...
+  turn 6  prompt 2114  generated 247  thinking 525ch
+        ok      write  [{"created":false,"ctime_ns":1787093398579756590,"dev":54,"hash":"90877b720acf4b417c502d40b3a5b4361a...
+        ~ touched  tally.txt
+  turn 7  prompt 2359  generated 730  thinking 2361ch
+        ok      write  [{"created":false,"ctime_ns":1787093407172934934,"dev":54,"hash":"5406ae35fbc1bca65b6e6370f35a316ce4...
+        ~ modified  tally.txt
+  turn 8  prompt 2598  generated 451  thinking 1512ch
+        ok      read  [{"content":"2026-08-09 opened\\n2026-08-10 reviewed\\n2026-08-11 merged\\n2026-08-12 shipped\n","ha...
+  turn 9  prompt 2766  generated 401  thinking 1063ch
+        REFUSED edit  {"error":"edit: edit: tally.txt: `old` is empty; there is nothing to find"}
+  turn 10  prompt 2863  generated 144  thinking 481ch
+        ok      hash  [{"hash":"5406ae35fbc1bca65b6e6370f35a316ce4806eab2b6b92e445d59df57b735ece","path":"tally.txt"}]
+  turn 11  prompt 2978  generated 3700  thinking 14519ch
+        ok      write  [{"created":false,"ctime_ns":1787093462461081310,"dev":54,"hash":"90877b720acf4b417c502d40b3a5b4361a...
+        ~ modified  tally.txt
+  turn 12  prompt 3223  generated 826  thinking 2493ch
+        ok      hash  [{"hash":"90877b720acf4b417c502d40b3a5b4361a69e6c2c469b77f4e9452e57d3d3a19","path":"tally.txt"}]
+
+stopped : the turn budget ran out
+turns   : 12 of 12
+calls   : 12 (1 refused)
+dropped : 0 turns of history
+elapsed : 104500 ms
+detail  : reached the 12-turn bound
+
+what actually changed (hash-verified, R6):
+  modified  tally.txt  913f893c4268 -> 90877b720acf
+  (1 of 1 are substantive)
+
+what was asked for (structural post-conditions, R6):
+  met  tally.txt exists  (already true before the run)
+  (1 of these was already true before the run began,
+   so the model could have passed it by doing nothing)
+  (1 requirement was declared unjudgeable and was never examined
+   here at all -- "all met" above does not cover it)

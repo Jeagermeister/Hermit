@@ -300,6 +300,7 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
                           : "the reply was empty");
       }
       outcome.final_content = reply->content;
+      outcome.final_reasoning = reply->reasoning;
       return finish(StopReason::Answered, {});
     }
 

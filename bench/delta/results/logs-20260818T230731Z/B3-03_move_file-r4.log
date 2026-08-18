@@ -1,0 +1,51 @@
+root    : "~/.cache/hermit-fsops/runs/delta-B3-03_move_file-r4"
+backups : "~/.cache/hermit-fsops/runs/delta-backups/B3-03_move_file-r4"  (outside the root, R4)
+model   : fsops-qwen3.5-9b:64k
+window  : 65536 tokens, 49152 for the prompt
+tools   : 8 offered
+bounds  : 12 turns, 240s, 8 calls/turn
+verify  : per-turn hash diff of the tree (R6)
+expect  : 2 post-conditions, 0 unjudged, up to 3 attempts (R7)
+
+instruction: Move the file report.txt into the existing archive directory. Keep the same filename and the same content. After the move, report.txt must no longer exist at the top level. Reply DONE when finished.
+
+  turn 1  prompt 1146  generated 183  thinking 596ch
+        ok      find  [{"path":"report.txt"}]
+  turn 2  prompt 1208  generated 73  thinking 217ch
+        ok      list  [{"ctime_ns":1787093802815057353,"dev":54,"ino":1184827,"mtime_ns":1787093802815057353,"path":"archi...
+  turn 3  prompt 1401  generated 80  thinking 177ch
+        ok      move  [{"ctime_ns":1787093807248105281,"dev":54,"from":"report.txt","hash":"c4e0be0f5318dcb15b72240e25a412...
+        ~ touched  archive
+        ~ created  archive/report.txt
+        ~ deleted  report.txt
+  turn 4  prompt 1602  generated 51  thinking 139ch
+        ok      list  [{"ctime_ns":1787093807248105281,"dev":54,"ino":1184827,"mtime_ns":1787093807248105281,"path":"archi...
+  turn 5  prompt 1720  generated 38  thinking 168ch
+
+stopped : the model answered without asking for a tool
+turns   : 5 of 12
+calls   : 4 (0 refused)
+dropped : 0 turns of history
+elapsed : 5850 ms
+
+reply: none -- the model emitted no content and answered into its thinking channel,
+       which follows verbatim:
+The file report.txt has been moved into the archive directory. The top level no longer shows report.txt, and it's now in archive/report.txt. The work is finished.
+
+DONE
+
+what actually changed (hash-verified, R6):
+  touched  archive
+  created  archive/report.txt  - -> c4e0be0f5318
+  deleted  report.txt  c4e0be0f5318 -> -
+  (2 of 3 are substantive)
+
+what was asked for (structural post-conditions, R6):
+  met  archive/report.txt has the bytes report.txt had
+  met  report.txt is absent
+
+note: the model stopped asking for tools, and the structure you stated was
+      checked against the tree rather than against the reply. Structure is
+      not meaning: a file can exist, hash correctly, and hold the wrong
+      thing -- which is a real recorded run, not a caveat (DECISIONS.md,
+      D13). What is claimed here is exactly what is printed above.

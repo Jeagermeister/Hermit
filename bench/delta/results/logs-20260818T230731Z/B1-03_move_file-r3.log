@@ -1,0 +1,49 @@
+root    : "~/.cache/hermit-fsops/runs/delta-B1-03_move_file-r3"
+backups : "~/.cache/hermit-fsops/runs/delta-backups/B1-03_move_file-r3"  (outside the root, R4)
+model   : fsops-qwen3.5-9b:64k
+window  : 65536 tokens, 49152 for the prompt
+tools   : 8 offered
+bounds  : 12 turns, 240s, 8 calls/turn
+verify  : per-turn hash diff of the tree (R6)
+expect  : 2 post-conditions, 0 unjudged, up to 1 attempts (R7)
+
+instruction: Move the file report.txt into the existing archive directory. Keep the same filename and the same content. After the move, report.txt must no longer exist at the top level. Reply DONE when finished.
+
+  turn 1  prompt 1146  generated 126  thinking 444ch
+        ok      list  [{"ctime_ns":1787093126518310716,"dev":54,"ino":1184552,"mtime_ns":1787093126518310716,"path":"archi...
+  turn 2  prompt 1339  generated 74  thinking 136ch
+        ok      move  [{"ctime_ns":1787093129251138252,"dev":54,"from":"report.txt","hash":"c4e0be0f5318dcb15b72240e25a412...
+        ~ touched  archive
+        ~ created  archive/report.txt
+        ~ deleted  report.txt
+  turn 3  prompt 1540  generated 24
+        ok      list  [{"ctime_ns":1787093129251138252,"dev":54,"ino":1184552,"mtime_ns":1787093129251138252,"path":"archi...
+  turn 4  prompt 1658  generated 32  thinking 130ch
+
+stopped : the model answered without asking for a tool
+turns   : 4 of 12
+calls   : 3 (0 refused)
+dropped : 0 turns of history
+elapsed : 3833 ms
+
+reply: none -- the model emitted no content and answered into its thinking channel,
+       which follows verbatim:
+The move was successful. The report.txt file no longer exists at the top level (it's now in archive/). The task is complete.
+
+DONE
+
+what actually changed (hash-verified, R6):
+  touched  archive
+  created  archive/report.txt  - -> c4e0be0f5318
+  deleted  report.txt  c4e0be0f5318 -> -
+  (2 of 3 are substantive)
+
+what was asked for (structural post-conditions, R6):
+  met  archive/report.txt has the bytes report.txt had
+  met  report.txt is absent
+
+note: the model stopped asking for tools, and the structure you stated was
+      checked against the tree rather than against the reply. Structure is
+      not meaning: a file can exist, hash correctly, and hold the wrong
+      thing -- which is a real recorded run, not a caveat (DECISIONS.md,
+      D13). What is claimed here is exactly what is printed above.

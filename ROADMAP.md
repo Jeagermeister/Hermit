@@ -543,12 +543,27 @@ model calling this as a tool.
 - [ ] **MCP server over stdio.** No listener, no port, no auth. Thin: transport only, over the
       same core the CLI drives.
 - [ ] **`bench/delta` — the before/after measurement.** Design settled in
-      [bench/delta/DESIGN.md](./bench/delta/DESIGN.md) before any run exists; runs blocked on
-      the loop and `mcp.cpp` above, and deliberately their first real workout. Two experiments,
+      [bench/delta/DESIGN.md](./bench/delta/DESIGN.md) before any run exists. Two experiments,
       separated: **economics** (delegation vs direct, needs no local model — Tier 0 is
-      inference-free, so it runs where developer machines have no GPU) and **reliability**
-      (local, tests R7's ~67%→~96% arithmetic as a measurement, self-contained for extraction
-      to a public repo). Paired deltas, pre-registered overturn conditions, no leaderboards.
+      inference-free) and **reliability** (local, tests R7's ~67%→~96% arithmetic as a
+      measurement). Paired deltas, pre-registered overturn conditions, no leaderboards.
+      - [x] ~~**E1, reliability**~~ — **ran 2026-08-18**, protocol frozen first
+        ([E1-PROTOCOL.md](./bench/delta/E1-PROTOCOL.md)), results in
+        [E1-RESULTS.md](./bench/delta/E1-RESULTS.md). Headline: Hermes-as-shipped 26/35,
+        hermit 33/35 both with and without retries; 4 wins 0 losses across tasks
+        (p = 0.125 — underpowered at seven tasks, stated rather than rounded up). R7 fired
+        only on `05_copy` and converted 4 of 4 — within-B3 attempt-level evidence, post
+        hoc and small, since the pre-registered B3−B1 column measured zero — pass@1
+        6/10 → 5/5, each retry handed the copy-corruption failure R3 caught by hash (a
+        re-typed file one byte off). Every remaining hermit failure was *semantic* —
+        structure held in 70/70 runs — which points the next unit of leverage at the
+        semantic judge. The experiment also flushed out two product defects (the
+        always-pinned `temperature 0.0` that silently suppressed R7, and answers left in
+        the thinking channel being dropped — both fixed and tested) plus a third finding,
+        a 14% malformed-tool-call transport-failure rate on the native endpoint; all
+        recorded in the results with the discarded collections quarantined, not deleted.
+      - [ ] **E2, economics** — still blocked on `mcp.cpp` above, deliberately its first
+        real workout.
 
 ## Phase 3 — The supervisor (the actual product)
 
