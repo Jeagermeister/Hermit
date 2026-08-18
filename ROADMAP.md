@@ -562,6 +562,9 @@ model calling this as a tool.
         the thinking channel being dropped — both fixed and tested) plus a third finding,
         a 14% malformed-tool-call transport-failure rate on the native endpoint; all
         recorded in the results with the discarded collections quarantined, not deleted.
+        The raw data — result files, per-run logs, the wire capture, and both quarantined
+        collections — is published in the **hermit-bench** repository (the extraction
+        DESIGN.md always planned); this repo keeps the suites and the analysis documents.
       - [ ] **E2, economics** — still blocked on `mcp.cpp` above, deliberately its first
         real workout.
 

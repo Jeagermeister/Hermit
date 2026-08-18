@@ -2,3 +2,9 @@ runs/
 logs/
 transcripts/
 __pycache__/
+
+# Results are published in the hermit-bench repository from 2026-08-18 on; the
+# tracked files below this date are the legacy sweeps the in-repo docs cite.
+results/fsops-*.json
+results/fsops-*.md
+results/fsops-*.partial.jsonl

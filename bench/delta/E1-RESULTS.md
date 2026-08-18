@@ -171,10 +171,16 @@ in hermit's code and is recorded under losses below.)
 
 | | |
 |---|---|
-| arm A file | `bench/fsops/results/fsops-20260818T215558Z.json` |
-| arm B file | `bench/delta/results/delta-armB-20260818T230731Z.json` |
-| arm B logs | `bench/delta/results/logs-20260818T230731Z/`, committed — every log-traced claim above is checkable there |
-| wire capture | `bench/delta/results/evidence/thinking-channel-tap-20260818.jsonl` — the raw request/response pairs behind the thinking-channel finding |
+| arm A file | `fsops/results/fsops-20260818T215558Z.json`, in **hermit-bench** |
+| arm B file | `delta/results/delta-armB-20260818T230731Z.json`, in **hermit-bench** |
+| arm B logs | `delta/results/logs-20260818T230731Z/`, in **hermit-bench** — every log-traced claim above is checkable there |
+| wire capture | `delta/results/evidence/thinking-channel-tap-20260818.jsonl`, in **hermit-bench** — the raw request/response pairs behind the thinking-channel finding |
+
+The raw data lives in the **hermit-bench** repository — the public extraction of both
+suites, their frozen protocols, this document, and every result file above, including
+the two quarantined collections. This repo keeps the suites as development tooling and
+carries no result artifacts from 2026-08-18 on; `run_delta.py --report` still
+reproduces the tables from a local, untracked copy of the same files.
 | model | `fsops-qwen3.5-9b:64k`, digest `2080d161fb89`, `num_ctx` 65536 both arms |
 | Hermes Agent | v0.20.0 (2026.8.3), as shipped |
 | Ollama | 0.32.9 |
