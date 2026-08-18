@@ -576,6 +576,28 @@ Ordered. Steps 1–5 are Phase 2 and 2.5 as already written; only the tool list 
    the combination unrepresentable rather than discouraged. `shell` is still absent, waiting on
    step 5.
 
+4b. ~~**The judgment half reaches a caller**~~ — numbered 4b rather than 5 because the steps
+   below are cited by number elsewhere, and renumbering them would break those references.
+   **Done 2026-08-18.** `supervisor/judge.cpp` decided post-conditions and nothing produced
+   any, so it was unreachable code; `app/expect.cpp` is the source. Expectations are stated
+   as `--expect kind:path` (repeatable) or an `expectations` array in the config file, judged
+   after every turn against the baseline, and printed by `agent`, which exits 3 when
+   something stated is measurably undone.
+
+   Two rules earn a place here rather than in a commit message, because both are cases where
+   the code looked right and would have reported something false:
+
+   - **A path is keyed by its literal spelling, never by `resolve()`'s output.** `resolve`
+     expands symlinks and §6's walker does not, so with `link.md -> notes.txt` the resolved
+     key answers about `notes.txt` while the operator asked about `link.md` — with a hash
+     behind it, so it reads as verified. `resolve` is kept as the containment *gate* and its
+     answer discarded. `..` is refused outright for the same reason: POSIX order and lexical
+     folding disagree after a symlink, so `dirlink/../x` gates as `a/x` and keys as `x`.
+   - **A tree that could not be read leaves every expectation `Undecidable`.** A default
+     `Verdict` has no findings, and `met()` is true of no findings — so a run that failed to
+     look would have reported everything as passing. §6's fail-closed rule has to reach the
+     verdict, not only the walk.
+
 5. **Clear D7's gate, which is two conditions and not one.**
    ⚠️ Both are required before the programmatic frontend ships; a programmatic caller is exactly
    the one D6's threat model did not cover.

@@ -20,6 +20,7 @@
 // source set it?" needs an answer that does not involve reading the code.
 
 #include <hermit/app/config.h>
+#include <hermit/app/expect.h>
 #include <hermit/app/toolset.h>
 #include <hermit/core/sandbox.h>
 #include <hermit/ollama/preflight.h>
@@ -402,6 +403,33 @@ int agent_command(std::span<const std::string_view> args) {
     return 1;
   }
 
+  // Parsed here and nowhere earlier: a path is only checkable against an open root, and
+  // `hermit::app::load` deliberately does no filesystem work. Refused rather than carried
+  // -- a mis-spelled path is not a harmless typo here, it becomes a permanent `Unmet` that
+  // R7 would hand to the model as a concrete failure to go and fix.
+  hermit::app::Expectations expectations;
+  {
+    const nlohmann::json settings{{"expectations", config->expectations},
+                                  {"unjudged", config->unjudged_requirements}};
+    auto parsed = hermit::app::parse_expectations_json(settings, *box);
+    if (!parsed) {
+      std::cerr << "error: " << parsed.error().render() << '\n';
+      return 2;
+    }
+    expectations = std::move(*parsed);
+  }
+
+  // Both checks sit here, immediately after the root opens and before a client is built:
+  // this is the earliest point a path can be checked at all, and the latest point at
+  // which being wrong is still free. Left where the loop options are assembled, a typo
+  // would first cost a socket and a preflight round trip against a live daemon.
+  if (!expectations.set.empty() && !verify) {
+    std::cerr << "error: --no-verify leaves nothing to judge the expectations against.\n"
+                 "       Drop --no-verify, or drop the expectations.\n";
+    return 2;
+  }
+
+
   // R4: outside the root, always. Defaulted beside it rather than inside it -- a store
   // under the root would be listable, readable and editable by the model, which is the
   // whole point of the rule.
@@ -486,6 +514,8 @@ int agent_command(std::span<const std::string_view> args) {
 
   hermit::supervisor::LoopOptions loop_options;
   loop_options.max_turns = max_turns;
+  loop_options.expected = expectations.set;
+  loop_options.unjudged_requirements = expectations.unjudged;
   loop_options.budget = std::chrono::seconds{static_cast<long>(budget_seconds)};
 
   // One line per turn, then one indented line per call. The result is truncated for
@@ -536,6 +566,13 @@ int agent_command(std::span<const std::string_view> args) {
             << "bounds  : " << max_turns << " turns, " << budget_seconds << "s, "
             << loop_options.max_calls_per_turn << " calls/turn\n"
             << "verify  : " << (verify ? "per-turn hash diff of the tree (R6)" : "off")
+            << '\n'
+            << "expect  : "
+            << (expectations.set.empty() ? std::string{"nothing stated -- report only"}
+                                         : std::to_string(expectations.set.size()) +
+                                               " post-conditions, " +
+                                               std::to_string(expectations.unjudged) +
+                                               " unjudged")
             << "\n\n"
             << "instruction: " << instruction << "\n\n";
 
@@ -573,6 +610,43 @@ int agent_command(std::span<const std::string_view> args) {
     }
   }
 
+  if (!expectations.set.empty() || expectations.unjudged > 0) {
+    std::cout << "\nwhat was asked for (structural post-conditions, R6):\n";
+    std::string line;
+    for (const char c : outcome.verdict.render()) {
+      if (c != '\n') {
+        line.push_back(c);
+        continue;
+      }
+      std::cout << "  " << line << '\n';
+      line.clear();
+    }
+
+    if (const auto vacuous = outcome.verdict.vacuous(); vacuous > 0) {
+      const bool one = vacuous == 1;
+      std::cout << "  (" << vacuous << (one ? " of these was" : " of these were")
+                << " already true before the run began,\n"
+                   "   so the model could have passed "
+                << (one ? "it" : "them") << " by doing nothing)\n";
+    }
+    if (const auto blind = outcome.verdict.count(hermit::supervisor::Outcome::Undecidable);
+        blind > 0) {
+      // Never counted as met, and never sent to the model: restating "one side could not
+      // be read" spends a retry on a sentence it cannot act on (judge.h).
+      std::cout << "  (" << blind
+                << " could not be decided -- the judge was not able to look, which is\n"
+                   "   reported to you and deliberately withheld from the model)\n";
+    }
+    if (const auto unjudged = expectations.unjudged; unjudged > 0) {
+      const bool one = unjudged == 1;
+      std::cout << "  (" << unjudged << (one ? " requirement was" : " requirements were")
+                << " declared unjudgeable and " << (one ? "was" : "were")
+                << " never examined\n"
+                   "   here at all -- \"all met\" above does not cover "
+                << (one ? "it" : "them") << ")\n";
+    }
+  }
+
   // Said out loud rather than left to be inferred from a zero exit status. What exists now
   // is the *observation* half of R6: the changeset above owes nothing to the reply, so a
   // model announcing success over an untouched tree is contradicted by it. What does not
@@ -590,7 +664,7 @@ int agent_command(std::span<const std::string_view> args) {
       std::cout << "\nnote: the model stopped asking for tools. Nothing about the tree was\n"
                    "      checked -- --no-verify was given, so this run is unverified and\n"
                    "      a clean stop is not evidence that anything happened.\n";
-    } else {
+    } else if (expectations.set.empty()) {
       std::cout << "\nnote: the model stopped asking for tools, and the changes above are what\n"
                    "      the filesystem shows. Whether they are the *correct* changes is not\n"
                    "      decided here -- that needs a post-condition this command was not given.\n";
@@ -598,9 +672,28 @@ int agent_command(std::span<const std::string_view> args) {
         std::cout << "      Nothing moved. For a read-only instruction that is right; for one\n"
                      "      that asked for work, it is the failure R6 was written about.\n";
       }
+    } else {
+      std::cout << "\nnote: the model stopped asking for tools, and the structure you stated was\n"
+                   "      checked against the tree rather than against the reply. Structure is\n"
+                   "      not meaning: a file can exist, hash correctly, and hold the wrong\n"
+                   "      thing -- which is a real recorded run, not a caveat (DECISIONS.md,\n"
+                   "      D13). What is claimed here is exactly what is printed above.\n";
     }
   }
-  return outcome.ran_to_completion() ? 0 : 1;
+  // The exit code answers "did the stated work hold", not merely "did the loop finish".
+  // Three states, because collapsing them loses the distinction the whole judgment half is
+  // built on:
+  //
+  //   1  the run did not complete -- a bound, a transport failure, an unreadable tree
+  //   3  it completed, and something stated was measurably not done (R7's trigger)
+  //   0  it completed, and nothing stated was found undone
+  //
+  // Undecidable does *not* reach 3. The judge could not look, which is an operator problem
+  // rather than a failed run, and `first_unmet()` skips it for the same reason -- it is
+  // not a finding anything can act on. It is still reported above, so it cannot pass
+  // silently.
+  if (!outcome.ran_to_completion()) return 1;
+  return outcome.verdict.first_unmet().has_value() ? 3 : 0;
 }
 
 // Everything that is in force, and where each value came from.

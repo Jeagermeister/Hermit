@@ -578,14 +578,61 @@ model calling this as a tool.
         reported as `Modified` or `TouchedOnly` rather than `TypeChanged`.
       - A content change hidden behind a `chmod 000` reports as `ReadabilityChanged`, which
         `substantive()` does not count.
-- [ ] **State verification — the judgment half.** Deciding whether the changes are the *right*
-      ones needs a post-condition, and a free-text instruction does not carry one. A live run
-      shows the gap exactly: asked to create `report.md` containing a summary, `llama3.2-3b`
-      created the file — changeset accurate, hash and all — containing the literal text
-      `grep -oP '(?<=^).*' notes.txt`. A shell command, written as content. Bytes moved, the
-      report is correct, the work is wrong. [D13](./DECISIONS.md) states the two open positions;
-      this bullet closes when one is chosen.
+- [x] ~~**State verification — the judgment half**~~ — **position 1 chosen 2026-08-17**
+      ([D13](./DECISIONS.md)): the supervisor is given post-conditions.
+      `supervisor/judge.cpp` decides them from two snapshots — a pure function that never
+      reads a reply, opens a file, or touches the filesystem.
+      It closed smaller than D13 framed it, because "post-condition" is two things.
+      **Structural** — does this path exist, is that one gone, did these bytes survive a move —
+      is a closed vocabulary, decidable from snapshots. **Semantic** — is this a *correct*
+      summary of `notes.txt` — is not, and D13's live example is semantic: `Exists("report.md")`
+      is satisfied perfectly by a file containing `grep -oP '(?<=^).*' notes.txt`. The structural
+      half is where the failures are, though. Classifying every failing post-condition across the
+      259 `bench/fsops` runs: existence/absence 286 (69.2%) and hash-preserved-across-a-move 43
+      (10.4%) — 329 of 413 — against content semantics 44 (10.7%) and reply/script output 40
+      (9.7%). The residue is named rather than absorbed, as `Verdict::unjudged`.
+      Three outcomes, not two: **met**; **unmet**, which is data and feeds R7 without ever
+      stopping the run; and **undecidable**, reported to the operator and never sent to the
+      model. Collapsing the last two would spend a retry telling a model "one side could not be
+      read", which it can do nothing with.
+- [x] ~~**Wire the judge to a caller**~~ — done 2026-08-18. Post-conditions are stated with
+      `--expect kind:path` (repeatable) or an `expectations` array in the config file,
+      parsed by `app/expect.cpp`, and judged after every turn against the baseline. The
+      verdict rides on `TurnEvent` and `LoopOutcome`; `hermit agent` prints it and exits
+      **3** when something stated is measurably undone, **1** when the run did not finish,
+      **0** otherwise.
+      Four things had to be decided rather than typed, and each is a test now:
+      - **The key is the literal path spelling, never `resolve()`'s output.** `resolve`
+        expands symlinks and the snapshot walker does not, so with `link.md -> notes.txt`
+        keying on the resolved path answers about `notes.txt` while the operator asked
+        about `link.md` — with a hash attached, so it reads as verified. A round-trip test
+        takes a real `TreeSnapshot` and asserts every parsed key is one the walker emits.
+      - **`..` is refused outright.** The containment gate resolves POSIX-order; a key
+        folded textually does not. With `dirlink -> a/b`, `dirlink/../x` resolves to `a/x`
+        and normalises to `x`, so the gate would pass on one path while the key named
+        another. Measured with `hermit resolve`, not reasoned about.
+      - **A set no tree could satisfy is refused.** `exists:x` beside `absent:x` parses
+        line by line and is unmet on every turn, so R7 would restate the same impossible
+        failure until a bound stopped the run. Built on what judge.cpp actually reads:
+        `preserved:a=b` constrains only `b`, so `absent:a` beside it is a *move*.
+      - **A tree that could not be read leaves every expectation `Undecidable`.** Both
+        early exits returned before the verdict was built, and a default `Verdict` has zero
+        findings — for which `met()` is true. A run that failed to look would have reported
+        everything as passing. Worse in the mid-run case, where judging the last good
+        snapshot yields a fully formed verdict, hashes and all, about a tree no longer on
+        disk.
+- [ ] **A post-condition for meaning, not only structure.** The four predicates cover 329 of
+      413 recorded failures; the residue is real. `report.md` holding
+      `grep -oP '(?<=^).*' notes.txt` satisfies `exists:report.md` perfectly, and D13's live
+      example is exactly that. Counted as `Verdict::unjudged` and stated with `--unjudged N`
+      so a verdict cannot read as "the work is done", which is honest bookkeeping rather
+      than an answer.
 - [ ] **Re-invocation** with one concrete remaining failure, per the tournament recommendation.
+      **Unblocked 2026-08-18**: `Verdict::first_unmet()` now returns that failure, in
+      declaration order and already phrased as a sentence — so an expectation set written in
+      dependency order yields the next actionable step rather than an arbitrary one. It skips
+      `Undecidable` on purpose. What remains is the re-invocation itself: nothing yet feeds
+      that finding back into a fresh session.
       **Measured support, 2026-08-17**: handed a refusal as a tool result, only `qwen3.5-9b` used
       it to correct itself. `llama3.2-3b`, `hermes3-8b` and `gemma4-e4b` all stopped calling tools
       and addressed the human instead — *"Please provide me with the path of the file"*. Stated at

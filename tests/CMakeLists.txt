@@ -22,7 +22,8 @@ add_executable(hermit_tests
   wire_test.cpp
   loop_test.cpp
   verify_test.cpp
-  judge_test.cpp)
+  judge_test.cpp
+  expect_test.cpp)
 
 target_link_libraries(hermit_tests
   PRIVATE hermit_app hermit_core hermit_ollama hermit_supervisor hermit_warnings

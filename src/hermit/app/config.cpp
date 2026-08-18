@@ -17,7 +17,8 @@ namespace {
 // Every key this understands, in one place. The unknown-key check reads these, so a
 // setting that is added here and nowhere else fails loudly rather than being accepted
 // and ignored -- which is the direction of failure worth having.
-constexpr std::string_view kTopLevelKeys[] = {"sandbox_root", "model", "ollama", "preflight"};
+constexpr std::string_view kTopLevelKeys[] = {"sandbox_root", "model",       "ollama",
+                                              "preflight",    "expectations", "unjudged"};
 constexpr std::string_view kOllamaKeys[] = {"base_url", "connect_timeout_s", "metadata_timeout_s",
                                             "chat_timeout_s", "max_num_ctx"};
 constexpr std::string_view kPreflightKeys[] = {"minimum_context", "require_tools", "warmup"};
@@ -38,8 +39,9 @@ constexpr std::string_view kPreflightKeys[] = {"minimum_context", "require_tools
 /// which catches the other direction: a *boolean* flag wrongly listed here would make
 /// `find_config_flag` skip a live `--config`, quietly not loading a named file.
 constexpr std::string_view kFlagsTakingAValue[] = {
-    "--config",          "--root",           "--model",        "--url", "--max-num-ctx",
-    "--min-context",     "--connect-timeout", "--metadata-timeout", "--chat-timeout",
+    "--config",      "--root",             "--model",        "--url",
+    "--max-num-ctx", "--min-context",      "--connect-timeout", "--metadata-timeout",
+    "--chat-timeout", "--expect",          "--unjudged",
 };
 
 bool takes_a_value(std::string_view flag) {
@@ -314,6 +316,21 @@ ConfigResult<void> overlay_json(Config& config, const nlohmann::json& doc,
     }
   }
 
+  // Shape only. Whether "exists:../x" names something reachable is a question for a
+  // sandbox, which this layer deliberately does not have -- see Config::expectations.
+  if (const auto it = doc.find("expectations"); it != doc.end()) {
+    if (!it->is_array()) return std::unexpected(wrong_type("expectations", "an array"));
+    config.expectations = *it;
+    config.set_origin(Field::Expectations, ConfigSource::File);
+  }
+  if (const auto it = doc.find("unjudged"); it != doc.end()) {
+    if (!it->is_number_unsigned()) {
+      return std::unexpected(wrong_type("unjudged", "a non-negative whole number"));
+    }
+    config.unjudged_requirements = it->get<std::size_t>();
+    config.set_origin(Field::Unjudged, ConfigSource::File);
+  }
+
   return {};
 }
 
@@ -457,6 +474,11 @@ namespace {
 ConfigResult<void> overlay_flags(Config& config, std::span<const std::string_view> args,
                                  std::vector<std::string_view>& positional) {
   bool everything_is_positional = false;
+  // `--expect` is repeatable, so the flag layer accumulates within one call and then
+  // replaces the file's set as a unit. Appending instead would leave a stale expectation
+  // in a config file unremovable from the command line, which is the opposite of what
+  // every other flag here does.
+  bool expectations_replaced = false;
   for (std::size_t i = 0; i < args.size(); ++i) {
     const std::string_view flag = args[i];
 
@@ -583,6 +605,23 @@ ConfigResult<void> overlay_flags(Config& config, std::span<const std::string_vie
     } else if (flag == "--no-warmup") {
       config.preflight.warmup = false;
       config.set_origin(Field::Warmup, ConfigSource::Flag);
+    } else if (flag == "--expect") {
+      const auto value = take();
+      if (!value) return std::unexpected(value.error());
+      if (value->empty()) {
+        return std::unexpected(ConfigProblem{ConfigError::BadValue, "--expect must not be empty"});
+      }
+      if (!expectations_replaced) {
+        config.expectations = nlohmann::json::array();
+        expectations_replaced = true;
+      }
+      config.expectations.push_back(std::string{*value});
+      config.set_origin(Field::Expectations, ConfigSource::Flag);
+    } else if (flag == "--unjudged") {
+      const auto value = take_whole();
+      if (!value) return std::unexpected(value.error());
+      config.unjudged_requirements = *value;
+      config.set_origin(Field::Unjudged, ConfigSource::Flag);
     } else if (flag == "--tools") {
       config.preflight.require_tools = true;
       config.set_origin(Field::RequireTools, ConfigSource::Flag);
@@ -703,6 +742,21 @@ std::string Config::render() const {
        Field::MinimumContext);
   line("preflight.require_tools", preflight.require_tools ? "true" : "false", Field::RequireTools);
   line("preflight.warmup", preflight.warmup ? "true" : "false", Field::Warmup);
+  line("expectations", expectations.empty() ? std::string{"(none stated)"}
+                                            : std::to_string(expectations.size()) + " stated",
+       Field::Expectations);
+  line("unjudged", std::to_string(unjudged_requirements), Field::Unjudged);
+
+  // Printed as written rather than as parsed, which is the useful form here: this command
+  // exists to show an operator which value is in force, and a spec that will be *rejected*
+  // for naming an unreachable path is exactly the one worth seeing. Parsing would need a
+  // sandbox this command does not require -- `hermit config` must still print with no
+  // --root at all.
+  for (const auto& expectation : expectations) {
+    out << "      " << (expectation.is_string() ? expectation.get<std::string>()
+                                                : expectation.dump())
+        << '\n';
+  }
 
   // Values that are legal, in force, and worth saying out loud. None of these is
   // rejected -- an operator who means them should be able to have them -- but none of

@@ -91,6 +91,7 @@
 #include <hermit/core/sandbox.h>
 #include <hermit/core/tool.h>
 #include <hermit/ollama/client.h>
+#include <hermit/supervisor/judge.h>
 #include <hermit/supervisor/session.h>
 #include <hermit/supervisor/verify.h>
 
@@ -128,6 +129,17 @@ enum class StopReason {
   /// checked. The usual cause is an unreadable directory, which hides a subtree and would
   /// otherwise report every file under it as deleted.
   VerificationFailed,
+
+  /// Expectations were stated with no verifier to judge them against, so the run never
+  /// started.
+  ///
+  /// Kept separate from `VerificationFailed` rather than folded into it, because the two
+  /// send an operator to different places: that one means the filesystem could not be
+  /// read, this one means the caller asked a question and supplied no way to answer it.
+  /// Reported as its own stop rather than ignored, for the reason `LoopOptions::expected`
+  /// gives -- silently not judging is indistinguishable from judging and finding nothing
+  /// wrong.
+  Misconfigured,
 };
 
 std::string_view to_string(StopReason r) noexcept;
@@ -179,6 +191,16 @@ struct TurnEvent {
   /// would need a snapshot between each, which costs a walk per call to answer a question
   /// nothing asks.
   Changeset changes{};
+
+  /// The stated expectations as they stood at the end of this turn. No findings when none
+  /// were stated, or when no verifier was supplied.
+  ///
+  /// Judged every turn rather than only at the end, and deliberately never used to stop
+  /// the run. `Exists("report.md")` goes `Met` the instant an empty file appears, so a
+  /// loop that stopped on a met verdict would cut the model off before it wrote the
+  /// content -- passing the expectation and failing the task. The model decides when it
+  /// is finished; this decides whether that was true.
+  Verdict verdict{};
 };
 
 struct LoopOptions {
@@ -218,6 +240,25 @@ struct LoopOptions {
   /// taken stops the run (`VerificationFailed`) rather than degrading it to an unverified
   /// one that looks identical from outside.
   TreeVerifier* verifier = nullptr;
+
+  /// The post-conditions this run is judged against ([judge.h](./judge.h)). Empty is the
+  /// default and means report-only: the changeset still says what moved, and nothing
+  /// claims whether it was the right thing.
+  ///
+  /// Declaration order is carried through to the verdict, because R7 restates the *first*
+  /// unmet finding -- so a set written in dependency order yields the next actionable step
+  /// rather than an arbitrary one out of a set.
+  ///
+  /// **Requires `verifier`.** Judging reads two snapshots and there are none without one,
+  /// so a non-empty set with no verifier is a configuration error the loop refuses at the
+  /// start rather than a request it can half-honour -- silently not judging would look
+  /// exactly like judging and finding nothing wrong.
+  ExpectationSet expected{};
+
+  /// Requirements the caller knew about and could not state as expectations, carried so
+  /// that "all expectations met" cannot be read as "the work is done". Reaches the verdict
+  /// unchanged; `Verdict::unjudged` says why it has to exist at all.
+  std::size_t unjudged_requirements = 0;
 
   /// Called once per completed turn, after its calls have run. Empty by default.
   ///
@@ -262,6 +303,16 @@ struct LoopOutcome {
   /// post-condition the supervisor has not been given; see verify.h's closing note.
   Changeset net_changes{};
 
+  /// The stated expectations against the whole run -- the last snapshot judged against the
+  /// first, the same pair `net_changes` is derived from.
+  ///
+  /// With no expectations stated there are no findings, and `met()` is then trivially true
+  /// because nothing was asked. That is exactly why this class does not turn the verdict
+  /// into a success flag: "nothing was asked" and "everything asked for holds" are the
+  /// same value here and must not be the same *report*. The frontend has the context to
+  /// tell them apart, so the frontend decides what an exit code says.
+  Verdict verdict{};
+
   /// The model's last prose reply. Empty for every reason except `Answered`, and
   /// legitimately empty even then if the model answered with tool calls to the end.
   std::string final_content;
@@ -273,7 +324,8 @@ struct LoopOutcome {
   std::chrono::milliseconds elapsed{0};
 
   /// Whether the run ended by the model's own choice rather than by hitting a bound.
-  /// Says nothing about whether the work is correct -- see StopReason::Answered.
+  /// Says nothing about whether the work is correct -- see StopReason::Answered, and
+  /// `verdict`, which does say so for the part that was actually stated.
   [[nodiscard]] bool ran_to_completion() const noexcept {
     return reason == StopReason::Answered;
   }
