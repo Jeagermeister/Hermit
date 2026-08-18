@@ -598,6 +598,30 @@ Ordered. Steps 1–5 are Phase 2 and 2.5 as already written; only the tool list 
      look would have reported everything as passing. §6's fail-closed rule has to reach the
      verdict, not only the walk.
 
+4c. ~~**The verdict feeds back — R7's re-invocation**~~ — same numbering rule as 4b.
+   **Done 2026-08-18.** `supervisor/reinvoke.cpp` runs up to `--attempts` total attempts
+   (default 3), each a **fresh session** given the original task plus the one concrete
+   remaining failure from `Verdict::first_unmet()` — never the failed history. The nearest
+   measurement (ROADMAP.md, 2026-08-17): handed a mid-session refusal, three of four models
+   stopped calling tools and addressed the human instead — these models do not reliably
+   self-correct in place, so the correction has to arrive fresh. Three policies, each a
+   test:
+
+   - **One baseline per job** (`LoopOptions::judge_baseline`). Attempt two is judged against
+     the tree attempt one started from, because `preserved:a=b` reads its source bytes from
+     the baseline — re-baselining between attempts would let a wrong first attempt change
+     what the operator's expectation *means* mid-job. Per-turn changesets stay per-attempt:
+     "what this attempt changed" is a claim about this attempt's calls, and inheriting a
+     previous attempt's residue would make it false.
+   - **Infrastructure is never retried.** Transport, a refused session, an unreadable tree
+     and misconfiguration stop the job; an undecidable-only verdict does too, since "one
+     side could not be read" is never sent to the model. A bound cutoff with an unmet
+     finding *is* retried — the judge's evidence is no weaker for the model having been
+     stopped mid-stride.
+   - **The retry prompt carries the task, not just the failure.** "falcon-index.md does not
+     exist" alone does not say what the file should contain; the task does. Composed from
+     the original task every time, so the framing cannot nest by the third attempt.
+
 5. **Clear D7's gate, which is two conditions and not one.**
    ⚠️ Both are required before the programmatic frontend ships; a programmatic caller is exactly
    the one D6's threat model did not cover.

@@ -260,6 +260,24 @@ struct LoopOptions {
   /// unchanged; `Verdict::unjudged` says why it has to exist at all.
   std::size_t unjudged_requirements = 0;
 
+  /// The baseline the verdict is judged against, when the caller holds one from before
+  /// this run. R7's driver ([reinvoke.h](./reinvoke.h)) takes one snapshot per *job* and
+  /// judges every attempt against it, so attempt two's verdict still answers the question
+  /// the operator asked at the start -- `Preserved` reads its source bytes from the
+  /// baseline, which is why re-baselining between attempts would change what an
+  /// expectation *means* mid-job.
+  ///
+  /// Null means this run's own opening snapshot is the baseline, which is right for a
+  /// single run. Like `verifier`, a collaborator with a lifetime: it must outlive the
+  /// loop. Supplying one without a `verifier` is refused as `Misconfigured` -- it
+  /// promises judging that nothing can perform.
+  ///
+  /// Deliberately *not* used to seed the per-turn changesets or `net_changes`: those stay
+  /// measured from this run's own opening snapshot, because "what this attempt changed"
+  /// is a statement about this attempt's model calls, and attributing a previous
+  /// attempt's residue to this one's first turn would be false.
+  const TreeSnapshot* judge_baseline = nullptr;
+
   /// Called once per completed turn, after its calls have run. Empty by default.
   ///
   /// A plain callback rather than a virtual interface or an event queue: D1 makes this

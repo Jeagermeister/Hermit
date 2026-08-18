@@ -186,6 +186,7 @@ add_library(hermit::ollama ALIAS hermit_ollama)
 add_library(hermit_supervisor
   src/hermit/supervisor/judge.cpp
   src/hermit/supervisor/loop.cpp
+  src/hermit/supervisor/reinvoke.cpp
   src/hermit/supervisor/session.cpp
   src/hermit/supervisor/verify.cpp
   src/hermit/supervisor/wire.cpp)
