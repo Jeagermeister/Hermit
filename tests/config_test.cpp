@@ -459,10 +459,11 @@ TEST(Config, EveryValueTakingFlagIsInTheSharedTable) {
   }
 }
 
-TEST(Config, TheSharedTableHoldsExactlyTheNineValueTakingFlags) {
+TEST(Config, TheSharedTableHoldsExactlyTheElevenValueTakingFlags) {
   // Pins the count so a flag silently dropped from the table is noticed even if no
-  // other test happens to exercise it.
-  EXPECT_EQ(hermit::app::flags_taking_a_value().size(), 9u);
+  // other test happens to exercise it. Nine until --expect and --unjudged arrived; this
+  // test is what caught them being added to apply_flags and not to the table.
+  EXPECT_EQ(hermit::app::flags_taking_a_value().size(), 11u);
 }
 
 TEST(Config, NoBooleanFlagIsListedAsValueTaking) {
@@ -839,3 +840,105 @@ TEST(Config, GatingHigherThanTheClampIsNotedButAllowed) {
   EXPECT_TRUE(validate(config, {}));
   EXPECT_NE(config.render().find("note:"), std::string::npos);
 }
+
+namespace {
+
+// --- expectations: carried raw, because parsing one needs a filesystem ---------
+
+/// The spec text of each carried expectation, whichever form it was written in.
+std::vector<std::string> specs(const Config& config) {
+  std::vector<std::string> out;
+  for (const auto& element : config.expectations) {
+    out.push_back(element.is_string() ? element.get<std::string>() : element.dump());
+  }
+  return out;
+}
+
+TEST(Expectations, TheFileFormIsCarriedUnparsedInEitherSpelling) {
+  // Deliberately NOT validated here. "exists:../nope" is nonsense against a sandbox and
+  // this layer says nothing about it: checking a path means resolving it against a root,
+  // which is filesystem work these overlays do not do. The frontend parses it once a
+  // sandbox exists, and that is the only place it can be checked at all.
+  Config config;
+  ASSERT_TRUE(apply_json(config, parse(R"({
+    "expectations": ["exists:index.md", {"kind": "absent", "path": "draft.md"}],
+    "unjudged": 3
+  })"), kBase));
+
+  EXPECT_EQ(specs(config), (std::vector<std::string>{"exists:index.md",
+                                                     R"({"kind":"absent","path":"draft.md"})"}));
+  EXPECT_EQ(config.unjudged_requirements, 3u);
+  EXPECT_EQ(config.origin(Field::Expectations), ConfigSource::File);
+  EXPECT_EQ(config.origin(Field::Unjudged), ConfigSource::File);
+}
+
+TEST(Expectations, TheShapeIsStillCheckedEvenThoughTheContentIsNot) {
+  Config config;
+  EXPECT_FALSE(apply_json(config, parse(R"({"expectations": "exists:x"})"), kBase));
+  EXPECT_FALSE(apply_json(config, parse(R"({"unjudged": -1})"), kBase));
+  EXPECT_FALSE(apply_json(config, parse(R"({"unjudged": "two"})"), kBase));
+}
+
+TEST(Expectations, RepeatedFlagsAccumulateWithinOneCall) {
+  Config config;
+  ASSERT_TRUE(apply(config, {"--expect", "exists:a.md", "--expect", "dir:out"}));
+  EXPECT_EQ(specs(config), (std::vector<std::string>{"exists:a.md", "dir:out"}));
+  EXPECT_EQ(config.origin(Field::Expectations), ConfigSource::Flag);
+}
+
+TEST(Expectations, AFlagReplacesTheFilesSetRatherThanAppendingToIt) {
+  // The precedence rule, and it is the one every other field here follows: the later
+  // source wins outright. Appending would leave a stale expectation in a config file
+  // impossible to get rid of from the command line -- and an expectation nobody can
+  // remove is one that fails every run for a reason the operator did not choose.
+  Config config;
+  ASSERT_TRUE(apply_json(config, parse(R"({"expectations": ["exists:from-file.md"]})"), kBase));
+  ASSERT_TRUE(apply(config, {"--expect", "exists:from-flag.md"}));
+
+  EXPECT_EQ(specs(config), (std::vector<std::string>{"exists:from-flag.md"}));
+  EXPECT_EQ(config.origin(Field::Expectations), ConfigSource::Flag);
+}
+
+TEST(Expectations, AFileSetSurvivesWhenNoExpectationFlagIsGiven) {
+  Config config;
+  ASSERT_TRUE(apply_json(config, parse(R"({"expectations": ["exists:kept.md"]})"), kBase));
+  ASSERT_TRUE(apply(config, {"--model", "m"}));
+  EXPECT_EQ(specs(config), (std::vector<std::string>{"exists:kept.md"}));
+  EXPECT_EQ(config.origin(Field::Expectations), ConfigSource::File);
+}
+
+TEST(Expectations, UnjudgedFollowsTheSamePrecedence) {
+  Config config;
+  ASSERT_TRUE(apply_json(config, parse(R"({"unjudged": 2})"), kBase));
+  EXPECT_EQ(config.unjudged_requirements, 2u);
+  ASSERT_TRUE(apply(config, {"--unjudged", "5"}));
+  EXPECT_EQ(config.unjudged_requirements, 5u);
+  EXPECT_EQ(config.origin(Field::Unjudged), ConfigSource::Flag);
+}
+
+TEST(Expectations, AnEmptyExpectationFlagIsRefused) {
+  Config config;
+  EXPECT_FALSE(apply(config, {"--expect", ""}));
+}
+
+TEST(Expectations, BothFlagsAreRegisteredAsTakingAValue) {
+  // The table `find_config_flag` scans with is separate from apply_flags' if/else, and
+  // config.h warns the two can disagree. They did: --expect was added to one and not the
+  // other, and the mismatch is caught at runtime rather than by the type system. This is
+  // the regression test for that, phrased as what an operator would actually type.
+  Config config;
+  std::vector<std::string_view> positional;
+  const auto args = flags({"--expect", "--root", "instruction"});
+  // "--root" is a flag, so it cannot be --expect's value: the value is refused rather
+  // than swallowed, which is what stops the instruction being eaten silently.
+  EXPECT_FALSE(apply_flags(config, args, positional));
+
+  Config other;
+  const auto good = flags({"--expect", "exists:x.md", "do the thing"});
+  std::vector<std::string_view> words;
+  ASSERT_TRUE(apply_flags(other, good, words));
+  EXPECT_EQ(specs(other), (std::vector<std::string>{"exists:x.md"}));
+  EXPECT_EQ(words, (std::vector<std::string_view>{"do the thing"}));
+}
+
+}  // namespace

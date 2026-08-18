@@ -108,6 +108,8 @@ enum class Field {
   MinimumContext,
   RequireTools,
   Warmup,
+  Expectations,
+  Unjudged,
   kCount,
 };
 
@@ -155,6 +157,28 @@ struct Config {
   /// The file that was read, if one was named. `nullopt` means none was, which is the
   /// normal case rather than a degraded one.
   std::optional<std::filesystem::path> config_file;
+
+  /// R6's post-conditions, carried **unparsed**: elements are either the compact
+  /// `kind:path` strings or the object form, and `app/expect` turns them into an
+  /// `ExpectationSet` once a root is open.
+  ///
+  /// Not parsed here, and the reason is structural rather than lazy. Checking an
+  /// expectation's path means resolving it against a `Sandbox`, and opening one
+  /// canonicalises a root -- filesystem work. These overlays are pure over their inputs,
+  /// which is exactly what lets precedence be tested with no disk, no environment and no
+  /// daemon. So the raw value travels and the frontend parses it at the one point where a
+  /// sandbox exists.
+  ///
+  /// A list, so precedence is *replacement* rather than merge: `--expect` on the command
+  /// line discards the file's set instead of appending to it, the same way `--model`
+  /// discards the file's model. Appending would make a file's stale expectation
+  /// impossible to get rid of without editing the file.
+  nlohmann::json expectations = nlohmann::json::array();
+
+  /// Requirements the caller knows about and cannot state as expectations, carried so
+  /// that "all expectations met" cannot be read as "the work is done". See
+  /// `Verdict::unjudged`.
+  std::size_t unjudged_requirements = 0;
 
   [[nodiscard]] ConfigSource origin(Field f) const noexcept {
     return origins_[static_cast<std::size_t>(f)];

@@ -789,3 +789,307 @@ TEST_F(LoopFixture, AnUnverifiableTreeStopsTheRunRatherThanRunningUnverified) {
   EXPECT_EQ(outcome.turns, 0u) << "the baseline is taken before the first request";
   EXPECT_TRUE(script.seen.empty()) << "and no request went out unverifiable";
 }
+
+// --- R6's judgment half: the stated expectations reach a verdict --------------
+
+using hermit::supervisor::Expectation;
+using hermit::supervisor::Outcome;
+
+TEST_F(LoopFixture, ExpectationsWithNoVerifierAreRefusedBeforeTheModelIsCalled) {
+  // The configuration error, and the assertion that matters is `seen.empty()`: refusing
+  // after a turn would have already spent a generation on a run that could never be
+  // judged. Silently running unjudged is the failure this exists to prevent -- it looks
+  // exactly like judging and finding nothing wrong.
+  LoopOptions options;
+  options.expected = {Expectation::exists("made.txt")};
+  options.verifier = nullptr;
+
+  Script script{.replies = {text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "make it");
+
+  EXPECT_EQ(outcome.reason, StopReason::Misconfigured);
+  EXPECT_EQ(outcome.turns, 0u);
+  EXPECT_TRUE(script.seen.empty()) << "a turn was sent for a run that could never be judged";
+}
+
+TEST_F(LoopFixture, NoExpectationsLeavesTheVerdictEmptyAndTriviallyMet) {
+  // Pinned because it is a trap rather than a feature: `met()` is true here and means
+  // only "nothing was asked". LoopOutcome says why the loop refuses to collapse this into
+  // a success flag, and this is the value that would make such a flag lie.
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+
+  Script script{.replies = {text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "do nothing");
+
+  EXPECT_EQ(outcome.reason, StopReason::Answered);
+  EXPECT_TRUE(outcome.verdict.findings.empty());
+  EXPECT_TRUE(outcome.verdict.met()) << "trivially, and that is the point";
+}
+
+TEST_F(LoopFixture, AnUnmetExpectationIsReportedAndIsWhatRSevenWouldRestate) {
+  // The measured failure R6 exists for: the model announces success over an untouched
+  // tree. The changeset already contradicted the claim; this puts a name to what is
+  // missing, which is what re-invocation needs and a changeset cannot supply.
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+  options.expected = {Expectation::exists("report.md")};
+
+  Script script{.replies = {text_reply("DONE")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "write report.md");
+
+  EXPECT_EQ(outcome.reason, StopReason::Answered) << "the model still answered by choice";
+  EXPECT_TRUE(outcome.net_changes.empty()) << "and changed nothing";
+  EXPECT_FALSE(outcome.verdict.met());
+
+  const auto unmet = outcome.verdict.first_unmet();
+  ASSERT_TRUE(unmet.has_value());
+  EXPECT_EQ(unmet->expectation.path, "report.md");
+  EXPECT_EQ(unmet->outcome, Outcome::Unmet);
+  EXPECT_FALSE(unmet->reason.empty()) << "R7 has nothing to restate without this";
+}
+
+TEST_F(LoopFixture, AMetExpectationNeverStopsTheRunEarly) {
+  // The decision this design turns on, kept as an executable argument rather than a
+  // comment. `Exists("report.md")` goes Met the instant an EMPTY file appears, so a loop
+  // that stopped on a met verdict would cut the model off before it wrote the content --
+  // passing the expectation and failing the task.
+  std::vector<TurnEvent> events;
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+  options.expected = {Expectation::exists("report.md")};
+  options.observer = [&events](const TurnEvent& event) { events.push_back(event); };
+
+  Script script{.replies = {
+                    call_reply({{"write", json{{"path", "report.md"}, {"content", ""}}}}),
+                    call_reply({{"write", json{{"path", "report.md"},
+                                               {"content", "the actual summary\n"}}}}),
+                    text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "summarise notes.txt into report.md");
+
+  ASSERT_EQ(events.size(), 3u) << "the run stopped early on a met verdict";
+  // Asserted through the finding, not through met(): met() is true of an EMPTY finding
+  // set, so a verdict that was never populated would pass a bare met() check and prove
+  // nothing. This is judge.h's own vacuity warning applied to its tests.
+  ASSERT_EQ(events[0].verdict.findings.size(), 1u);
+  EXPECT_EQ(events[0].verdict.findings[0].outcome, Outcome::Met)
+      << "met on an empty file, which is the hazard";
+  EXPECT_EQ(outcome.reason, StopReason::Answered);
+  EXPECT_TRUE(outcome.verdict.met());
+
+  // The empty-file turn passed the expectation, and the file it passed on was empty.
+  // Structure is all this layer claims; judge.h says the semantic half is not covered.
+  const auto content = std::ifstream{tmp_ / "root" / "report.md"};
+  ASSERT_TRUE(content.good());
+}
+
+TEST_F(LoopFixture, EachTurnIsJudgedAgainstTheBaselineNotThePreviousTurn) {
+  // `Preserved` asks what the bytes were *before the run*. Judging turn-to-turn cannot
+  // answer that: by the turn after a move, the original is already gone from the near
+  // side and the question becomes unanswerable rather than merely harder.
+  std::vector<TurnEvent> events;
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+  options.expected = {Expectation::preserved("notes.txt", "archive.txt")};
+  options.observer = [&events](const TurnEvent& event) { events.push_back(event); };
+
+  Script script{.replies = {
+                    call_reply({{"move", json{{"from", "notes.txt"}, {"to", "archive.txt"}}}}),
+                    call_reply({{"read", json{{"paths", json::array({"archive.txt"})}}}}),
+                    text_reply("moved")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "archive notes.txt");
+
+  ASSERT_EQ(events.size(), 3u);
+  ASSERT_EQ(events[0].verdict.findings.size(), 1u);
+  EXPECT_EQ(events[0].verdict.findings[0].outcome, Outcome::Met)
+      << "the move preserved the bytes";
+
+  // The load-bearing one. Two turns after the move, `notes.txt` is gone from the near
+  // side of a turn-to-turn comparison, so judging against the previous snapshot could
+  // only report Undecidable here. Met is a claim only the baseline can support.
+  ASSERT_EQ(events[2].verdict.findings.size(), 1u);
+  EXPECT_EQ(events[2].verdict.findings[0].outcome, Outcome::Met);
+  ASSERT_EQ(outcome.verdict.findings.size(), 1u);
+  EXPECT_EQ(outcome.verdict.findings[0].outcome, Outcome::Met);
+}
+
+TEST_F(LoopFixture, WhatCouldNotBeStatedReachesEveryVerdict) {
+  // The count exists so "all expectations met" cannot be read as "the work is done". It
+  // has to reach the turns as well as the outcome: a caller watching the trace and a
+  // caller reading the result must not be told different things about the same run.
+  std::vector<TurnEvent> events;
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+  options.expected = {Expectation::exists("made.txt")};
+  options.unjudged_requirements = 2;
+  options.observer = [&events](const TurnEvent& event) { events.push_back(event); };
+
+  Script script{.replies = {call_reply({{"write", json{{"path", "made.txt"},
+                                                       {"content", "x"}}}}),
+                            text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "make it");
+
+  ASSERT_EQ(events.size(), 2u);
+  EXPECT_EQ(events[0].verdict.unjudged, 2u);
+  EXPECT_EQ(events[1].verdict.unjudged, 2u);
+  EXPECT_EQ(outcome.verdict.unjudged, 2u);
+  ASSERT_EQ(outcome.verdict.findings.size(), 1u);
+  EXPECT_EQ(outcome.verdict.findings[0].outcome, Outcome::Met)
+      << "met and incomplete at once, which is exactly what unjudged is for";
+}
+
+TEST_F(LoopFixture, ARunCutOffByABoundIsStillJudged) {
+  // Judging only on a clean answer would leave the bounds reporting nothing about the
+  // work -- and a run that ran out of turns is precisely the one a caller is deciding
+  // whether to re-invoke.
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+  options.max_turns = 1;
+  options.expected = {Expectation::exists("never.md")};
+
+  Script script{.replies = {call_reply({{"read", json{{"paths", json::array({"notes.txt"})}}}}),
+                            call_reply({{"read", json{{"paths", json::array({"notes.txt"})}}}})}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "make never.md");
+
+  EXPECT_EQ(outcome.reason, StopReason::TurnBudget);
+  EXPECT_FALSE(outcome.verdict.met());
+  ASSERT_TRUE(outcome.verdict.first_unmet().has_value());
+  EXPECT_EQ(outcome.verdict.first_unmet()->expectation.path, "never.md");
+}
+
+TEST_F(LoopFixture, ATreeThatCouldNotBeReadLeavesEveryExpectationUndecidedNotMet) {
+  // The gap a plain "did we set the field" review does not show. On a stop where the tree
+  // could not be read there is no snapshot to judge, and a verdict left default-
+  // constructed has ZERO findings -- for which `met()` returns true. So the run would
+  // stop, report that it could not read the filesystem, and carry a verdict that says
+  // every expectation passed.
+  //
+  // `Undecidable` is exactly this case and is why Outcome has three states: met() goes
+  // false because the judge never agreed, and first_unmet() stays empty so R7 is not sent
+  // to restate "we could not look" to a model that can do nothing with it.
+  if (::geteuid() == 0) GTEST_SKIP() << "root ignores the permission bits this test sets";
+  std::filesystem::create_directories(tmp_ / "root" / "locked");
+  ::chmod((tmp_ / "root" / "locked").c_str(), 0000);
+
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+  options.expected = {Expectation::exists("report.md")};
+  options.unjudged_requirements = 1;
+
+  Script script{.replies = {text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "write report.md");
+  ::chmod((tmp_ / "root" / "locked").c_str(), 0755);
+
+  ASSERT_EQ(outcome.reason, StopReason::VerificationFailed);
+  EXPECT_FALSE(outcome.verdict.met()) << "an unread tree must never report as passing";
+  ASSERT_EQ(outcome.verdict.findings.size(), 1u);
+  EXPECT_EQ(outcome.verdict.findings[0].outcome, Outcome::Undecidable);
+  EXPECT_FALSE(outcome.verdict.findings[0].reason.empty());
+  EXPECT_FALSE(outcome.verdict.first_unmet().has_value())
+      << "R7 must not be handed \"we could not look\" as a concrete failure";
+  EXPECT_EQ(outcome.verdict.unjudged, 1u);
+}
+
+TEST_F(LoopFixture, AMisconfiguredRunAlsoLeavesEveryExpectationUndecided) {
+  // Same hole on the other early exit: expectations stated with no verifier returns
+  // before finish() is ever reached, so the verdict is default-constructed and met().
+  LoopOptions options;
+  options.expected = {Expectation::exists("made.txt")};
+  options.verifier = nullptr;
+
+  Script script{.replies = {text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "make it");
+
+  ASSERT_EQ(outcome.reason, StopReason::Misconfigured);
+  EXPECT_FALSE(outcome.verdict.met());
+  ASSERT_EQ(outcome.verdict.findings.size(), 1u);
+  EXPECT_EQ(outcome.verdict.findings[0].outcome, Outcome::Undecidable);
+}
+
+TEST_F(LoopFixture, AVerdictIsNotCarriedForwardFromTheLastTreeThatCouldBeRead) {
+  // The dangerous half of the same hole. When the walk fails *mid-run*, `previous` holds
+  // a real snapshot from an earlier turn -- so judging against it produces a fully formed
+  // verdict, with hashes, about a tree that is no longer the one on disk. Here turn 1
+  // genuinely satisfies the expectation, and the run then loses its ability to look.
+  // Reporting Met would be defensible and wrong: what is true is that we stopped knowing.
+  if (::geteuid() == 0) GTEST_SKIP() << "root ignores the permission bits this test sets";
+  std::filesystem::create_directories(tmp_ / "root" / "locked");
+
+  std::vector<TurnEvent> events;
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+  options.expected = {Expectation::exists("report.md")};
+  options.observer = [&](const TurnEvent& event) {
+    events.push_back(event);
+    // Blind the walk only after turn 1 has been seen and judged.
+    ::chmod((tmp_ / "root" / "locked").c_str(), 0000);
+  };
+
+  Script script{.replies = {
+                    call_reply({{"write", json{{"path", "report.md"}, {"content", "ok"}}}}),
+                    call_reply({{"read", json{{"paths", json::array({"report.md"})}}}}),
+                    text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "write report.md");
+  ::chmod((tmp_ / "root" / "locked").c_str(), 0755);
+
+  ASSERT_EQ(outcome.reason, StopReason::VerificationFailed);
+
+  // Turn 1 really did satisfy it, and that finding was true when it was made.
+  ASSERT_GE(events.size(), 1u);
+  ASSERT_EQ(events[0].verdict.findings.size(), 1u);
+  EXPECT_EQ(events[0].verdict.findings[0].outcome, Outcome::Met);
+  EXPECT_TRUE(std::filesystem::exists(tmp_ / "root" / "report.md"));
+
+  // The run's verdict is still not Met, because by the end we could no longer look.
+  EXPECT_FALSE(outcome.verdict.met());
+  ASSERT_EQ(outcome.verdict.findings.size(), 1u);
+  EXPECT_EQ(outcome.verdict.findings[0].outcome, Outcome::Undecidable);
+}

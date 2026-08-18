@@ -29,6 +29,7 @@ std::string unknown_tool(std::string_view name) {
 std::string_view to_string(StopReason r) noexcept {
   switch (r) {
     case StopReason::VerificationFailed: return "the tree could not be verified";
+    case StopReason::Misconfigured:  return "expectations were stated with nothing to judge them against";
     case StopReason::Answered:       return "the model answered without asking for a tool";
     case StopReason::TurnBudget:     return "the turn budget ran out";
     case StopReason::TimeBudget:     return "the wall-clock budget ran out";
@@ -107,6 +108,40 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
   const auto started = Clock::now();
   LoopOutcome outcome;
 
+  // Every stated expectation as a question that was not answered, for the stops where
+  // there is no snapshot to answer it from.
+  //
+  // A default-constructed Verdict will not do, and the reason is a trap rather than a
+  // detail: it has zero findings, and `met()` is true of zero findings. A run that stopped
+  // because it could not read the filesystem would then carry a verdict saying everything
+  // passed. `Undecidable` is the state that exists for exactly this -- `met()` goes false
+  // because the judge never agreed, and `first_unmet()` skips it, so R7 is never handed
+  // "we could not look" as a concrete failure to go and fix.
+  const auto unanswered = [&](std::string_view why) {
+    Verdict verdict;
+    verdict.unjudged = options_.unjudged_requirements;
+    for (const auto& expectation : options_.expected) {
+      verdict.findings.push_back(Finding{.expectation = expectation,
+                                         .outcome = Outcome::Undecidable,
+                                         .reason = std::string{why}});
+    }
+    return verdict;
+  };
+
+  // Refused before anything is sent, because the alternative is a run that looks judged
+  // and is not. There is no snapshot without a verifier and therefore nothing to judge
+  // against, so this is the caller contradicting itself rather than a condition to
+  // recover from.
+  if (!options_.expected.empty() && options_.verifier == nullptr) {
+    outcome.reason = StopReason::Misconfigured;
+    outcome.detail = std::to_string(options_.expected.size()) +
+                     " expectations were stated but no verifier was supplied";
+    outcome.verdict = unanswered("no verifier was supplied to judge against");
+    outcome.elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started);
+    return outcome;
+  }
+
   // The baseline, taken before the model is told anything. Everything the run is later
   // judged to have done is measured against this, so it must precede the first request.
   TreeSnapshot baseline;
@@ -116,6 +151,7 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     if (!taken) {
       outcome.reason = StopReason::VerificationFailed;
       outcome.detail = taken.error().message();
+      outcome.verdict = unanswered(outcome.detail);
       outcome.elapsed =
           std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started);
       return outcome;
@@ -123,6 +159,15 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     baseline = std::move(*taken);
     previous = baseline;
   }
+
+  // The only place `judge` is called. A second call site is how `unjudged_requirements`
+  // would end up on the outcome and missing from the turns, and a verdict that quietly
+  // drops it reports "all met" for a task with a requirement nobody examined.
+  const auto judged = [&](const TreeSnapshot& current) {
+    Verdict verdict = judge(baseline, current, options_.expected);
+    verdict.unjudged = options_.unjudged_requirements;
+    return verdict;
+  };
 
   const auto finish = [&](StopReason reason, std::string detail) {
     outcome.reason = reason;
@@ -133,6 +178,17 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     // including the bounds -- a run that ran out of turns still changed whatever it
     // changed, and that is exactly what a caller deciding whether to re-invoke needs.
     if (options_.verifier != nullptr) outcome.net_changes = diff(baseline, previous);
+    // Judged on every exit path, bounds included: a run that ran out of turns still
+    // either met the stated expectations or did not, and which one it was is exactly what
+    // a caller deciding whether to re-invoke needs. Computed even with no verifier, where
+    // it is an empty set of findings carrying `unjudged` -- the honest reading of "nobody
+    // asked, and here is what could not be asked".
+    //
+    // Except when the tree could not be read. `previous` is then the last snapshot that
+    // succeeded, and judging against it would report a verdict about a tree that is no
+    // longer the one on disk -- with a hash behind it, so it would read as verified.
+    outcome.verdict = reason == StopReason::VerificationFailed ? unanswered(outcome.detail)
+                                                               : judged(previous);
     outcome.elapsed =
         std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started);
     return outcome;
@@ -201,6 +257,10 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
       if (!taken) return taken.error().message();
       event.changes = diff(previous, *taken);
       previous = std::move(*taken);
+      // Against the baseline, not against the previous turn. `Preserved` asks what the
+      // bytes were before the run, and a turn-to-turn comparison cannot answer that --
+      // by the second turn the original is already gone from the near side.
+      event.verdict = judged(previous);
       return std::nullopt;
     };
 

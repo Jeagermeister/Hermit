@@ -94,14 +94,22 @@ after every turn, and `agent` prints a hash-verified changeset that owes nothing
 ([D13](./DECISIONS.md)). A model announcing success over an untouched tree is now contradicted by
 evidence rather than merely doubted.
 
-What is still missing is the *judgment* half. Deciding whether the changes are the right ones
-needs a post-condition, and a free-text instruction does not carry one — so nothing yet re-invokes
-with one concrete remaining failure (R7). The gap is easy to see: asked to write a summary into
-`report.md`, one model created the file containing the literal text `grep -oP '(?<=^).*' notes.txt`.
-Bytes moved, the changeset is accurate, the work is wrong. The MCP frontend is
-[ROUTING.md](./ROUTING.md) §12 step 6.
+**The judgment half landed 2026-08-18.** A free-text instruction carries no post-condition, so one
+is stated alongside it — `--expect exists:falcon-index.md`, or an `expectations` array in a config
+file. Those are judged against the tree after every turn, and `agent` prints the verdict and exits
+3 when something stated is measurably undone. A model that answers `DONE` over an untouched tree
+now produces a named failure — `falcon-index.md does not exist` — rather than only a suspiciously
+empty changeset.
 
-So: the stories' mechanics run; their *guarantees* do not yet. §12 remains the honest odometer.
+Two limits, both deliberate and both visible on screen. **Structure is not meaning:** four
+predicates — exists, absent, bytes-preserved-across-a-move, identical — cover 329 of the 413
+failures recorded in `bench/fsops`, and the residue is named rather than absorbed. `report.md`
+containing the literal text `grep -oP '(?<=^).*' notes.txt` satisfies `exists:report.md` perfectly,
+and that is a real recorded run. **And a verdict is not a re-invocation:** `first_unmet()` returns
+the one concrete remaining failure R7 asks for, but nothing yet feeds it back into a fresh session.
+
+So: the stories' mechanics run, and their structural guarantees now hold. The MCP frontend is
+[ROUTING.md](./ROUTING.md) §12 step 6, and §12 remains the honest odometer.
 
 ## Why native code, honestly
 
@@ -129,8 +137,8 @@ The evidence sits in two places, across two machines and two agent harnesses:
 | `src/hermit/core/` | Library code. `sandbox` (R1), `tool` (D4's interface), `fsio` (the one open primitive), `sha256` (R3's hash), `observed` (the staleness guard), `backup` (R4's archive) |
 | `src/hermit/core/tools/` | The eight Tier 0 tools — read, list, find, grep, hash, write, edit, move — [ROUTING.md](./ROUTING.md) §4's surface, verified per call |
 | `src/hermit/ollama/` | The only layer that speaks HTTP: client and R9 preflight |
-| `src/hermit/supervisor/` | The turn: `loop` (dispatch and the R8 bounds), `session` (history and the context budget), `wire` (the JSON bridge between `core`'s pure data and the model), `verify` (R6's per-turn hash diff of the tree) — [D7](./DECISIONS.md)'s middle layer |
-| `src/hermit/app/` | `config` and `toolset` (composing the eight tools), shared by the CLI and the coming MCP frontend |
+| `src/hermit/supervisor/` | The turn: `loop` (dispatch and the R8 bounds), `session` (history and the context budget), `wire` (the JSON bridge between `core`'s pure data and the model), `verify` (R6's per-turn hash diff of the tree), `judge` (what the stated post-conditions came to) — [D7](./DECISIONS.md)'s middle layer |
+| `src/hermit/app/` | `config`, `toolset` (composing the eight tools) and `expect` (post-conditions, parsed against a root), shared by the CLI and the coming MCP frontend |
 | `src/main.cpp` | `hermit` — manual harness for the pieces that exist |
 | `tests/` | GoogleTest suite; run with `ctest` |
 | `DECISIONS.md` | The hard-to-reverse choices, and what would overturn each |
@@ -165,6 +173,7 @@ hermit resolve   --root DIR <path>...   # R1 path resolution
 hermit preflight --model NAME           # R9 model gates, against a live daemon
 hermit session   --model NAME           # context accounting, against a live model
 hermit agent     --root DIR --model NAME <instruction>   # the loop, end to end
+                 [--expect kind:path]...                 # R6 post-conditions, judged
 hermit config                           # every setting in force, and where it came from
 ```
 
@@ -175,13 +184,27 @@ make — the third is a runaway guard rather than a knob, and calls past it are 
 dropped, because a dropped call reads to the model as still outstanding. It prints, in so many
 words, what it did and did not check. After every turn it takes a hash diff of the whole tree and
 prints what actually moved, owing nothing to the model's reply (R6's observation half, `--no-verify`
-to skip it). What it still does not do is decide whether those were the *right* changes: that needs
-a post-condition a free-text instruction does not carry, so a clean stop plus an accurate changeset
-is evidence, not a verdict -- and a command that implied otherwise would be the more useful lie.
+to skip it).
+
+State a post-condition with `--expect` and it prints a verdict too: each expectation in the order
+written, met or unmet or undecidable, decided from the tree and never from the reply. Exit 3 means
+something stated is undone. With nothing stated it stays report-only, because a clean stop plus an
+accurate changeset is evidence and not a verdict -- and a command that implied otherwise would be
+the more useful lie.
+
+An expectation names a path exactly as the tree spells it from the root: no leading `/`, no `..`,
+and a symlink means the link rather than what it points at. Anything else is refused before the
+model is called, because a mis-spelled path is not a harmless typo here -- it becomes a permanent
+`unmet` that R7 would hand back as a concrete failure to go and fix. A set that contradicts itself
+(`exists:x` beside `absent:x`) is refused for the same reason.
 
 ```bash
 hermit agent --root ~/scratch --model qwen35-agent --max-turns 8 \
   'Read notes.txt and tell me how many lines it has.'
+
+hermit agent --root ~/notes --model qwen35-agent \
+  --expect exists:falcon-index.md --expect preserved:notes.txt=notes.txt \
+  'Index every note that mentions Project Falcon.'
 ```
 
 `resolve` shows how paths land against a sandbox root from a *different* working directory —

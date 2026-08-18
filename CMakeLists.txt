@@ -206,6 +206,7 @@ add_library(hermit::supervisor ALIAS hermit_supervisor)
 # the binaries' link lines rather than a declared dependency.
 add_library(hermit_app
   src/hermit/app/config.cpp
+  src/hermit/app/expect.cpp
   src/hermit/app/toolset.cpp)
 
 target_include_directories(hermit_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
