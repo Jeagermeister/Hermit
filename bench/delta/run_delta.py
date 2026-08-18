@@ -379,12 +379,15 @@ def report() -> int:
     # stamp precisely so this selection can never pick one up by mtime accident.
     stamped = re.compile(r"^delta-armB-\d{8}T\d{6}Z\.json$")
     a_stamped = re.compile(r"^fsops-\d{8}T\d{6}Z\.json$")
+    # Ordered by the stamp in the name, never by mtime: a scrub, copy or checkout
+    # touches mtimes, and an analysis that silently re-pairs against an older sweep
+    # because a file was edited is exactly the accident this selection must not have.
     a_file = max((f for f in (FSOPS / "results").glob("fsops-*.json")
                   if a_stamped.match(f.name)),
-                 key=lambda p: p.stat().st_mtime, default=None)
+                 key=lambda p: p.name, default=None)
     b_file = max((f for f in RESULTS.glob("delta-armB-*.json")
                   if stamped.match(f.name)),
-                 key=lambda p: p.stat().st_mtime, default=None)
+                 key=lambda p: p.name, default=None)
     if a_file is None or b_file is None:
         print("missing results: arm A" if a_file is None else "missing results: arm B")
         return 1
