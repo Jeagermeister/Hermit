@@ -25,6 +25,7 @@
 #include <hermit/core/sandbox.h>
 #include <hermit/ollama/preflight.h>
 #include <hermit/supervisor/loop.h>
+#include <hermit/supervisor/reinvoke.h>
 #include <hermit/supervisor/session.h>
 #include <hermit/supervisor/verify.h>
 
@@ -72,6 +73,10 @@ int usage(std::ostream& to = std::cerr) {
       "agent only:\n"
       "  --max-turns N          turn bound for one run (default 12)\n"
       "  --budget N             wall-clock seconds for one run, checked between turns (R8)\n"
+      "  --attempts N           R7: total attempts at the stated post-conditions, each in\n"
+      "                         a fresh session re-invoked with the one concrete remaining\n"
+      "                         failure (default 3; 1 disables re-invocation; without\n"
+      "                         --expect there is nothing to retry and one attempt runs)\n"
       "  --backups DIR          where undo data goes; must be outside --root (R4)\n"
       "  --no-verify            skip the per-turn hash diff of the tree (R6); verification\n"
       "                         is on by default\n"
@@ -323,6 +328,7 @@ int agent_command(std::span<const std::string_view> args) {
   std::vector<std::string_view> passthrough;
   std::size_t max_turns = 12;
   std::uint64_t budget_seconds = 300;
+  std::size_t attempts = 3;
   std::optional<std::filesystem::path> backup_dir;
   bool verify = true;
 
@@ -365,6 +371,19 @@ int agent_command(std::span<const std::string_view> args) {
         return 2;
       }
       budget_seconds = *parsed;
+      continue;
+    }
+    if (takes_value("--attempts", value)) {
+      // Room for far more than the ~67%->~96% arithmetic ever needs; a three-digit
+      // attempt count is an operator mistake, not a plan. `whole_number` already refuses
+      // zero, so "never run" cannot be asked for.
+      const auto parsed = whole_number(value, 100);
+      if (!parsed) {
+        std::cerr << "error: --attempts needs a whole number from 1 to 100, got: " << value
+                  << '\n';
+        return 2;
+      }
+      attempts = *parsed;
       continue;
     }
     if (takes_value("--backups", value)) {
@@ -502,13 +521,22 @@ int agent_command(std::span<const std::string_view> args) {
   // Terse and specific about the two things these models get wrong most: inventing file
   // contents rather than reading them, and announcing completion without doing the work.
   // Not a fix for either -- R6 is why the supervisor exists -- just not an invitation.
-  auto session = hermit::supervisor::Session::open(
-      options, *client,
-      "You do filesystem work by calling the tools you were given. Read a file before "
-      "describing it; never guess its contents. Make one tool call per step, and stop "
-      "calling tools only when the work is actually finished.");
-  if (!session) {
-    std::cerr << "error: " << session.error().message() << '\n';
+  //
+  // A factory rather than a session, because R7 runs every attempt in a fresh one --
+  // "break larger work into fresh sessions" is the tournament's own recommendation, and
+  // the probe behind it is in ROADMAP.md: handed a mid-session refusal, three of four
+  // models stopped calling tools and addressed the human instead. The probe session below
+  // exists to fail fast and to give the banner real numbers; the driver never sees it.
+  const auto make_session = [&options, &client] {
+    return hermit::supervisor::Session::open(
+        options, *client,
+        "You do filesystem work by calling the tools you were given. Read a file before "
+        "describing it; never guess its contents. Make one tool call per step, and stop "
+        "calling tools only when the work is actually finished.");
+  };
+  const auto probe = make_session();
+  if (!probe) {
+    std::cerr << "error: " << probe.error().message() << '\n';
     return 1;
   }
 
@@ -555,14 +583,24 @@ int agent_command(std::span<const std::string_view> args) {
   hermit::supervisor::TreeVerifier verifier{*box};
   if (verify) loop_options.verifier = &verifier;
 
-  hermit::supervisor::AgentLoop loop{*client, tools->registry(), *box, loop_options};
+  hermit::supervisor::ReinvokeOptions reinvoke_options;
+  reinvoke_options.attempts = attempts;
+  // The first attempt's banner is the run header below; a retry announces itself with
+  // the one sentence the model is being re-invoked over, before its turns start.
+  reinvoke_options.on_attempt = [](std::size_t attempt, std::size_t of,
+                                   const hermit::supervisor::Finding* retrying) {
+    if (retrying == nullptr) return;
+    std::cout << "\nattempt " << attempt << " of " << of
+              << " -- re-invoking with the one concrete remaining failure (R7):\n"
+              << "  " << retrying->reason << "\n\n";
+  };
 
   std::cout << "root    : " << box->root() << '\n'
             << "backups : " << *backup_dir << "  (outside the root, R4)\n"
             << "model   : " << config->model << '\n'
-            << "window  : " << session->window() << " tokens, " << session->prompt_budget()
+            << "window  : " << probe->window() << " tokens, " << probe->prompt_budget()
             << " for the prompt\n"
-            << "tools   : " << loop.definitions().size() << " offered\n"
+            << "tools   : " << tools->registry().tools().size() << " offered\n"
             << "bounds  : " << max_turns << " turns, " << budget_seconds << "s, "
             << loop_options.max_calls_per_turn << " calls/turn\n"
             << "verify  : " << (verify ? "per-turn hash diff of the tree (R6)" : "off")
@@ -572,11 +610,39 @@ int agent_command(std::span<const std::string_view> args) {
                                          : std::to_string(expectations.set.size()) +
                                                " post-conditions, " +
                                                std::to_string(expectations.unjudged) +
-                                               " unjudged")
+                                               " unjudged, up to " +
+                                               std::to_string(attempts) + " attempts (R7)")
             << "\n\n"
             << "instruction: " << instruction << "\n\n";
 
-  const auto outcome = loop.run(*session, instruction);
+  const auto job = hermit::supervisor::reinvoke(*client, tools->registry(), *box,
+                                                loop_options, reinvoke_options, make_session,
+                                                instruction);
+  if (!job.error.empty()) {
+    std::cerr << "error: " << job.error << '\n';
+    return 1;
+  }
+  const auto& outcome = job.last();
+
+  // The job at a glance, one line per attempt, before the detail of the final one. Only
+  // when R7 actually re-invoked -- a single attempt's story is already told below.
+  if (job.attempts.size() > 1) {
+    std::cout << "\nre-invocation (R7): " << job.attempts.size() << " of " << attempts
+              << " attempts used\n";
+    for (std::size_t i = 0; i < job.attempts.size(); ++i) {
+      const auto& made = job.attempts[i].outcome;
+      std::cout << "  attempt " << (i + 1) << ": ";
+      if (const auto unmet = made.verdict.first_unmet()) {
+        std::cout << "unmet -- " << unmet->reason;
+      } else if (made.verdict.met()) {
+        std::cout << "met";
+      } else {
+        std::cout << "undecidable";
+      }
+      std::cout << "  (" << made.turns << (made.turns == 1 ? " turn, " : " turns, ")
+                << made.elapsed.count() << " ms)\n";
+    }
+  }
 
   std::cout << "\nstopped : " << hermit::supervisor::to_string(outcome.reason) << '\n'
             << "turns   : " << outcome.turns << " of " << max_turns << '\n'
@@ -589,7 +655,14 @@ int agent_command(std::span<const std::string_view> args) {
   }
 
   if (verify) {
-    std::cout << "\nwhat actually changed (hash-verified, R6):\n";
+    // With one attempt this is the whole run's effect. With several it is the final
+    // attempt's only -- each attempt's changes were printed under its own turns, and
+    // claiming run-level truth for an attempt-level measurement would be false. The
+    // *verdict* below is job-level either way: every attempt is judged against the one
+    // baseline taken before the first.
+    std::cout << (job.attempts.size() > 1
+                      ? "\nwhat the final attempt changed (hash-verified, R6):\n"
+                      : "\nwhat actually changed (hash-verified, R6):\n");
     if (outcome.net_changes.empty()) {
       std::cout << "  nothing\n";
     } else {

@@ -101,12 +101,20 @@ file. Those are judged against the tree after every turn, and `agent` prints the
 now produces a named failure — `falcon-index.md does not exist` — rather than only a suspiciously
 empty changeset.
 
-Two limits, both deliberate and both visible on screen. **Structure is not meaning:** four
+**And the verdict now feeds back — R7, done the same day.** An unmet verdict no longer just exits
+3: `agent` re-invokes, up to three attempts by default (`--attempts`), each a **fresh session**
+handed the original task plus the one concrete remaining failure. Every attempt is judged against
+the one baseline taken before the first, so a wrong first attempt cannot change what the stated
+expectations mean mid-job. Undecidable-only verdicts and infrastructure failures are never retried —
+R7 exists for model inconsistency, nothing else. This is the ~67% → ~96% arithmetic the
+tournaments recommended, wired end to end; *measuring* it as a delta is `bench/delta`'s
+reliability experiment, still ahead.
+
+One limit remains, deliberate and visible on screen. **Structure is not meaning:** four
 predicates — exists, absent, bytes-preserved-across-a-move, identical — cover 329 of the 413
 failures recorded in `bench/fsops`, and the residue is named rather than absorbed. `report.md`
 containing the literal text `grep -oP '(?<=^).*' notes.txt` satisfies `exists:report.md` perfectly,
-and that is a real recorded run. **And a verdict is not a re-invocation:** `first_unmet()` returns
-the one concrete remaining failure R7 asks for, but nothing yet feeds it back into a fresh session.
+and that is a real recorded run.
 
 So: the stories' mechanics run, and their structural guarantees now hold. The MCP frontend is
 [ROUTING.md](./ROUTING.md) §12 step 6, and §12 remains the honest odometer.

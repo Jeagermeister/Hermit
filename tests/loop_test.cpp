@@ -1093,3 +1093,68 @@ TEST_F(LoopFixture, AVerdictIsNotCarriedForwardFromTheLastTreeThatCouldBeRead) {
   ASSERT_EQ(outcome.verdict.findings.size(), 1u);
   EXPECT_EQ(outcome.verdict.findings[0].outcome, Outcome::Undecidable);
 }
+
+// --- the judge-baseline seam (what R7's driver rides on) ----------------------
+
+TEST_F(LoopFixture, AJudgeBaselineWithoutAVerifierIsMisconfigured) {
+  // The pointer promises judging semantics -- an R7 attempt judged against the tree the
+  // job started from -- and there is no judging without snapshots. Silently ignoring it
+  // would re-baseline the caller's job, which is the same shape of failure as silently
+  // not judging.
+  TreeVerifier verifier{*sandbox_};
+  const auto held = verifier.snapshot();
+  ASSERT_TRUE(held.has_value());
+
+  LoopOptions options;
+  options.judge_baseline = &*held;  // and, deliberately, no verifier
+
+  Script script{};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "anything");
+
+  EXPECT_EQ(outcome.reason, StopReason::Misconfigured);
+  EXPECT_TRUE(script.seen.empty())
+      << "a model turn was spent on a run that contradicts itself";
+}
+
+TEST_F(LoopFixture, TheVerdictIsJudgedAgainstASuppliedBaselineNotTheRunsOwn) {
+  // Vacuity is what makes the two baselines distinguishable from outside: the file
+  // exists when *this run* opens, so judged against the run's own snapshot the finding
+  // is met vacuously ("already true before the run"). Judged against the older
+  // caller-held baseline -- taken before the file existed -- it is met on merit. R7's
+  // driver depends on exactly this: attempt two's verdict must credit attempt one's
+  // work rather than call it already done.
+  TreeVerifier verifier{*sandbox_};
+  const auto before = verifier.snapshot();
+  ASSERT_TRUE(before.has_value());
+
+  std::ofstream{tmp_ / "root" / "made-before.txt"} << "an earlier attempt made this\n";
+
+  LoopOptions options;
+  options.verifier = &verifier;
+  options.judge_baseline = &*before;
+  options.expected = {Expectation::exists("made-before.txt")};
+
+  Script script{.replies = {text_reply("nothing left to do")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "make made-before.txt");
+
+  ASSERT_EQ(outcome.verdict.findings.size(), 1u);
+  EXPECT_EQ(outcome.verdict.findings[0].outcome, Outcome::Met);
+  EXPECT_FALSE(outcome.verdict.findings[0].vacuous)
+      << "judged against the run's own opening snapshot, not the supplied baseline";
+
+  // The attribution half of the same policy: the supplied baseline changes what is
+  // *judged*, never what is *reported changed*. This run touched nothing, so its net
+  // changeset is empty -- were `net_changes` diffed from the supplied baseline instead,
+  // `made-before.txt` would appear here as Created, crediting this run with work that
+  // predates it.
+  EXPECT_TRUE(outcome.net_changes.empty())
+      << "a previous attempt's residue was attributed to this run";
+}

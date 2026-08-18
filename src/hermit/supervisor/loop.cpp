@@ -29,7 +29,7 @@ std::string unknown_tool(std::string_view name) {
 std::string_view to_string(StopReason r) noexcept {
   switch (r) {
     case StopReason::VerificationFailed: return "the tree could not be verified";
-    case StopReason::Misconfigured:  return "expectations were stated with nothing to judge them against";
+    case StopReason::Misconfigured:  return "the run was configured to judge with nothing to judge against";
     case StopReason::Answered:       return "the model answered without asking for a tool";
     case StopReason::TurnBudget:     return "the turn budget ran out";
     case StopReason::TimeBudget:     return "the wall-clock budget ran out";
@@ -142,12 +142,28 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     return outcome;
   }
 
+  // The companion refusal. A caller-held baseline exists to be judged against -- attempt
+  // two of an R7 job judged against the tree attempt one started from -- and there is no
+  // judging without a verifier. Ignoring it would silently re-baseline the caller's job,
+  // which is the same shape of failure as silently not judging.
+  if (options_.judge_baseline != nullptr && options_.verifier == nullptr) {
+    outcome.reason = StopReason::Misconfigured;
+    outcome.detail = "a judge baseline was supplied but no verifier";
+    outcome.verdict = unanswered("no verifier was supplied to judge against");
+    outcome.elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started);
+    return outcome;
+  }
+
   // The baseline, taken before the model is told anything. Everything the run is later
   // judged to have done is measured against this, so it must precede the first request.
   TreeSnapshot baseline;
   TreeSnapshot previous;
   if (options_.verifier != nullptr) {
-    auto taken = options_.verifier->snapshot();
+    // A caller-held job baseline seeds the walk so unchanged files carry their hashes
+    // forward instead of being re-read; it does not replace the opening snapshot, for the
+    // attribution reason `LoopOptions::judge_baseline` states.
+    auto taken = options_.verifier->snapshot(options_.judge_baseline);
     if (!taken) {
       outcome.reason = StopReason::VerificationFailed;
       outcome.detail = taken.error().message();
@@ -164,7 +180,10 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
   // would end up on the outcome and missing from the turns, and a verdict that quietly
   // drops it reports "all met" for a task with a requirement nobody examined.
   const auto judged = [&](const TreeSnapshot& current) {
-    Verdict verdict = judge(baseline, current, options_.expected);
+    // The caller's job baseline when one was supplied, this run's own otherwise.
+    const TreeSnapshot& against =
+        options_.judge_baseline != nullptr ? *options_.judge_baseline : baseline;
+    Verdict verdict = judge(against, current, options_.expected);
     verdict.unjudged = options_.unjudged_requirements;
     return verdict;
   };

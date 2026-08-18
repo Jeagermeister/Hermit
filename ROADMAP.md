@@ -627,12 +627,27 @@ model calling this as a tool.
       example is exactly that. Counted as `Verdict::unjudged` and stated with `--unjudged N`
       so a verdict cannot read as "the work is done", which is honest bookkeeping rather
       than an answer.
-- [ ] **Re-invocation** with one concrete remaining failure, per the tournament recommendation.
-      **Unblocked 2026-08-18**: `Verdict::first_unmet()` now returns that failure, in
-      declaration order and already phrased as a sentence — so an expectation set written in
-      dependency order yields the next actionable step rather than an arbitrary one. It skips
-      `Undecidable` on purpose. What remains is the re-invocation itself: nothing yet feeds
-      that finding back into a fresh session.
+- [x] ~~**Re-invocation** with one concrete remaining failure~~ — **done 2026-08-18**,
+      `supervisor/reinvoke.cpp`, later the same day as the judge wiring because that is what
+      unblocked it. Up to `--attempts` total attempts (default 3 — the ~67%→~96% arithmetic),
+      each a fresh session given the original task plus `Verdict::first_unmet()`'s sentence,
+      composed from the original task every time so the framing cannot nest on the third try.
+      Three policies live in the driver rather than the loop, each pinned by a test:
+      - **One baseline per job** (`LoopOptions::judge_baseline`). Attempt two is judged
+        against the tree attempt one started from: `preserved:a=b` reads its source bytes
+        from the baseline, so re-baselining between attempts would let a wrong first attempt
+        change what the operator's expectation *means* mid-job. The recovery case — attempt
+        one moves the source to the wrong place, attempt two finishes the move, verdict Met —
+        is a test, and under per-attempt baselines it would have collapsed to Undecidable,
+        unrecoverable by any model. Per-turn changesets stay per-attempt, because "what this
+        attempt changed" is a claim about this attempt's model calls.
+      - **Fresh session per attempt**, never the failed history. The measured support below
+        is why.
+      - **Infrastructure is never retried.** Transport, a refused session, an unreadable tree
+        and misconfiguration stop the job, and an undecidable-only verdict does too —
+        restating "one side could not be read" spends a model run on a sentence it cannot act
+        on. A bound cutoff with an unmet finding *is* retried: the judge's evidence is no
+        weaker for the model having been stopped mid-stride.
       **Measured support, 2026-08-17**: handed a refusal as a tool result, only `qwen3.5-9b` used
       it to correct itself. `llama3.2-3b`, `hermes3-8b` and `gemma4-e4b` all stopped calling tools
       and addressed the human instead — *"Please provide me with the path of the file"*. Stated at
