@@ -13,8 +13,9 @@
 // file never overwrite an earlier backup, and a directory reused across
 // sessions continues numbering after the generations already in it. Order
 // generations by NUMERIC value, not lexicographically: names are zero-padded
-// to four digits and keep growing past 9999. Enumeration and restore are the
-// supervisor's side (Phase 3); this type only ever adds.
+// to four digits and keep growing past 9999. Enumeration, restore and
+// retention are the supervisor's side (supervisor/undo.h); this type only
+// ever adds.
 //
 // Backup paths are host-absolute and must never reach a model-facing result:
 // SandboxPath::relative() exists so the host layout does not leak, and the
@@ -26,11 +27,52 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <optional>
 #include <string_view>
 
 #include <hermit/core/fsio.h>
 
 namespace hermit {
+
+/// Dropped at the store root the first time anything is preserved. Its
+/// existence is the assertion "hermit owns this directory's numeric children":
+/// retention (supervisor/undo.h) is destructive and runs automatically on an
+/// operator-supplied path, so it refuses to delete anything from a directory
+/// that lacks this file -- `--backups` pointed at the wrong place must never
+/// prune a directory that merely has numeric names in it.
+///
+/// The marker also carries the store's **numbering floor**: a line `next N`
+/// (absent until retention first removes something) below the banner line.
+/// Scanning the directory recovers the sequence only while the newest
+/// generation is still on disk; retention that removes *everything* would let
+/// the next preservation restart at 0000 and hand a fresh backup a pruned
+/// one's identity in the listing -- exactly what D14 promises cannot happen.
+/// So whoever deletes a generation raises the floor FIRST (undo.cpp does),
+/// and `begin` numbers from `max(scan, floor)`. A floor that cannot be parsed
+/// is treated as absent: the generations a crash left behind still carry the
+/// scan, and a corrupt second line must not brick the store.
+inline constexpr std::string_view kStoreMarker = ".hermit-store";
+
+/// The marker's fixed first line.
+inline constexpr std::string_view kStoreBanner = "hermit backup store";
+
+/// The numbering floor recorded in `dir`'s marker, if one is set and parseable.
+[[nodiscard]] std::optional<std::uint64_t> read_store_floor(
+    const std::filesystem::path& dir);
+
+/// Record `next` as the numbering floor, never lowering an existing one.
+/// Plain rewrite, not atomic: single-threaded (D1), and a torn write parses
+/// as "no floor", which the scan covers as long as the caller raises the
+/// floor BEFORE deleting the generations that carry it.
+[[nodiscard]] std::expected<void, IoError> raise_store_floor(
+    const std::filesystem::path& dir, std::uint64_t next);
+
+/// A directory name that is a generation number: all digits AND within range.
+/// A 25-digit name is numeric but can never have been written by
+/// `generation_name`, so it is not a generation -- parsing it modulo 2^64
+/// would collide it with a real one in listings and scans.
+[[nodiscard]] std::optional<std::uint64_t> parse_generation_name(
+    std::string_view name);
 
 class BackupStore {
  public:

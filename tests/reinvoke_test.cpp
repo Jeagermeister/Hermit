@@ -426,3 +426,156 @@ TEST_F(ReinvokeFixture, TheJobBaselineHoldsAcrossAttempts) {
   ASSERT_EQ(job.last().verdict.findings.size(), 1u);
   EXPECT_EQ(job.last().verdict.findings[0].outcome, Outcome::Met);
 }
+
+// --- meaning after structure (semantic.h, wired through the driver) -----------
+
+TEST_F(ReinvokeFixture, MeaningIsJudgedOnlyAfterStructurePasses) {
+  // Attempt one leaves the structural expectation unmet; the semantic judge must not
+  // be consulted, and the criterion must still appear in the verdict -- as Undecidable,
+  // "not judged" -- so nothing the operator stated silently drops out of the report.
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+  options.expected = {Expectation::exists("made.txt")};
+
+  Script script{.replies = {text_reply("DONE")}};
+  Script judge_script{};  // must never be consulted
+
+  ReinvokeOptions retries;
+  retries.attempts = 1;
+  retries.semantic = {Expectation::satisfies("made.txt", "a greeting")};
+  retries.judge = hermit::supervisor::SemanticJudge{
+      .chat = judge_script.fn(), .model = "judge", .num_ctx = 4096};
+
+  const auto job = reinvoke(script.fn(), tools_->registry(), *sandbox_, std::move(options),
+                            retries, counted_factory(), "make a file");
+
+  EXPECT_TRUE(job.error.empty()) << job.error;
+  ASSERT_EQ(job.attempts.size(), 1u);
+  EXPECT_TRUE(judge_script.seen.empty()) << "the judge ran on a structurally failed attempt";
+  ASSERT_EQ(job.last().verdict.findings.size(), 2u);
+  EXPECT_EQ(job.last().verdict.findings[0].outcome, Outcome::Unmet);
+  EXPECT_EQ(job.last().verdict.findings[1].outcome, Outcome::Undecidable);
+  EXPECT_NE(job.last().verdict.findings[1].reason.find("not judged"), std::string::npos);
+}
+
+TEST_F(ReinvokeFixture, AnUnmetJudgmentDrivesTheRetryAndAMetOneStopsIt) {
+  // The E1 residue, closed end to end: structure holds on the first attempt, the judge
+  // reads the bytes and says no, and its sentence -- not a hash's -- is what the fresh
+  // session is re-invoked with.
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+  options.expected = {Expectation::exists("summary.md")};
+
+  Script script{.replies = {call_reply({{"write", json{{"path", "summary.md"},
+                                                       {"content", "grep -c . notes.txt"}}}}),
+                            text_reply("done"),
+                            text_reply("rewrote it")}};
+  Script judge_script{
+      .replies = {[] {
+                    ChatReply r;
+                    r.content = json{{"satisfied", false},
+                                     {"reason", "summary.md holds a shell command, not "
+                                                "a summary"}}.dump();
+                    r.finish_reason = "stop";
+                    return r;
+                  }(),
+                  [] {
+                    ChatReply r;
+                    r.content = json{{"satisfied", true}, {"reason", ""}}.dump();
+                    r.finish_reason = "stop";
+                    return r;
+                  }()}};
+
+  ReinvokeOptions retries;
+  retries.attempts = 3;
+  retries.semantic = {Expectation::satisfies("summary.md", "a prose summary")};
+  retries.judge = hermit::supervisor::SemanticJudge{
+      .chat = judge_script.fn(), .model = "judge", .num_ctx = 4096};
+
+  const auto job = reinvoke(script.fn(), tools_->registry(), *sandbox_, std::move(options),
+                            retries, counted_factory(), "summarise the notes");
+
+  EXPECT_TRUE(job.error.empty()) << job.error;
+  ASSERT_EQ(job.attempts.size(), 2u);
+  EXPECT_EQ(judge_script.seen.size(), 2u) << "once per structurally met attempt";
+
+  // The retry was composed from the judge's sentence.
+  const std::string& second = job.attempts[1].instruction;
+  EXPECT_NE(second.find("summarise the notes"), std::string::npos);
+  EXPECT_NE(second.find("holds a shell command"), std::string::npos);
+
+  ASSERT_EQ(job.last().verdict.findings.size(), 2u);
+  EXPECT_TRUE(job.last().verdict.met());
+}
+
+TEST_F(ReinvokeFixture, CriteriaWithNoJudgeRefuseTheJobBeforeAnyModelRun) {
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+
+  Script script{};
+  ReinvokeOptions retries;
+  retries.semantic = {Expectation::satisfies("summary.md", "a prose summary")};
+  // no judge
+
+  const auto job = reinvoke(script.fn(), tools_->registry(), *sandbox_, std::move(options),
+                            retries, counted_factory(), "summarise the notes");
+
+  EXPECT_FALSE(job.error.empty());
+  EXPECT_NE(job.error.find("no semantic judge"), std::string::npos) << job.error;
+  EXPECT_TRUE(job.attempts.empty());
+  EXPECT_EQ(sessions_opened_, 0u);
+}
+
+TEST_F(ReinvokeFixture, AStructuralExpectationInTheSemanticSetIsRefused) {
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+
+  Script script{};
+  Script judge_script{};
+  ReinvokeOptions retries;
+  retries.semantic = {Expectation::exists("summary.md")};
+  retries.judge = hermit::supervisor::SemanticJudge{
+      .chat = judge_script.fn(), .model = "judge", .num_ctx = 4096};
+
+  const auto job = reinvoke(script.fn(), tools_->registry(), *sandbox_, std::move(options),
+                            retries, counted_factory(), "summarise the notes");
+
+  EXPECT_FALSE(job.error.empty());
+  EXPECT_NE(job.error.find("structural"), std::string::npos) << job.error;
+  EXPECT_TRUE(job.attempts.empty());
+}
+
+TEST_F(ReinvokeFixture, AnUnreachableJudgeIsReportedNotRetried) {
+  // The attempt itself succeeded; only the judge could not run. Undecidable is never
+  // retried (a retry would need the same dead daemon), and it is not a job error --
+  // the verdict simply says the criterion went undecided.
+  TreeVerifier verifier{*sandbox_};
+  LoopOptions options;
+  options.verifier = &verifier;
+  options.expected = {Expectation::exists("made.txt")};
+
+  Script script{.replies = {call_reply({{"write", json{{"path", "made.txt"},
+                                                       {"content", "hello"}}}}),
+                            text_reply("done")}};
+  Script judge_script{};  // empty: reports Unreachable when consulted
+
+  ReinvokeOptions retries;
+  retries.attempts = 3;
+  retries.semantic = {Expectation::satisfies("made.txt", "a greeting")};
+  retries.judge = hermit::supervisor::SemanticJudge{
+      .chat = judge_script.fn(), .model = "judge", .num_ctx = 4096};
+
+  const auto job = reinvoke(script.fn(), tools_->registry(), *sandbox_, std::move(options),
+                            retries, counted_factory(), "make a file");
+
+  EXPECT_TRUE(job.error.empty()) << job.error;
+  ASSERT_EQ(job.attempts.size(), 1u);
+  ASSERT_EQ(job.last().verdict.findings.size(), 2u);
+  EXPECT_EQ(job.last().verdict.findings[0].outcome, Outcome::Met);
+  EXPECT_EQ(job.last().verdict.findings[1].outcome, Outcome::Undecidable);
+  EXPECT_FALSE(job.last().verdict.met());
+}

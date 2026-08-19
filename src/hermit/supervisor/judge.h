@@ -29,7 +29,9 @@
 //   reply / script output           40    9.7%   not the filesystem at all
 //
 // Four predicates cover 329 of 413 observed failures. The residue is real and is named
-// rather than absorbed -- see `Verdict::unjudged`.
+// rather than absorbed: content semantics became `satisfies:` (decided by a model, in
+// [semantic.h](./semantic.h), D15); reply markers remain `Verdict::unjudged`, because
+// D13 keeps the reply off the verification path.
 //
 // --- Snapshots, not changesets ----------------------------------------------
 //
@@ -95,6 +97,15 @@ enum class ExpectationKind {
   /// the same wrong content. Only `Preserved(config.ini -> config.ini)` catches that.
   /// Neither predicate implies the other; the pair is what closes R3's case.
   Identical,
+
+  /// The content at `path` satisfies `criterion` -- an open-vocabulary claim about
+  /// meaning that no pair of snapshots decides. `judge()` answers it Undecidable,
+  /// deliberately: the semantic judge ([semantic.h](./semantic.h)) is what decides it,
+  /// from the file's bytes as they stand, once per attempt, after the structural
+  /// verdict is fully met (D15). It exists in this enum because a criterion is still an
+  /// expectation -- it renders in the same verdict, feeds R7 the same way, and shares
+  /// the parse layer's path gate.
+  Satisfies,
 };
 
 /// One thing a caller states should be true when the work is done.
@@ -110,6 +121,9 @@ struct Expectation {
   /// `Preserved`: the destination. `Identical`: the second side. Empty otherwise.
   std::string other{};
 
+  /// `Satisfies` only: the operator's stated requirement on the content, free text.
+  std::string criterion{};
+
   /// `Exists` only.
   bool must_be_dir = false;
 
@@ -117,6 +131,7 @@ struct Expectation {
   [[nodiscard]] static Expectation absent(std::string path);
   [[nodiscard]] static Expectation preserved(std::string from, std::string to);
   [[nodiscard]] static Expectation identical(std::string a, std::string b);
+  [[nodiscard]] static Expectation satisfies(std::string path, std::string criterion);
 
   /// How the expectation reads in a report: "final.md exists", "draft_v1.md is absent".
   [[nodiscard]] std::string render() const;

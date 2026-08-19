@@ -35,10 +35,26 @@ namespace {
 /// only be built *after* the job baseline exists -- LoopOptions carries the pointer.
 using LoopFactory = std::function<AgentLoop(const LoopOptions&)>;
 
-ReinvokeOutcome drive(const LoopFactory& make_loop, LoopOptions loop_options,
-                      const ReinvokeOptions& options, const SessionFactory& make_session,
-                      const std::string& task) {
+ReinvokeOutcome drive(const LoopFactory& make_loop, const Sandbox& sandbox,
+                      LoopOptions loop_options, const ReinvokeOptions& options,
+                      const SessionFactory& make_session, const std::string& task) {
   ReinvokeOutcome result;
+
+  // Fail closed before any model run: criteria with no judge would silently degrade to
+  // structure-only supervision, which is exactly the "looks verified, is not" shape this
+  // codebase keeps refusing.
+  if (!options.semantic.empty() && !options.judge) {
+    result.error = "the job states satisfies: criteria but no semantic judge was configured";
+    return result;
+  }
+  for (const Expectation& e : options.semantic) {
+    if (e.kind != ExpectationKind::Satisfies) {
+      result.error = "\"" + e.render() +
+                     "\" is a structural expectation and belongs in LoopOptions::expected, "
+                     "not in ReinvokeOptions::semantic";
+      return result;
+    }
+  }
 
   // The job baseline, taken once and judged against by every attempt. Only when judging
   // is actually on: without expectations there is nothing to hold stable, and without a
@@ -82,8 +98,27 @@ ReinvokeOutcome drive(const LoopFactory& make_loop, LoopOptions loop_options,
     record.outcome = loop.run(*session, record.instruction);
     result.attempts.push_back(std::move(record));
 
-    const LoopOutcome& done = result.attempts.back().outcome;
+    LoopOutcome& done = result.attempts.back().outcome;
     if (infrastructure(done.reason)) break;
+
+    // Meaning after structure (header). The criteria are appended to the attempt's own
+    // verdict either way, so every report shows everything the operator stated; when
+    // structure did not pass they are Undecidable, which first_unmet() skips -- the
+    // retry goes to the structural finding, which is the progression the policy wants.
+    if (!options.semantic.empty()) {
+      if (done.verdict.met()) {
+        for (Finding& f : judge_semantics(*options.judge, sandbox, options.semantic)) {
+          done.verdict.findings.push_back(std::move(f));
+        }
+      } else {
+        for (const Expectation& e : options.semantic) {
+          done.verdict.findings.push_back(
+              Finding{.expectation = e,
+                      .outcome = Outcome::Undecidable,
+                      .reason = "not judged: the structural verdict did not pass"});
+        }
+      }
+    }
 
     retrying = done.verdict.first_unmet();
     if (!retrying) break;
@@ -117,7 +152,7 @@ ReinvokeOutcome reinvoke(const ollama::Client& client, ToolRegistry& registry,
                          const std::string& task) {
   return drive(
       [&](const LoopOptions& built) { return AgentLoop{client, registry, sandbox, built}; },
-      std::move(loop_options), options, make_session, task);
+      sandbox, std::move(loop_options), options, make_session, task);
 }
 
 ReinvokeOutcome reinvoke(ChatFn chat, ToolRegistry& registry, const Sandbox& sandbox,
@@ -125,7 +160,7 @@ ReinvokeOutcome reinvoke(ChatFn chat, ToolRegistry& registry, const Sandbox& san
                          const SessionFactory& make_session, const std::string& task) {
   return drive(
       [&](const LoopOptions& built) { return AgentLoop{chat, registry, sandbox, built}; },
-      std::move(loop_options), options, make_session, task);
+      sandbox, std::move(loop_options), options, make_session, task);
 }
 
 }  // namespace hermit::supervisor

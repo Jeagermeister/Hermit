@@ -525,10 +525,12 @@ Not in the roadmap's tool list, and this project exists partly because a tournam
    supervisor concern under §6, and the supervisor is the unrestricted parent. Backups may
    therefore live anywhere convenient, including outside the root, because the confined process
    cannot address them.
-   **Retention and how undo is invoked remain undesigned, and they are what still blocks this.**
+   **Designed and built 2026-08-18** ([D14](./DECISIONS.md)): `hermit undo` lists the store's
+   generations and restores by explicit flag, restore preserves what it overwrites, and
+   retention (72h default, `--keep-hours`) prunes at agent start behind a store-marker check.
    Every other mutating tool overwrites content a snapshot holds; `delete` is the only one whose
-   failure is irreversible if that story is missing. **This is the load-bearing condition** —
-   model confidence without working undo only means being wrong less often.
+   failure is irreversible if that story is missing. **This condition now holds** — what a
+   `delete` destroys would be preserved and restorable. Condition 2 below is what still blocks.
 2. **A retested `06_selective_delete` holds for the model being built against** — on the current
    harness, with more than 3 repeats and a `--deterministic` pass. SWEEP2 §4
    demonstrates that per-cell numbers at n=3 are not capability: the control moved 3/3 → 0/3 on

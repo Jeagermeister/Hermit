@@ -930,6 +930,130 @@ measurement rather than an assumption.
 
 ---
 
+## D14 — Undo is list-first and never destructive; retention is short and automatic
+
+**Decided 2026-08-18**, closing what ROUTING.md §11 recorded as the load-bearing blocker:
+"retention and how undo is invoked remain undesigned." The store itself (R4, `core/backup.h`)
+had preserved bytes since the first mutating tool; nothing could read them back out.
+
+**1. Undo is a subcommand, and its default is the listing.** `hermit undo --root DIR` shows
+what can be restored and changes nothing. Both mutations are an explicit flag away —
+`--restore N` for one generation, `--last` for the newest — because the operator reaching for
+undo is by definition recovering from a mistake, and a recovery tool whose bare invocation
+mutates is how one mistake becomes two. Enumeration, restore and retention live in
+`supervisor/undo.{h,cpp}`, not in `BackupStore`: the store's own header says "this type only
+ever adds", and keeping the tool-facing type add-only means nothing a model can reach holds a
+delete or an overwrite of the archive.
+
+**2. Restore obeys backup-before-mutate itself.** Restoring generation N first preserves the
+target's current bytes as a new generation, then publishes atomically (temp beside the target,
+rename over it) — the same discipline as the `write` tool, applied to the supervisor. Two
+consequences, both tested: no invocation of undo can ever lose bytes, and redo is not a
+feature, it is just undo of the undo. The recorded path also goes back through
+`Sandbox::resolve` on the way out: `preserve()` refused absolute and `..` paths on the way in,
+but the store is operator-editable, and a hand-edited row must fail R1 rather than write
+outside the root. A symlink planted in the root that would carry the restore outside is
+refused by the same resolution that would have refused it as a tool argument.
+
+**3. Retention is 72 hours, applied at agent start, and refuses unmarked directories.** The
+operator's argument, verbatim reasoning: the supervised trees live under git, so the store
+covers the gap between a bad mutation and the operator noticing — it is not the archive, git
+is. Generations older than `--keep-hours` (default 72) are pruned when a job starts and on
+`undo --prune`; nothing else ever deletes from the store. Because pruning is destructive and
+runs automatically on an operator-supplied path, it is the most guarded operation in the
+module: `BackupStore` drops a `.hermit-store` marker at the store root on first use, and
+prune refuses any directory that lacks it — `--backups` pointed at the wrong place must never
+delete things that merely have numeric names. Aging is by a generation's *files*, not its
+directory — restocking a store bumps the directory mtime;
+`AFreshGenerationInAnAgedDirectorySurvives` pins the difference. A retention
+failure at job start is a note rather than a stop. And numbering never rewinds across
+pruning: a new backup can never take a pruned one's identity in the listing, because the
+marker carries a numbering floor (`next N`) that prune raises *before* removing anything —
+a total prune (the normal state of a store idle past the window) would otherwise leave
+nothing for the scan to continue from. The 2026-08-18 review caught exactly that rewind;
+`NumberingSurvivesATotalPrune` pins the fix.
+
+**What this does not cover, stated so it is not discovered later.** The store records
+mutations of existing files — `write` over a file and `edit`. File *creation* preserves
+nothing (there are no pre-mutation bytes), so undo cannot remove a file the model created;
+`move` never destroys bytes (`RENAME_NOREPLACE`), so there is nothing of it to restore. Both
+are per-file, not per-job: undo restores one generation at a time, and "put the whole tree
+back to before the job" remains a sequence of restores the operator reads off the listing.
+
+**What would overturn this.** Retention: a real loss traced to the 72-hour default — a bad
+mutation noticed on Monday from a Friday job — moves the default upward or keys it on job
+boundaries rather than wall-clock hours. List-first: an operator study or a real incident
+showing the listing is read wrong under pressure would justify a confirmation prompt on
+`--restore` too.
+
+---
+
+## D15 — Meaning is judged by a model, after structure, and labelled as judgment
+
+**Decided 2026-08-18**, the same night as D14, closing the residue the structural judge
+names outright: four predicates cover 329 of 413 recorded failures, and E1 sharpened the
+argument to a point — every remaining supervised failure in that experiment was semantic
+(`FILECOUNT=` computed but never emitted; an append mangled), invisible to hashes, while
+R7 converted 4/4 of the failures the judge *could* see. The retry engine was idle for want
+of findings. This is what feeds it.
+
+**1. A criterion is an expectation: `satisfies:PATH=CRITERION`.** Fifth kind beside
+exists/dir/absent/preserved/identical, stated in `--expect` like the rest, split at the
+*first* `=` because the right half is the operator's words, not a path — carried verbatim,
+never rewritten, since it is what the judge is asked and what an unmet finding quotes
+back. The parse layer routes criteria to their own set (`Expectations::semantic`) after
+the unsatisfiable-set check runs across both halves — `absent:x` beside `satisfies:x=...`
+is refused where it was authored. The structural `judge()` answers a criterion
+`Undecidable` by a fail-closed arm it should never reach.
+
+**2. The judge is a model reading the tree, never the transcript.** D13's discipline
+applied to meaning: a fresh session — no history, no reply, no thinking — handed three
+things, all ground truth from the tree: the target file's bytes as they stand, the
+criterion, and the tree's relative path listing (paths only; the listing is what makes
+"FILECOUNT=<count of *.txt files>" answerable). Default judge is the working model tag —
+the fresh-session isolation is the guard against self-grading, the same argument as R7's
+fresh attempts — with `--judge-model` to bring a stronger or different judge. The request
+carries a JSON schema and **no tools**: D12 measured `tools`+`format` breaking four of
+seven models, and schema-alone working on seven of seven; a judge that emits a tool call
+has left its job.
+
+**3. After structure, once per attempt.** Structural judgment is cheap and per-turn; the
+semantic judge is a model call. It runs only when an attempt ends with every structural
+expectation met, so R7 gets a progression — fix the structure, then fix the meaning — and
+no judge tokens are spent on an attempt that already failed structurally. When structure
+did not pass, the criteria still appear in the verdict as Undecidable ("not judged"), so
+a report never silently omits something the operator stated. An unmet judgment drives the
+retry exactly as a structural finding does: the judge's sentence, verbatim, plus the
+original task. Measured live the night this landed: handed a planted `grep ... | bc` where
+prose was required — D13's live example — the 9B judge returned *"The file report.md
+contains shell commands such as grep and bc instead of a single line of prose stating the
+total number of widget units."* That sentence is a better re-invocation prompt than any
+template this project could write.
+
+**4. A judgment is labelled as one, everywhere it appears.** A hash comparison is a
+measurement; this is a model's opinion, and the two must never read alike. Every decided
+`satisfies:` line in a verdict carries "(the model's judgment, not a measurement)";
+`met()` still counts them — an operator who stated a criterion wants it enforced — but the
+report always says which claims were measured and which were judged. Failure is closed in
+every direction: judge unreachable, reply unparseable, content binary, file over the read
+cap — all `Undecidable`, reported and never retried. The one deliberate asymmetry: a
+*missing* file is `Unmet`, because absence is an established fact and "create it" is
+actionable — and it costs no model call.
+
+**Known limits, stated when built.** The judge sees one file's content plus the tree's
+paths, so a criterion needing another file's *content* is checkable only as far as form
+and plausibility. Reply-marker requirements ("output contains TXTCOUNT=3") stay in
+`unjudged` — D13 keeps the reply off the verification path, deliberately. And the content
+being judged is model-written: the prompt states that content is data, never instructions,
+which is a mitigation and not a guarantee — the standing caveat of every LLM-judge design.
+
+**What would overturn this.** A measured false-Met rate worth the name — the judge
+agreeing with content that is wrong — moves the default away from same-model judging, or
+adds a second judge and a vote. E2's protocol is the natural place to measure it, now that
+the mechanism exists end to end.
+
+---
+
 ## Still open
 
 ### ~~Which chat endpoint~~ — settled as D8

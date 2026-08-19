@@ -90,9 +90,19 @@ struct ExpectError {
 /// verdict on that task reads as success while a real requirement goes unexamined.
 struct Expectations {
   supervisor::ExpectationSet set{};
+
+  /// The `satisfies:` criteria, split out because they go to a different judge at a
+  /// different time: `set` is decided from snapshots every turn, these are decided by a
+  /// model once per attempt, after `set` is fully met (semantic.h, D15). The
+  /// unsatisfiable-set check runs across both before the split, so `absent:x` beside
+  /// `satisfies:x=...` is refused where it was authored.
+  supervisor::ExpectationSet semantic{};
+
   std::size_t unjudged = 0;
 
-  [[nodiscard]] bool empty() const noexcept { return set.empty() && unjudged == 0; }
+  [[nodiscard]] bool empty() const noexcept {
+    return set.empty() && semantic.empty() && unjudged == 0;
+  }
 };
 
 /// Parse one `kind:path` or `kind:from=to` spec.
@@ -104,11 +114,13 @@ struct Expectations {
 ///     absent:PATH          not present afterwards
 ///     preserved:FROM=TO    TO now holds the bytes FROM held at baseline
 ///     identical:A=B        A and B hold the same bytes now
+///     satisfies:PATH=TEXT  a model judges whether PATH's content satisfies TEXT
 ///
 /// A one-sided kind takes everything after the colon, so `exists:report=final.md` names a
 /// file with an '=' in it. A two-sided kind needs exactly one '=' and refuses a second
 /// rather than guessing which one splits the pair; the object form below has no such
-/// limit and is the way to write those paths.
+/// limit and is the way to write those paths. `satisfies:` splits at the FIRST '=' --
+/// its right half is free text, not a path, and may contain anything.
 ///
 /// `preserved:p=p` is the "do not touch p" constraint, and judge.h excludes it from the
 /// vacuity flag for that reason.
@@ -122,6 +134,7 @@ struct Expectations {
 ///     {"kind": "exists",    "path": "index.md"}
 ///     {"kind": "exists",    "path": "archive", "as_directory": true}
 ///     {"kind": "preserved", "path": "notes.txt", "other": "notes.txt"}
+///     {"kind": "satisfies", "path": "report.md", "criterion": "a one-line summary"}
 ///
 /// `value` is the whole settings object, not the array: `unjudged` is a sibling key of
 /// `expectations`, so reading one without the other would silently drop it.

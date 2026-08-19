@@ -22,6 +22,8 @@ add_executable(hermit_tests
   wire_test.cpp
   loop_test.cpp
   reinvoke_test.cpp
+  semantic_test.cpp
+  undo_test.cpp
   verify_test.cpp
   judge_test.cpp
   expect_test.cpp)
