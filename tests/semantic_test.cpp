@@ -53,6 +53,10 @@ ChatReply verdict_reply(bool satisfied, std::string_view reason) {
   ChatReply reply;
   reply.content = json{{"satisfied", satisfied}, {"reason", reason}}.dump();
   reply.finish_reason = "stop";
+  // A realistic figure, deliberately: a defaulted 0 would sit under the gross-loss
+  // tell's floor today but silently reroute any future test with a bigger fixture
+  // into the truncation path instead of the path it means to exercise.
+  reply.prompt_tokens = 600;
   return reply;
 }
 
@@ -310,6 +314,46 @@ TEST_F(SemanticTest, AReasonIsScrubbedToOneBoundedLine) {
   EXPECT_EQ(reason.find('\n'), std::string::npos);
   EXPECT_EQ(reason.find('\x1b'), std::string::npos);
   EXPECT_LE(reason.size(), 503u);  // the cap plus "..."
+}
+
+TEST_F(SemanticTest, APromptAtTheTruncationBoundaryIsUndecidable) {
+  // Mechanism, not estimate: Ollama truncates an over-long prompt to num_ctx minus
+  // num_predict, so prompt_tokens reaching that boundary IS the truncation
+  // signature. The chars-based estimate alone was measured failing open on
+  // digit-dense content -- more real tokens than any honest estimate of what was
+  // sent -- which is exactly the case this check exists for.
+  ChatReply reply = verdict_reply(true, "looks fine");
+  reply.prompt_tokens = 2051;  // window 4096, reserve 2048: at the boundary
+  Script script{.replies = {reply}};
+  const auto judge = judge_with(script);
+
+  const auto findings = judge_semantics(
+      judge, *box_, {Expectation::satisfies("report.md", "a summary")});
+  ASSERT_EQ(findings.size(), 1u);
+  EXPECT_EQ(findings[0].outcome, Outcome::Undecidable);
+  EXPECT_NE(findings[0].reason.find("boundary"), std::string::npos) << findings[0].reason;
+}
+
+TEST_F(SemanticTest, ATransportReasonIsScrubbedBeforeTheVerdictRow) {
+  // The transport detail can embed raw response-body bytes (an HTML 502 with
+  // newlines, say); it is foreign text headed for a verdict line, same as a judge
+  // reason.
+  Script script{};
+  SemanticJudge judge{
+      .chat = [](const ChatRequest&) -> hermit::ollama::Result<ChatReply> {
+        return std::unexpected(hermit::ollama::Failure{
+            hermit::ollama::TransportError::Unreachable,
+            "HTTP 502\n<html>\n<body>bad gateway</body>\x1b[0m"});
+      },
+      .model = "judge-model",
+      .num_ctx = 4096};
+
+  const auto findings = judge_semantics(
+      judge, *box_, {Expectation::satisfies("report.md", "a summary")});
+  ASSERT_EQ(findings.size(), 1u);
+  ASSERT_EQ(findings[0].outcome, Outcome::Undecidable);
+  EXPECT_EQ(findings[0].reason.find('\n'), std::string::npos) << findings[0].reason;
+  EXPECT_EQ(findings[0].reason.find('\x1b'), std::string::npos);
 }
 
 }  // namespace

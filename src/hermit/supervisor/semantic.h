@@ -59,9 +59,11 @@ struct SemanticJudge {
   ChatFn chat;
   std::string model;
 
-  /// The window every request names. Not optional, structurally: an unset num_ctx
-  /// leaves the server default in force, which is "exactly the undetermined state R9
-  /// refuses" (client.h) -- so the seam does not admit it.
+  /// The window every request names. Not optional: an unset num_ctx leaves the
+  /// server default in force, which is "exactly the undetermined state R9 refuses"
+  /// (client.h). The zero a default-constructed judge carries fails closed -- every
+  /// criterion lands Undecidable against a 0-token window -- rather than silently
+  /// inheriting the server's idea of a window.
   std::uint64_t num_ctx = 0;
 
   /// Generation cap, sent as num_predict. Bounded because the judge's whole answer is
@@ -73,10 +75,12 @@ struct SemanticJudge {
 
   /// Files past this are Undecidable, never truncated: a judgment of half a file
   /// silently reads as a judgment of the file. The same rule is enforced against the
-  /// WINDOW in judge_one -- a file can pass this cap and still not fit num_ctx, and
-  /// Ollama truncates an over-window prompt silently, keeping the tail: the charter
-  /// and the criterion would be the first things dropped, leaving a schema-forced
-  /// verdict about half the evidence. Both directions land Undecidable.
+  /// WINDOW in judge_one, twice -- a cheap size gate before any tokens are spent, and
+  /// the authoritative check after the reply: Ollama truncates an over-long prompt to
+  /// num_ctx minus num_predict (measured), so prompt_tokens reaching that boundary is
+  /// the truncation signature itself, independent of how densely the content
+  /// tokenises. A chars-based estimate alone was measured failing open on
+  /// digit-dense content. All of it lands Undecidable, never a verdict.
   std::uint64_t max_read_bytes = kDefaultMaxReadBytes;
 };
 

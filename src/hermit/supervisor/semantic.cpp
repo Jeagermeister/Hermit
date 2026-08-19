@@ -1,6 +1,7 @@
 #include <hermit/supervisor/semantic.h>
 
 #include <algorithm>
+#include <limits>
 #include <cerrno>
 #include <filesystem>
 #include <string_view>
@@ -168,7 +169,10 @@ Finding judge_one(const SemanticJudge& judge, const Sandbox& box,
   ollama::ChatRequest request;
   request.model = judge.model;
   request.num_ctx = judge.num_ctx;
-  request.max_tokens = static_cast<int>(judge.max_tokens);
+  // Clamped before the narrowing cast: a huge library-supplied cap wrapped negative
+  // would read to Ollama as UNLIMITED num_predict -- the exact inversion of a bound.
+  request.max_tokens = static_cast<int>(
+      std::min<std::uint64_t>(judge.max_tokens, std::numeric_limits<int>::max()));
   request.messages.push_back({.role = "system", .content = std::string{kJudgeCharter}});
   const std::size_t sent_chars = kJudgeCharter.size() + question.size();
   request.messages.push_back({.role = "user", .content = std::move(question)});
@@ -176,15 +180,34 @@ Finding judge_one(const SemanticJudge& judge, const Sandbox& box,
 
   const auto reply = judge.chat(request);
   if (!reply) {
-    return undecidable("the judge could not be reached: " + reply.error().message());
+    // Transport detail can embed raw response-body bytes (client.cpp parse_body); it
+    // goes through the same one-line scrub as every other foreign text headed for a
+    // verdict row.
+    return undecidable("the judge could not be reached: " +
+                       one_line(reply.error().message()));
   }
 
-  // The truncation tell, after the fact -- Session's own arithmetic (session.cpp,
-  // looks_truncated), applied here because the judge bypasses Session: estimate what
-  // was sent at ~4 chars/token, and if the server evaluated less than an eighth of
-  // that, part of the prompt was discarded. The gate above catches what cannot fit;
-  // this catches what the server dropped anyway. A verdict about a beheaded prompt
-  // is not a verdict.
+  // The truncation tell, after the fact, and it is mechanism-derived rather than
+  // estimated: Ollama truncates an over-long prompt to num_ctx minus num_predict
+  // (measured live, 2026-08-18 -- a 4096 window with num_predict 2048 evaluated
+  // exactly 2051 of ~5500 real tokens). So a prompt_tokens at or past that boundary
+  // IS the truncation signature -- and a legitimate prompt that merely reaches it is
+  // sitting exactly where the next byte gets discarded, which is not a place to
+  // record a verdict from either. No chars-per-token estimate can catch this case:
+  // token-dense content (digits, logs) can hold more real tokens than any honest
+  // estimate of what was sent, which is how the first version of this check was
+  // measured failing open.
+  if (reply->prompt_tokens + judge.max_tokens >= judge.num_ctx) {
+    return undecidable("the prompt reached the judge's truncation boundary (" +
+                       std::to_string(reply->prompt_tokens) + " prompt tokens + " +
+                       std::to_string(judge.max_tokens) + " reserved for the reply, "
+                       "window " + std::to_string(judge.num_ctx) +
+                       "), so evidence was -- or was about to be -- silently "
+                       "discarded before judging");
+  }
+  // Session's gross-loss arithmetic stays as the backstop for any other server
+  // policy: if what was evaluated is under an eighth of a conservative estimate of
+  // what was sent, part of the prompt is gone regardless of mechanism.
   const std::uint64_t sent_estimate = sent_chars / 4;
   if (sent_estimate >= 256 && reply->prompt_tokens < sent_estimate / 8) {
     return undecidable("the server evaluated only " +

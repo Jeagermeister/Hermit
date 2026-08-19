@@ -307,7 +307,12 @@ std::expected<Pruned, std::string> prune(const fs::path& store,
 
   for (const Doomed& d : doomed) {
     fs::remove_all(d.dir, ec);
-    if (ec) return fail("removing " + d.dir.string() + " failed: " + ec.message());
+    if (ec) {
+      return fail("removing " + d.dir.string() + " failed: " + ec.message() + " (" +
+                  std::to_string(result.generations) +
+                  " generations were already removed; the numbering floor was raised "
+                  "first, so nothing can collide)");
+    }
     ++result.generations;
     result.bytes += d.bytes;
   }

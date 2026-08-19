@@ -370,4 +370,56 @@ TEST_F(UndoTest, AnOverflowLengthNumericNameIsNotAGeneration) {
   EXPECT_TRUE(fs::exists(store_dir_ / alien / "planted.txt"));
 }
 
+TEST_F(UndoTest, TheExactBoundaryNumericNameIsRefusedToo) {
+  // 2^64-1 parses cleanly where 25 digits overflow -- and every consumer follows a
+  // generation number with +1, which wraps it to 0. Planted beside a real store, it
+  // would have written a floor of `next 0` after a prune and let numbering rewind
+  // through the back door. Not a generation, same as the overflow case.
+  preserve("a.txt", "real");
+  const std::string boundary = "18446744073709551615";
+  write_file(store_dir_ / boundary / "planted.txt", "not ours");
+  const auto now = fs::file_time_type::clock::now();
+  fs::last_write_time(store_dir_ / "0000" / "a.txt", now - 100h);
+  fs::last_write_time(store_dir_ / boundary / "planted.txt", now - 100h);
+
+  const auto rows = enumerate(store_dir_);
+  ASSERT_TRUE(rows.has_value()) << rows.error();
+  ASSERT_EQ(rows->size(), 1u);
+
+  const auto removed = prune(store_dir_, 72h, now);
+  ASSERT_TRUE(removed.has_value()) << removed.error();
+  EXPECT_EQ(removed->generations, 1u);
+  EXPECT_TRUE(fs::exists(store_dir_ / boundary / "planted.txt"));
+
+  // The floor survived the plant: the next preservation continues, never rewinds.
+  preserve("b.txt", "after");
+  const auto after = enumerate(store_dir_);
+  ASSERT_TRUE(after.has_value()) << after.error();
+  ASSERT_EQ(after->size(), 1u);
+  EXPECT_EQ(after->front().name, "0001");
+}
+
+TEST_F(UndoTest, AFloorStraddlingTheMarkerReadCapIsAbsentNotUnderstated) {
+  // A hand-padded marker whose `next N` digits cross the 256-byte read window must
+  // parse as NO floor (the scan covers), never as the visible digit prefix -- an
+  // understated floor is the one direction the marker exists to prevent.
+  preserve("a.txt", "x");
+  std::string content = "hermit backup store\n";
+  content += std::string(246 - content.size(), '#');
+  content += "\nnext 123456\n";
+  // Layout check, so the test cannot drift into a weaker case: "next " must sit fully
+  // inside the 256-byte read window with a digit PREFIX visible -- the shape the old
+  // code parsed as floor 1234.
+  ASSERT_EQ(content.substr(247, 9), "next 1234");
+  ASSERT_GT(content.size(), 256u);
+  write_file(store_dir_ / hermit::kStoreMarker, content);
+  EXPECT_FALSE(hermit::read_store_floor(store_dir_).has_value());
+
+  // And the honest writer round-trips: raise then read gives the raised value back.
+  ASSERT_TRUE(hermit::raise_store_floor(store_dir_, 7).has_value());
+  const auto floor = hermit::read_store_floor(store_dir_);
+  ASSERT_TRUE(floor.has_value());
+  EXPECT_EQ(*floor, 7u);
+}
+
 }  // namespace

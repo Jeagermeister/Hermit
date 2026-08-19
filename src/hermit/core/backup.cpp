@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <charconv>
+#include <limits>
 #include <string>
 #include <system_error>
 
@@ -62,7 +63,8 @@ std::expected<std::filesystem::path, IoError> BackupStore::begin(
       if (errno != EEXIST) return std::unexpected{IoError{.code = errno}};
     } else {
       Fd owned_marker{mfd};
-      if (auto written = write_all(owned_marker.get(), "hermit backup store\n");
+      if (auto written = write_all(owned_marker.get(),
+                                   std::string{kStoreBanner} + "\n");
           !written) {
         return std::unexpected{written.error()};
       }
@@ -148,6 +150,12 @@ std::optional<std::uint64_t> parse_generation_name(std::string_view name) {
   const auto [stopped, ec] = std::from_chars(name.data(), name.data() + name.size(), value);
   // Overflow: all digits, but nothing `generation_name` could ever have written.
   if (ec != std::errc{} || stopped != name.data() + name.size()) return std::nullopt;
+  // Exactly 2^64-1 parses cleanly and is refused anyway: every consumer follows a
+  // generation number with +1 (the scan's next-seq, prune's floor), which would wrap
+  // to 0 and hand a planted directory the power to rewind numbering to 0000 -- the
+  // D14 violation by the back door. `generation_name` can never emit it (the store
+  // would have had to survive 2^64 preservations), so refusing loses nothing.
+  if (value == std::numeric_limits<std::uint64_t>::max()) return std::nullopt;
   return value;
 }
 
@@ -157,17 +165,27 @@ std::optional<std::uint64_t> read_store_floor(const std::filesystem::path& dir) 
   if (fd < 0) return std::nullopt;
   Fd owned{fd};
   // The whole file is two short lines; 256 bytes is generous and bounds a
-  // hand-edited marker.
+  // hand-edited marker. EINTR is retried because a floor misread as absent lets
+  // raise_store_floor rewrite a higher floor lower -- the one direction backup.h
+  // forbids.
   char buf[256];
-  const ssize_t n = ::read(owned.get(), buf, sizeof buf);
+  ssize_t n = -1;
+  do {
+    n = ::read(owned.get(), buf, sizeof buf);
+  } while (n < 0 && errno == EINTR);
   if (n <= 0) return std::nullopt;
   const std::string_view text{buf, static_cast<std::size_t>(n)};
   const auto at = text.find("next ");
   if (at == std::string_view::npos) return std::nullopt;
   const std::string_view rest = text.substr(at + 5);
+  // The digits must END inside the read window: a hand-padded marker whose number
+  // straddles the cap would otherwise parse its visible prefix as a smaller floor --
+  // silently UNDERSTATING it, the unsafe direction. Our own writer always terminates
+  // with a newline, so requiring one costs nothing and turns truncation into
+  // "absent", which the header promises is the failure mode.
   const auto end_of_line = rest.find('\n');
-  const std::string_view digits =
-      end_of_line == std::string_view::npos ? rest : rest.substr(0, end_of_line);
+  if (end_of_line == std::string_view::npos) return std::nullopt;
+  const std::string_view digits = rest.substr(0, end_of_line);
   std::uint64_t value = 0;
   const auto [stopped, ec] =
       std::from_chars(digits.data(), digits.data() + digits.size(), value);

@@ -536,6 +536,15 @@ int agent_command(std::span<const std::string_view> args) {
                  "       Drop --no-verify, or drop the expectations.\n";
     return 2;
   }
+  if (judge_model && expectations.semantic.empty()) {
+    // Beside the other usage gates, deliberately: this refusal needs nothing built,
+    // and a usage error reported only after retention has already pruned would be an
+    // exit 2 with side effects. Accepting the flag silently would be worse still -- a
+    // flag that looks like it arranged judging while nothing gets judged.
+    std::cerr << "error: --judge-model was given, but no satisfies: expectation states "
+                 "what it would judge.\n";
+    return 2;
+  }
 
 
   const auto store_dir = settle_store_dir(*box, std::move(backup_dir));
@@ -651,33 +660,32 @@ int agent_command(std::span<const std::string_view> args) {
 
   hermit::supervisor::ReinvokeOptions reinvoke_options;
   reinvoke_options.attempts = attempts;
-  if (judge_model && expectations.semantic.empty()) {
-    // Accepting it silently would be this codebase's least favourite failure: a flag
-    // that looks like it arranged judging while nothing gets judged.
-    std::cerr << "error: --judge-model was given, but no satisfies: expectation states "
-                 "what it would judge.\n";
-    return 2;
-  }
   if (!expectations.semantic.empty()) {
     // The working model was preflighted through the probe; a judge model named by flag
     // has passed no gate at all, and a typo here would run the whole job and then leave
     // every criterion Undecidable -- reported, but only after the tokens are spent.
-    // Refused up front instead, the same reason R9 exists.
+    // Refused up front instead, the same reason R9 exists. The card also carries the
+    // judge's own architecture context, which bounds its window below: handing a
+    // 16K-architecture judge the working model's 64K num_ctx would push it past what
+    // it was built for, and that degrades silently -- no truncation, so not even the
+    // boundary tell can see it.
+    std::uint64_t judge_window = probe->window();
     if (judge_model && *judge_model != config->model) {
-      if (const auto card = client->show(*judge_model); !card) {
+      const auto card = client->show(*judge_model);
+      if (!card) {
         std::cerr << "error: the judge model " << *judge_model
                   << " is not known to the daemon: " << card.error().detail << '\n';
         return 2;
       }
+      if (card->architecture_context) {
+        judge_window = std::min(judge_window, *card->architecture_context);
+      }
     }
-    // The judge shares the working session's window: it is sized by the same daemon
-    // and the same clamp, and a criterion whose file needs more context than the work
-    // itself is a case to surface, not to size around silently.
     reinvoke_options.semantic = expectations.semantic;
     reinvoke_options.judge = hermit::supervisor::SemanticJudge{
         .chat = [&client](const hermit::ollama::ChatRequest& r) { return client->chat(r); },
         .model = judge_model.value_or(config->model),
-        .num_ctx = probe->window(),
+        .num_ctx = judge_window,
     };
   }
   // The first attempt's banner is the run header below; a retry announces itself with
