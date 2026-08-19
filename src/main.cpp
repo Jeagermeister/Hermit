@@ -57,7 +57,7 @@ int usage(std::ostream& to = std::cerr) {
       "       hermit preflight --model NAME\n"
       "       hermit session   --model NAME   (try --max-num-ctx 2048 to force compaction)\n"
       "       hermit agent     --root DIR --model NAME <instruction>\n"
-      "       hermit undo      --root DIR    (lists what can be restored; see undo only:)\n"
+      "       hermit undo      --root DIR    (lists what can be restored; --restore/--last/--prune act)\n"
       "       hermit config\n"
       "\n"
       "settings, in increasing precedence: defaults < --config file < environment < flags\n"
@@ -550,11 +550,9 @@ int agent_command(std::span<const std::string_view> args) {
   const auto store_dir = settle_store_dir(*box, std::move(backup_dir));
   if (!store_dir) return 2;
 
-  // Retention, settled 2026-08-18: the store covers the gap between a bad mutation and
-  // the operator noticing -- the supervised trees this project runs against live under
-  // git, so 72 hours is history enough. A retention failure is a note, not a stop: the
-  // job the operator asked for must not be blocked by archive bookkeeping, and the
-  // likely cause (a pre-marker store) comes with its own instructions.
+  // A retention failure is a note, not a stop (D14): the job the operator asked for
+  // must not be blocked by archive bookkeeping, and the likely cause (a pre-marker
+  // store) comes with its own instructions.
   {
     const auto pruned = hermit::supervisor::prune(
         *store_dir, std::chrono::hours{keep_hours},
@@ -661,22 +659,22 @@ int agent_command(std::span<const std::string_view> args) {
   hermit::supervisor::ReinvokeOptions reinvoke_options;
   reinvoke_options.attempts = attempts;
   if (!expectations.semantic.empty()) {
-    // The working model was preflighted through the probe; a judge model named by flag
-    // has passed no gate at all, and a typo here would run the whole job and then leave
-    // every criterion Undecidable -- reported, but only after the tokens are spent.
-    // Refused up front instead, the same reason R9 exists. The card also carries the
-    // judge's own architecture context, which bounds its window below: handing a
-    // 16K-architecture judge the working model's 64K num_ctx would push it past what
-    // it was built for, and that degrades silently -- no truncation, so not even the
-    // boundary tell can see it.
     std::uint64_t judge_window = probe->window();
     if (judge_model && *judge_model != config->model) {
+      // The working model was preflighted through the probe; a judge model named by
+      // flag has passed no gate at all, and a typo here would run the whole job and
+      // then leave every criterion Undecidable -- reported, but only after the tokens
+      // are spent. Refused up front instead, the same reason R9 exists.
       const auto card = client->show(*judge_model);
       if (!card) {
         std::cerr << "error: the judge model " << *judge_model
                   << " is not known to the daemon: " << card.error().detail << '\n';
         return 2;
       }
+      // The card also carries the judge's own architecture context, which bounds its
+      // window below: handing a 16K-architecture judge the working model's 64K num_ctx
+      // would push it past what it was built for, and that degrades silently -- no
+      // truncation, so not even the boundary tell can see it.
       if (card->architecture_context) {
         judge_window = std::min(judge_window, *card->architecture_context);
       }

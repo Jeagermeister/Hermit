@@ -8,7 +8,7 @@
 // consistent a retry driver would be pointless; bench/fsops measured that they are not
 // (39% of model x task pairs were unstable across three identical runs).
 //
-// Three policies live here rather than in the loop, stated because each is a decision and
+// Four policies live here rather than in the loop, stated because each is a decision and
 // not a default:
 //
 //   - **Every attempt is a fresh session.** "Break larger work into fresh sessions" is

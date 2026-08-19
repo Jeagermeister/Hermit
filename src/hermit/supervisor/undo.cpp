@@ -233,13 +233,8 @@ std::expected<Pruned, std::string> prune(const fs::path& store,
   const fs::file_time_type cutoff = now - keep;
   Pruned result;
 
-  // Two phases, and the order is D14's guarantee: decide what goes, RAISE THE
-  // NUMBERING FLOOR, then remove. A store whose every generation is past the
-  // cutoff -- the normal state of any store idle longer than the window --
-  // would otherwise scan empty on the next run and restart at 0000, handing a
-  // fresh backup a pruned one's identity in the listing. Floor first also
-  // fails safe: a crash between the raise and the removals leaves the
-  // generations on disk, where the scan still covers them.
+  // Decide, then raise the numbering floor (backup.h), then remove -- so a
+  // crash between raise and removal still leaves the floor recorded.
   struct Doomed {
     fs::path dir;
     std::uint64_t seq;

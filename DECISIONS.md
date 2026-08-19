@@ -964,13 +964,14 @@ runs automatically on an operator-supplied path, it is the most guarded operatio
 module: `BackupStore` drops a `.hermit-store` marker at the store root on first use, and
 prune refuses any directory that lacks it — `--backups` pointed at the wrong place must never
 delete things that merely have numeric names. Aging is by a generation's *files*, not its
-directory (restocking a store bumps the directory mtime; `AFreshGenerationInAnAgedDirectorySurvives`
-pins the difference), a retention failure at job start is a note rather than a stop, and
-numbering never rewinds across pruning, so a new backup can never take a pruned one's identity
-in the listing — the marker carries a numbering floor (`next N`) that prune raises *before*
-removing anything, because a total prune (the normal state of a store idle past the window)
-would otherwise leave nothing for the scan to continue from. The 2026-08-18 review caught
-exactly that rewind; `NumberingSurvivesATotalPrune` pins the fix.
+directory — restocking a store bumps the directory mtime;
+`AFreshGenerationInAnAgedDirectorySurvives` pins the difference. A retention
+failure at job start is a note rather than a stop. And numbering never rewinds across
+pruning: a new backup can never take a pruned one's identity in the listing, because the
+marker carries a numbering floor (`next N`) that prune raises *before* removing anything —
+a total prune (the normal state of a store idle past the window) would otherwise leave
+nothing for the scan to continue from. The 2026-08-18 review caught exactly that rewind;
+`NumberingSurvivesATotalPrune` pins the fix.
 
 **What this does not cover, stated so it is not discovered later.** The store records
 mutations of existing files — `write` over a file and `edit`. File *creation* preserves

@@ -32,14 +32,7 @@
 //     working on seven of seven models, and it is the shape Tier 1's `triage` was
 //     already promised. A reply that still fails to parse is Undecidable.
 //
-// **Known limits, stated rather than discovered later.** The judge sees one file's
-// content plus the tree's paths, so a criterion needing another file's *content* ("a
-// summary of notes.txt" judged for faithfulness) is checkable only as far as form and
-// plausibility -- the judge cannot compare against bytes it was not given. And the
-// content being judged is model-written: a hostile or degenerate file could try to
-// address the judge directly. The prompt states that content is data, never
-// instructions, which is a mitigation and not a guarantee -- the same standing caveat
-// as every LLM-judge design.
+// Known limits and what would overturn this design: DECISIONS.md D15.
 
 #include <cstdint>
 #include <optional>
@@ -73,14 +66,9 @@ struct SemanticJudge {
   /// content, which parses to Undecidable -- fail closed, and visible.
   std::uint64_t max_tokens = 2048;
 
-  /// Files past this are Undecidable, never truncated: a judgment of half a file
-  /// silently reads as a judgment of the file. The same rule is enforced against the
-  /// WINDOW in judge_one, twice -- a cheap size gate before any tokens are spent, and
-  /// the authoritative check after the reply: Ollama truncates an over-long prompt to
-  /// num_ctx minus num_predict (measured), so prompt_tokens reaching that boundary is
-  /// the truncation signature itself, independent of how densely the content
-  /// tokenises. A chars-based estimate alone was measured failing open on
-  /// digit-dense content. All of it lands Undecidable, never a verdict.
+  /// Files past this are Undecidable, never truncated -- a judgment of half a file
+  /// would silently read as a judgment of the whole one. See judge_one's truncation
+  /// checks, which enforce the same rule against the window.
   std::uint64_t max_read_bytes = kDefaultMaxReadBytes;
 };
 

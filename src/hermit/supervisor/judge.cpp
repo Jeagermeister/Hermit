@@ -185,10 +185,8 @@ Judgement judge_one(const Expectation& e, const TreeSnapshot& baseline,
     }
 
     case ExpectationKind::Satisfies:
-      // Meaning is not decidable from snapshots; the semantic judge decides it, later
-      // and elsewhere (semantic.h). Answered here at all only so that a caller who
-      // routes a criterion into the structural judge gets a fail-closed Undecidable
-      // rather than a fabricated answer.
+      // This arm exists only so a Satisfies criterion routed here fails closed instead
+      // of falling through.
       return undecidable("meaning is not decidable from snapshots; the semantic judge decides it");
   }
   return undecidable("unknown expectation kind");
@@ -316,9 +314,8 @@ std::string Verdict::render() const {
     // Said on the line it applies to, because a count at the bottom of a report is a
     // number a reader has to go looking for the cause of.
     if (f.vacuous) text += "  (already true before the run)";
-    // A hash comparison is a measurement; a satisfies: verdict is a model's opinion,
-    // and the two must never read alike. Undecidable lines already say the judge did
-    // not decide, so the label sits only where a decision was made.
+    // A measurement and a judgment must not look alike in a report (D15); label only
+    // decided satisfies: lines.
     if (f.expectation.kind == ExpectationKind::Satisfies && f.outcome != Outcome::Undecidable) {
       text += "  (the model's judgment, not a measurement)";
     }
