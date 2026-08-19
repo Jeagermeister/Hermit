@@ -183,6 +183,13 @@ Judgement judge_one(const Expectation& e, const TreeSnapshot& baseline,
       if (lhs->sha256 != rhs->sha256) return unmet(e.path + " and " + e.other + " differ");
       return met();
     }
+
+    case ExpectationKind::Satisfies:
+      // Meaning is not decidable from snapshots; the semantic judge decides it, later
+      // and elsewhere (semantic.h). Answered here at all only so that a caller who
+      // routes a criterion into the structural judge gets a fail-closed Undecidable
+      // rather than a fabricated answer.
+      return undecidable("meaning is not decidable from snapshots; the semantic judge decides it");
   }
   return undecidable("unknown expectation kind");
 }
@@ -233,6 +240,14 @@ Expectation Expectation::identical(std::string a, std::string b) {
                      .must_be_dir = false};
 }
 
+Expectation Expectation::satisfies(std::string path, std::string criterion) {
+  return Expectation{.kind = ExpectationKind::Satisfies,
+                     .path = std::move(path),
+                     .other = {},
+                     .criterion = std::move(criterion),
+                     .must_be_dir = false};
+}
+
 std::string Expectation::render() const {
   switch (kind) {
     case ExpectationKind::Exists:
@@ -245,6 +260,8 @@ std::string Expectation::render() const {
                            : other + " has the bytes " + path + " had";
     case ExpectationKind::Identical:
       return path + " and " + other + " are identical";
+    case ExpectationKind::Satisfies:
+      return path + " satisfies \"" + criterion + "\"";
   }
   return path;
 }
@@ -299,6 +316,12 @@ std::string Verdict::render() const {
     // Said on the line it applies to, because a count at the bottom of a report is a
     // number a reader has to go looking for the cause of.
     if (f.vacuous) text += "  (already true before the run)";
+    // A hash comparison is a measurement; a satisfies: verdict is a model's opinion,
+    // and the two must never read alike. Undecidable lines already say the judge did
+    // not decide, so the label sits only where a decision was made.
+    if (f.expectation.kind == ExpectationKind::Satisfies && f.outcome != Outcome::Undecidable) {
+      text += "  (the model's judgment, not a measurement)";
+    }
     text += '\n';
   }
   return text;

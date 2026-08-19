@@ -750,3 +750,45 @@ TEST(JudgeContentGuard, AStaleHashOnAShapeThatCannotHoldOneNeverProducesAMet) {
         << name << " via Identical";
   }
 }
+
+// --- satisfies: never decided here --------------------------------------------
+
+TEST(JudgeSatisfies, TheStructuralJudgeAnswersACriterionUndecidableNeverMet) {
+  // Meaning is not decidable from snapshots. In production the parse layer routes
+  // criteria to the semantic judge and this arm never runs; a caller that hands one in
+  // anyway must get a fail-closed Undecidable, not a fabricated answer -- and never a
+  // Met, which would count toward verdict.met().
+  const auto v = judge({}, hermit::supervisor::TreeSnapshot{},
+                       {Expectation::satisfies("report.md", "a one-line summary")});
+  ASSERT_EQ(v.findings.size(), 1u);
+  EXPECT_EQ(v.findings[0].outcome, Outcome::Undecidable);
+  EXPECT_FALSE(v.met());
+}
+
+TEST(JudgeSatisfies, ADecidedCriterionRendersAsAJudgmentNotAMeasurement) {
+  // The one report-surface rule of D15: a hash line and a judged line must never read
+  // alike. Undecidable lines already say the judge did not decide, so the label sits
+  // only where a decision was made.
+  hermit::supervisor::Verdict v;
+  v.findings.push_back({.expectation = Expectation::satisfies("report.md", "a summary"),
+                        .outcome = Outcome::Met});
+  v.findings.push_back({.expectation = Expectation::satisfies("tally.txt", "a count"),
+                        .outcome = Outcome::Unmet,
+                        .reason = "tally.txt holds a shell command"});
+  v.findings.push_back({.expectation = Expectation::satisfies("notes.txt", "kept"),
+                        .outcome = Outcome::Undecidable,
+                        .reason = "not judged: the structural verdict did not pass"});
+
+  const std::string text = v.render();
+  const auto marks = [&](std::string_view line_key) {
+    const auto at = text.find(line_key);
+    if (at == std::string::npos) return false;
+    const auto eol = text.find('\n', at);
+    return text.substr(at, eol - at).find("the model's judgment, not a measurement") !=
+           std::string::npos;
+  };
+  EXPECT_TRUE(marks("report.md"));
+  EXPECT_TRUE(marks("tally.txt"));
+  EXPECT_FALSE(marks("notes.txt"));
+}
+

@@ -27,6 +27,7 @@
 #include <hermit/supervisor/loop.h>
 #include <hermit/supervisor/reinvoke.h>
 #include <hermit/supervisor/session.h>
+#include <hermit/supervisor/undo.h>
 #include <hermit/supervisor/verify.h>
 
 #include <algorithm>
@@ -35,6 +36,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <optional>
 #include <iostream>
@@ -55,6 +57,7 @@ int usage(std::ostream& to = std::cerr) {
       "       hermit preflight --model NAME\n"
       "       hermit session   --model NAME   (try --max-num-ctx 2048 to force compaction)\n"
       "       hermit agent     --root DIR --model NAME <instruction>\n"
+      "       hermit undo      --root DIR    (lists what can be restored; see undo only:)\n"
       "       hermit config\n"
       "\n"
       "settings, in increasing precedence: defaults < --config file < environment < flags\n"
@@ -77,9 +80,25 @@ int usage(std::ostream& to = std::cerr) {
       "                         a fresh session re-invoked with the one concrete remaining\n"
       "                         failure (default 3; 1 disables re-invocation; without\n"
       "                         --expect there is nothing to retry and one attempt runs)\n"
-      "  --backups DIR          where undo data goes; must be outside --root (R4)\n"
       "  --no-verify            skip the per-turn hash diff of the tree (R6); verification\n"
       "                         is on by default\n"
+      "  --judge-model NAME     who decides satisfies: expectations (default: the working\n"
+      "                         model, in a fresh session that never sees the transcript)\n"
+      "\n"
+      "agent and undo:\n"
+      "  --backups DIR          where undo data goes; must be outside --root (R4).\n"
+      "                         Defaults to .hermit-backups-<root name> beside the root\n"
+      "  --keep-hours N         retention: generations older than N hours are pruned at\n"
+      "                         agent start and by undo --prune (default 72 -- supervised\n"
+      "                         trees live under git; the store covers the gap between a\n"
+      "                         bad mutation and the operator noticing, not the archive)\n"
+      "\n"
+      "undo only (no flag lists the generations; each action is explicit):\n"
+      "  --restore N            write generation N's preserved bytes back to the file they\n"
+      "                         came from; the file's current bytes are preserved first,\n"
+      "                         so a restore is itself undoable\n"
+      "  --last                 restore the newest generation\n"
+      "  --prune                apply retention now, without running a job\n"
       "\n"
       "environment: HERMIT_CONFIG (absolute), HERMIT_SANDBOX_ROOT (absolute), HERMIT_MODEL,\n"
       "             HERMIT_OLLAMA_URL, HERMIT_MAX_NUM_CTX\n";
@@ -319,6 +338,57 @@ int session_command(std::span<const std::string_view> args) {
   return 0;
 }
 
+// R4: outside the root, always. Defaulted beside it rather than inside it -- a store
+// under the root would be listable, readable and editable by the model, which is the
+// whole point of the rule. Shared by `agent` and `undo`, which must agree on where the
+// store is or undo would list a different history than the job wrote.
+//
+// Prints its own complaint and returns nothing on refusal; the caller exits 2.
+std::optional<std::filesystem::path> settle_store_dir(
+    const hermit::Sandbox& box, std::optional<std::filesystem::path> backup_dir) {
+  if (!backup_dir) {
+    backup_dir = box.root().parent_path() /
+                 (".hermit-backups-" + box.root().filename().string());
+  }
+
+  // Cheap containment check on the *lexical* paths, which is enough for an operator
+  // typo. It is not a security boundary and is not claimed as one: both paths are
+  // host-side operator configuration, not model input.
+  //
+  // Compared with a separator appended, not as a bare prefix. A bare prefix test
+  // makes `/tmp/sandbox-backups` look "inside" `/tmp/sandbox`, which would refuse the
+  // most natural place to put the store -- right beside the root, which is where this
+  // command's own default puts it.
+  constexpr char kSep = std::filesystem::path::preferred_separator;
+  std::string root = box.root().lexically_normal().string();
+  while (root.size() > 1 && root.back() == kSep) root.pop_back();
+  // weakly_canonical, not absolute: Sandbox::open canonicalises the root, expanding
+  // every symlink, and sandbox.cpp says outright that "the two must be expressed in the
+  // same terms or containment comparisons silently fail open". absolute() resolves no
+  // symlinks, so `--root ~/work --backups ~/work/undo` with ~/work a symlink would
+  // compare a canonical root against an unexpanded store, call the store outside, and
+  // put the undo data inside the sandbox where the model can list, read, edit and move
+  // it -- R4 defeated by the check meant to enforce it.
+  // weakly_canonical tolerates a store that does not exist yet, which is the normal
+  // case: BackupStore creates it lazily on the first mutation.
+  const std::string store =
+      std::filesystem::weakly_canonical(*backup_dir).lexically_normal().string();
+
+  // `--root /` needs its own arm, and getting it wrong is worse than it looks: the strip
+  // loop leaves root as "/", so the general test degrades to `starts_with("//")`, which
+  // no normalised path matches -- every location would have been accepted as "outside"
+  // the one root that contains everything.
+  const bool inside = (root == std::string{kSep})
+                          ? store.starts_with(kSep)
+                          : (store == root || store.starts_with(root + kSep));
+  if (inside) {
+    std::cerr << "error: --backups must be outside --root (R4): " << store << " is inside "
+              << root << '\n';
+    return std::nullopt;
+  }
+  return backup_dir;
+}
+
 // Phase 2 --- the loop, end to end: one instruction, the eight Tier 0 tools, a real
 // model. This is the first subcommand where all four layers run at once.
 int agent_command(std::span<const std::string_view> args) {
@@ -329,7 +399,9 @@ int agent_command(std::span<const std::string_view> args) {
   std::size_t max_turns = 12;
   std::uint64_t budget_seconds = 300;
   std::size_t attempts = 3;
+  std::uint64_t keep_hours = 72;
   std::optional<std::filesystem::path> backup_dir;
+  std::optional<std::string> judge_model;
   bool verify = true;
 
   // A flag whose value is missing is reported as such. Letting it fall through to
@@ -390,6 +462,23 @@ int agent_command(std::span<const std::string_view> args) {
       backup_dir = std::filesystem::path{value};
       continue;
     }
+    if (takes_value("--judge-model", value)) {
+      judge_model = std::string{value};
+      continue;
+    }
+    if (takes_value("--keep-hours", value)) {
+      // A year, and `whole_number` refuses zero -- "keep nothing" is not a retention
+      // setting, it is `rm -rf` spelled confusingly, and an accidental 0 would prune
+      // the entire history the moment the job starts.
+      const auto parsed = whole_number(value, 8760);
+      if (!parsed) {
+        std::cerr << "error: --keep-hours needs a whole number from 1 to 8760, got: "
+                  << value << '\n';
+        return 2;
+      }
+      keep_hours = *parsed;
+      continue;
+    }
     if (args[i] == "--no-verify") {
       verify = false;
       continue;
@@ -442,55 +531,32 @@ int agent_command(std::span<const std::string_view> args) {
   // this is the earliest point a path can be checked at all, and the latest point at
   // which being wrong is still free. Left where the loop options are assembled, a typo
   // would first cost a socket and a preflight round trip against a live daemon.
-  if (!expectations.set.empty() && !verify) {
+  if ((!expectations.set.empty() || !expectations.semantic.empty()) && !verify) {
     std::cerr << "error: --no-verify leaves nothing to judge the expectations against.\n"
                  "       Drop --no-verify, or drop the expectations.\n";
     return 2;
   }
 
 
-  // R4: outside the root, always. Defaulted beside it rather than inside it -- a store
-  // under the root would be listable, readable and editable by the model, which is the
-  // whole point of the rule.
-  if (!backup_dir) {
-    backup_dir = box->root().parent_path() /
-                 (".hermit-backups-" + box->root().filename().string());
-  }
-  {
-    // Cheap containment check on the *lexical* paths, which is enough for an operator
-    // typo. It is not a security boundary and is not claimed as one: both paths are
-    // host-side operator configuration, not model input.
-    //
-    // Compared with a separator appended, not as a bare prefix. A bare prefix test
-    // makes `/tmp/sandbox-backups` look "inside" `/tmp/sandbox`, which would refuse the
-    // most natural place to put the store -- right beside the root, which is where this
-    // command's own default puts it.
-    constexpr char kSep = std::filesystem::path::preferred_separator;
-    std::string root = box->root().lexically_normal().string();
-    while (root.size() > 1 && root.back() == kSep) root.pop_back();
-    // weakly_canonical, not absolute: Sandbox::open canonicalises the root, expanding
-    // every symlink, and sandbox.cpp says outright that "the two must be expressed in the
-    // same terms or containment comparisons silently fail open". absolute() resolves no
-    // symlinks, so `--root ~/work --backups ~/work/undo` with ~/work a symlink would
-    // compare a canonical root against an unexpanded store, call the store outside, and
-    // put the undo data inside the sandbox where the model can list, read, edit and move
-    // it -- R4 defeated by the check meant to enforce it.
-    // weakly_canonical tolerates a store that does not exist yet, which is the normal
-    // case: BackupStore creates it lazily on the first mutation.
-    const std::string store =
-        std::filesystem::weakly_canonical(*backup_dir).lexically_normal().string();
+  const auto store_dir = settle_store_dir(*box, std::move(backup_dir));
+  if (!store_dir) return 2;
 
-    // `--root /` needs its own arm, and getting it wrong is worse than it looks: the strip
-    // loop leaves root as "/", so the general test degrades to `starts_with("//")`, which
-    // no normalised path matches -- every location would have been accepted as "outside"
-    // the one root that contains everything.
-    const bool inside = (root == std::string{kSep})
-                            ? store.starts_with(kSep)
-                            : (store == root || store.starts_with(root + kSep));
-    if (inside) {
-      std::cerr << "error: --backups must be outside --root (R4): " << store << " is inside "
-                << root << '\n';
-      return 2;
+  // Retention, settled 2026-08-18: the store covers the gap between a bad mutation and
+  // the operator noticing -- the supervised trees this project runs against live under
+  // git, so 72 hours is history enough. A retention failure is a note, not a stop: the
+  // job the operator asked for must not be blocked by archive bookkeeping, and the
+  // likely cause (a pre-marker store) comes with its own instructions.
+  {
+    const auto pruned = hermit::supervisor::prune(
+        *store_dir, std::chrono::hours{keep_hours},
+        std::filesystem::file_time_type::clock::now());
+    if (!pruned) {
+      std::cerr << "note: retention skipped: " << pruned.error() << '\n';
+    } else if (pruned->generations > 0) {
+      std::cout << "retention: pruned " << pruned->generations
+                << (pruned->generations == 1 ? " undo generation older than "
+                                             : " undo generations older than ")
+                << keep_hours << "h from " << store_dir->string() << '\n';
     }
   }
 
@@ -500,7 +566,7 @@ int agent_command(std::span<const std::string_view> args) {
     return 1;
   }
 
-  auto tools = hermit::app::ToolSet::tier0(*backup_dir);
+  auto tools = hermit::app::ToolSet::tier0(*store_dir);
   if (!tools) {
     std::cerr << "error: composing the tool set failed: "
               << hermit::to_string(tools.error().kind) << '\n';
@@ -585,6 +651,35 @@ int agent_command(std::span<const std::string_view> args) {
 
   hermit::supervisor::ReinvokeOptions reinvoke_options;
   reinvoke_options.attempts = attempts;
+  if (judge_model && expectations.semantic.empty()) {
+    // Accepting it silently would be this codebase's least favourite failure: a flag
+    // that looks like it arranged judging while nothing gets judged.
+    std::cerr << "error: --judge-model was given, but no satisfies: expectation states "
+                 "what it would judge.\n";
+    return 2;
+  }
+  if (!expectations.semantic.empty()) {
+    // The working model was preflighted through the probe; a judge model named by flag
+    // has passed no gate at all, and a typo here would run the whole job and then leave
+    // every criterion Undecidable -- reported, but only after the tokens are spent.
+    // Refused up front instead, the same reason R9 exists.
+    if (judge_model && *judge_model != config->model) {
+      if (const auto card = client->show(*judge_model); !card) {
+        std::cerr << "error: the judge model " << *judge_model
+                  << " is not known to the daemon: " << card.error().detail << '\n';
+        return 2;
+      }
+    }
+    // The judge shares the working session's window: it is sized by the same daemon
+    // and the same clamp, and a criterion whose file needs more context than the work
+    // itself is a case to surface, not to size around silently.
+    reinvoke_options.semantic = expectations.semantic;
+    reinvoke_options.judge = hermit::supervisor::SemanticJudge{
+        .chat = [&client](const hermit::ollama::ChatRequest& r) { return client->chat(r); },
+        .model = judge_model.value_or(config->model),
+        .num_ctx = probe->window(),
+    };
+  }
   // The first attempt's banner is the run header below; a retry announces itself with
   // the one sentence the model is being re-invoked over, before its turns start.
   reinvoke_options.on_attempt = [](std::size_t attempt, std::size_t of,
@@ -596,7 +691,8 @@ int agent_command(std::span<const std::string_view> args) {
   };
 
   std::cout << "root    : " << box->root() << '\n'
-            << "backups : " << *backup_dir << "  (outside the root, R4)\n"
+            << "backups : " << *store_dir << "  (outside the root, R4; kept "
+            << keep_hours << "h)\n"
             << "model   : " << config->model << '\n'
             << "window  : " << probe->window() << " tokens, " << probe->prompt_budget()
             << " for the prompt\n"
@@ -606,13 +702,19 @@ int agent_command(std::span<const std::string_view> args) {
             << "verify  : " << (verify ? "per-turn hash diff of the tree (R6)" : "off")
             << '\n'
             << "expect  : "
-            << (expectations.set.empty() ? std::string{"nothing stated -- report only"}
-                                         : std::to_string(expectations.set.size()) +
-                                               " post-conditions, " +
-                                               std::to_string(expectations.unjudged) +
-                                               " unjudged, up to " +
-                                               std::to_string(attempts) + " attempts (R7)")
-            << "\n\n"
+            << (expectations.empty()
+                    ? std::string{"nothing stated -- report only"}
+                    : std::to_string(expectations.set.size()) + " structural, " +
+                          std::to_string(expectations.semantic.size()) +
+                          " judged for meaning, " + std::to_string(expectations.unjudged) +
+                          " unjudged, up to " + std::to_string(attempts) + " attempts (R7)")
+            << '\n';
+  if (!expectations.semantic.empty()) {
+    std::cout << "judge   : " << judge_model.value_or(config->model)
+              << "  (a fresh session per attempt; its verdicts are the model's judgment,"
+                 " not a measurement)\n";
+  }
+  std::cout << "\n"
             << "instruction: " << instruction << "\n\n";
 
   const auto job = hermit::supervisor::reinvoke(*client, tools->registry(), *box,
@@ -691,8 +793,12 @@ int agent_command(std::span<const std::string_view> args) {
     }
   }
 
-  if (!expectations.set.empty() || expectations.unjudged > 0) {
-    std::cout << "\nwhat was asked for (structural post-conditions, R6):\n";
+  if (!expectations.set.empty() || !expectations.semantic.empty() ||
+      expectations.unjudged > 0) {
+    std::cout << (expectations.semantic.empty()
+                      ? "\nwhat was asked for (structural post-conditions, R6):\n"
+                      : "\nwhat was asked for (structure measured per R6; meaning judged "
+                        "per D15):\n");
     std::string line;
     for (const char c : outcome.verdict.render()) {
       if (c != '\n') {
@@ -745,7 +851,7 @@ int agent_command(std::span<const std::string_view> args) {
       std::cout << "\nnote: the model stopped asking for tools. Nothing about the tree was\n"
                    "      checked -- --no-verify was given, so this run is unverified and\n"
                    "      a clean stop is not evidence that anything happened.\n";
-    } else if (expectations.set.empty()) {
+    } else if (expectations.set.empty() && expectations.semantic.empty()) {
       std::cout << "\nnote: the model stopped asking for tools, and the changes above are what\n"
                    "      the filesystem shows. Whether they are the *correct* changes is not\n"
                    "      decided here -- that needs a post-condition this command was not given.\n";
@@ -775,6 +881,182 @@ int agent_command(std::span<const std::string_view> args) {
   // silently.
   if (!outcome.ran_to_completion()) return 1;
   return outcome.verdict.first_unmet().has_value() ? 3 : 0;
+}
+
+// R4's operator side: list what the store preserved, put a generation back, or apply
+// retention by hand. No flag lists -- the safe reading is the default, and both
+// mutations are an explicit flag away.
+int undo_command(std::span<const std::string_view> args) {
+  std::optional<std::filesystem::path> backup_dir;
+  std::optional<std::uint64_t> restore_seq;
+  bool restore_last = false;
+  bool prune_now = false;
+  std::uint64_t keep_hours = 72;
+  bool keep_hours_given = false;
+
+  std::vector<std::string_view> passthrough;
+  bool malformed = false;
+  for (std::size_t i = 0; i < args.size(); ++i) {
+    const auto takes_value = [&](std::string_view flag, std::string_view& out) {
+      if (args[i] != flag) return false;
+      if (i + 1 >= args.size()) {
+        std::cerr << "error: " << flag << " needs a value\n";
+        malformed = true;
+        return false;
+      }
+      out = args[++i];
+      return true;
+    };
+    std::string_view value;
+    if (malformed) break;
+    if (takes_value("--backups", value)) {
+      backup_dir = std::filesystem::path{value};
+      continue;
+    }
+    if (takes_value("--restore", value)) {
+      // Not `whole_number`: that helper refuses zero because zero is never a valid
+      // bound, but generation 0000 is the first thing every store writes, and the
+      // operator will type the zero-padded name straight off the listing.
+      std::uint64_t seq = 0;
+      const auto* const end = value.data() + value.size();
+      const auto [stopped, ec] = std::from_chars(value.data(), end, seq);
+      if (ec != std::errc{} || stopped != end || value.empty()) {
+        std::cerr << "error: --restore needs a generation number from the listing, got: "
+                  << value << '\n';
+        return 2;
+      }
+      restore_seq = seq;
+      continue;
+    }
+    if (takes_value("--keep-hours", value)) {
+      const auto parsed = whole_number(value, 8760);
+      if (!parsed) {
+        std::cerr << "error: --keep-hours needs a whole number from 1 to 8760, got: "
+                  << value << '\n';
+        return 2;
+      }
+      keep_hours = *parsed;
+      keep_hours_given = true;
+      continue;
+    }
+    if (args[i] == "--last") {
+      restore_last = true;
+      continue;
+    }
+    if (args[i] == "--prune") {
+      prune_now = true;
+      continue;
+    }
+    passthrough.push_back(args[i]);
+  }
+  if (malformed) return 2;
+
+  const int actions = (restore_seq ? 1 : 0) + (restore_last ? 1 : 0) + (prune_now ? 1 : 0);
+  if (actions > 1) {
+    std::cerr << "error: --restore, --last and --prune are one decision each; "
+                 "pick one per invocation\n";
+    return 2;
+  }
+  if (keep_hours_given && !prune_now) {
+    std::cerr << "error: --keep-hours only means something with --prune here; "
+                 "the agent applies it automatically at start\n";
+    return 2;
+  }
+
+  std::vector<std::string_view> words;
+  // No model and no network, same as resolve: undo is pure filesystem work.
+  const auto config = hermit::app::load(
+      passthrough, {.sandbox_root = true, .model = false, .ollama = false}, words);
+  if (!config) return report(config.error());
+  if (!words.empty()) {
+    std::cerr << "error: undo takes no positional arguments, got: " << words.front() << '\n';
+    return 2;
+  }
+
+  auto box = hermit::Sandbox::open(config->sandbox_root);
+  if (!box) {
+    std::cerr << "error: " << hermit::to_string(box.error()) << ": " << config->sandbox_root
+              << '\n';
+    return 1;
+  }
+  const auto store_dir = settle_store_dir(*box, std::move(backup_dir));
+  if (!store_dir) return 2;
+
+  if (prune_now) {
+    const auto pruned = hermit::supervisor::prune(
+        *store_dir, std::chrono::hours{keep_hours},
+        std::filesystem::file_time_type::clock::now());
+    if (!pruned) {
+      std::cerr << "error: " << pruned.error() << '\n';
+      return 1;
+    }
+    std::cout << "pruned " << pruned->generations
+              << (pruned->generations == 1 ? " generation" : " generations")
+              << " older than " << keep_hours << "h from " << store_dir->string() << '\n';
+    return 0;
+  }
+
+  const auto generations = hermit::supervisor::enumerate(*store_dir);
+  if (!generations) {
+    std::cerr << "error: " << generations.error() << '\n';
+    return 1;
+  }
+  if (generations->empty()) {
+    // A listing of an empty history is a fact; an explicitly requested restore that
+    // cannot happen is a failure, and a scripted caller must be able to tell them
+    // apart by the exit code.
+    if (restore_seq || restore_last) {
+      std::cerr << "error: nothing to restore: no generations in " << store_dir->string()
+                << '\n';
+      return 1;
+    }
+    std::cout << "nothing to undo: no generations in " << store_dir->string() << '\n';
+    return 0;
+  }
+
+  if (restore_last) restore_seq = generations->back().seq;
+  if (restore_seq) {
+    const auto restored =
+        hermit::supervisor::restore(*store_dir, *box, *restore_seq);
+    if (!restored) {
+      std::cerr << "error: " << restored.error() << '\n';
+      return 1;
+    }
+    std::cout << "restored " << restored->generation.relative.string()
+              << " from generation " << restored->generation.name << '\n';
+    if (restored->preserved) {
+      // The listing names generations by directory; say it the same way, so the redo
+      // the operator may want next is a copy-paste from this line.
+      const std::filesystem::path as_generation =
+          restored->preserved->lexically_relative(*store_dir);
+      std::cout << "(its previous content is preserved as generation "
+                << as_generation.begin()->string() << ")\n";
+    } else {
+      std::cout << "(the file did not exist, so nothing needed preserving)\n";
+    }
+    return 0;
+  }
+
+  // The listing, newest first: the mistake being recovered from is almost always the
+  // most recent one.
+  std::cout << "undo data in " << store_dir->string() << " (newest first):\n\n"
+            << "  generation  preserved at         bytes       file\n";
+  for (auto it = generations->rbegin(); it != generations->rend(); ++it) {
+    const auto sys_when =
+        std::chrono::clock_cast<std::chrono::system_clock>(it->when);
+    const std::time_t t = std::chrono::system_clock::to_time_t(sys_when);
+    char stamp[32] = "unknown";
+    if (std::tm tm{}; ::localtime_r(&t, &tm) != nullptr) {
+      std::strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", &tm);
+    }
+    std::cout << "  " << it->name << "        " << stamp << "  ";
+    std::string size = std::to_string(it->bytes);
+    if (size.size() < 10) size.append(10 - size.size(), ' ');
+    std::cout << size << "  " << it->relative.string() << '\n';
+  }
+  std::cout << "\nrestore one with: hermit undo --root " << box->root().string()
+            << " --restore <generation>\n";
+  return 0;
 }
 
 // Everything that is in force, and where each value came from.
@@ -810,6 +1092,7 @@ int main(int argc, char** argv) {
   if (command == "preflight") return preflight_command(args);
   if (command == "session") return session_command(args);
   if (command == "agent") return agent_command(args);
+  if (command == "undo") return undo_command(args);
   if (command == "config") return config_command(args);
   if (command == "--help" || command == "-h" || command == "help") {
     usage(std::cout);

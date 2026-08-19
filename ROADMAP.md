@@ -639,12 +639,16 @@ model calling this as a tool.
         everything as passing. Worse in the mid-run case, where judging the last good
         snapshot yields a fully formed verdict, hashes and all, about a tree no longer on
         disk.
-- [ ] **A post-condition for meaning, not only structure.** The four predicates cover 329 of
-      413 recorded failures; the residue is real. `report.md` holding
-      `grep -oP '(?<=^).*' notes.txt` satisfies `exists:report.md` perfectly, and D13's live
-      example is exactly that. Counted as `Verdict::unjudged` and stated with `--unjudged N`
-      so a verdict cannot read as "the work is done", which is honest bookkeeping rather
-      than an answer.
+- [x] ~~**A post-condition for meaning, not only structure**~~ — **done 2026-08-18**,
+      [D15](./DECISIONS.md): `satisfies:PATH=CRITERION`, decided by a model reading the
+      file's bytes and the tree's path listing in a fresh session (default: the working
+      model; `--judge-model` overrides), once per attempt, only after the structural
+      verdict is fully met — and labelled "(the model's judgment, not a measurement)" on
+      every decided line. An unmet judgment drives R7 exactly as a structural finding
+      does; E1's whole residue was this shape, and the live check reproduced D13's
+      example: handed `grep ... | bc` where prose was required, the 9B judge wrote the
+      retry sentence itself. Reply markers ("output contains TXTCOUNT=3") remain
+      `Verdict::unjudged` — D13 keeps the reply off the verification path.
 - [x] ~~**Re-invocation** with one concrete remaining failure~~ — **done 2026-08-18**,
       `supervisor/reinvoke.cpp`, later the same day as the judge wiring because that is what
       unblocked it. Up to `--attempts` total attempts (default 3 — the ~67%→~96% arithmetic),
@@ -673,10 +677,17 @@ model calling this as a tool.
       measures reaction to a confusing error rather than to a fair one. The direction is the
       point — these models do not reliably self-correct, so re-invocation has to come from
       outside them.
-- [ ] **Guardrails** — dry-run, backup-before-mutate, undo. The erased `tally.py` is the argument.
-      *Where* backups live was settled 2026-08-15 — never granted to the confined child, per
-      [D10](./DECISIONS.md) and [ROUTING.md](./ROUTING.md) §11 — so what remains here is
-      retention and how undo is invoked, which is still the load-bearing half.
+- [x] ~~**Guardrails** — backup-before-mutate, undo, retention~~ — **done 2026-08-18**,
+      [D14](./DECISIONS.md): `hermit undo` lists by default and mutates only by explicit flag;
+      restore preserves what it overwrites (redo is undo of the undo) and re-resolves the
+      recorded path through R1 on the way out; retention is 72h (`--keep-hours`), applied at
+      agent start, refusing any directory without the `.hermit-store` marker. The erased
+      `tally.py` was the argument, and its recovery is now the smoke test. *Where* backups
+      live was settled 2026-08-15 — never granted to the confined child, per
+      [D10](./DECISIONS.md) and [ROUTING.md](./ROUTING.md) §11. **Dry-run remains unbuilt**
+      and moves to the `delete` discussion where it belongs: every current mutation is
+      backed up or non-destructive, so dry-run pays for itself the day a destructive tool
+      lands.
 - [ ] **Bounded sessions** — fresh session per unit of work rather than one long autonomous run.
 
 ---

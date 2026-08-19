@@ -26,6 +26,16 @@
 //     *means* mid-job. The verdict always answers the question that was asked, once, at
 //     the start. `LoopOptions::judge_baseline` is the seam this rides on.
 //
+//   - **Meaning is judged after structure, once per attempt.** Structural judgment is
+//     cheap and per-turn; the semantic judge (semantic.h) is a model call, and it runs
+//     only when an attempt ends with every structural expectation met -- so R7 gets a
+//     progression, fix the structure and then fix the meaning, and no judge tokens are
+//     spent on an attempt that already failed structurally. When structure did not pass,
+//     the criteria are still reported -- as Undecidable, "not judged" -- so a completed
+//     attempt's verdict never silently omits something the operator stated. (An
+//     infrastructure stop breaks out before either judge and reports nothing but the
+//     stop itself; its exit is nonzero, so nothing reads as examined.)
+//
 //   - **Infrastructure is never retried.** Transport, SessionRefused, VerificationFailed
 //     and Misconfigured stop the job: R7 exists for model inconsistency, and a model run
 //     spent against a dead daemon or an unreadable tree retries a problem that is not the
@@ -44,6 +54,7 @@
 #include <vector>
 
 #include <hermit/supervisor/loop.h>
+#include <hermit/supervisor/semantic.h>
 #include <hermit/supervisor/session.h>
 
 namespace hermit::supervisor {
@@ -66,6 +77,15 @@ struct ReinvokeOptions {
   /// arithmetic the product is named for: three attempts with a check in between.
   /// 0 is read as 1 -- "never run" is not a request anyone makes on purpose.
   std::size_t attempts = 3;
+
+  /// The meaning half of the post-conditions: `Satisfies` expectations only, judged in
+  /// declaration order once per attempt, after the structural verdict is fully met.
+  /// Empty means no semantic judging. Non-empty requires `judge`, refused at entry
+  /// otherwise -- the same fail-closed shape as judge_baseline without a verifier.
+  ExpectationSet semantic{};
+
+  /// How the semantic judge is reached. Only read when `semantic` is non-empty.
+  std::optional<SemanticJudge> judge{};
 
   /// Called before each attempt begins. `retrying` is the unmet finding this attempt was
   /// re-invoked to fix, null on the first attempt; it points at driver-held state and

@@ -247,7 +247,7 @@ TEST_F(ExpectTest, TheRootItselfIsRefused) {
 TEST_F(ExpectTest, MalformedSpecsAreRefusedWithTheCallersOwnText) {
   EXPECT_EQ(refusal(""), "empty expectation");
   EXPECT_EQ(refusal("notes.txt"),
-            "no kind; expected exists:, dir:, absent:, preserved: or identical:");
+            "no kind; expected exists:, dir:, absent:, preserved:, identical: or satisfies:");
   EXPECT_EQ(refusal("exists:"), "empty path");
   EXPECT_EQ(refusal("preserved:notes.txt"), "preserved needs two paths, written FROM=TO");
   EXPECT_EQ(refusal("identical:notes.txt="), "second path: empty path");
@@ -258,7 +258,7 @@ TEST_F(ExpectTest, MalformedSpecsAreRefusedWithTheCallersOwnText) {
   EXPECT_EQ(parsed.error().spec, "exsits:notes.txt");
   EXPECT_EQ(parsed.error().render(),
             "expectation \"exsits:notes.txt\": unknown kind \"exsits\"; expected exists, "
-            "dir, absent, preserved or identical");
+            "dir, absent, preserved, identical or satisfies");
 }
 
 TEST_F(ExpectTest, TheFirstRefusalStopsTheWholeSet) {
@@ -427,6 +427,85 @@ TEST_F(ExpectTest, TheJsonFormIsCheckedForContradictionsToo) {
   auto parsed = parse_expectations_json(settings, *sandbox_);
   ASSERT_FALSE(parsed.has_value());
   EXPECT_EQ(parsed.error().spec, "report.md");
+}
+
+// --- satisfies: -- the meaning half's grammar ---------------------------------
+
+TEST_F(ExpectTest, SatisfiesSplitsAtTheFirstEqualsAndKeepsTheRestVerbatim) {
+  // The right half is the operator's words, not a path: a second '=' belongs to the
+  // criterion, and nothing may rewrite it -- it is what the judge is asked and what an
+  // unmet finding quotes back.
+  const Expectation e = ok("satisfies:report.md=a summary where x=1 holds");
+  EXPECT_EQ(e.kind, ExpectationKind::Satisfies);
+  EXPECT_EQ(e.path, "report.md");
+  EXPECT_EQ(e.criterion, "a summary where x=1 holds");
+}
+
+TEST_F(ExpectTest, SatisfiesWithoutACriterionIsRefused) {
+  EXPECT_NE(refusal("satisfies:report.md").find("needs a criterion"), std::string::npos);
+  EXPECT_NE(refusal("satisfies:report.md=").find("needs a criterion"), std::string::npos);
+}
+
+TEST_F(ExpectTest, SatisfiesGatesItsPathLikeAnyOther) {
+  EXPECT_NE(refusal("satisfies:../out.md=a summary").find(".."), std::string::npos);
+}
+
+TEST_F(ExpectTest, TheObjectFormCarriesACriterionKey) {
+  const auto settings = nlohmann::json::parse(R"({
+    "expectations": [{"kind": "satisfies", "path": "report.md",
+                      "criterion": "a one-line summary"}]
+  })");
+  auto parsed = parse_expectations_json(settings, *sandbox_);
+  ASSERT_TRUE(parsed.has_value()) << parsed.error().render();
+  ASSERT_EQ(parsed->semantic.size(), 1u);
+  EXPECT_EQ(parsed->semantic[0].criterion, "a one-line summary");
+}
+
+TEST_F(ExpectTest, CriteriaAreSplitFromStructureKeepingBothOrders) {
+  // Structure goes to the per-turn judge, criteria to the per-attempt one; the split
+  // must not reorder either side, because R7 restates the FIRST unmet finding.
+  auto parsed = parse_set({"exists:report.md", "satisfies:report.md=a summary",
+                           "exists:existing", "satisfies:existing=kept intact"});
+  ASSERT_TRUE(parsed.has_value()) << parsed.error().render();
+  ASSERT_EQ(parsed->set.size(), 2u);
+  ASSERT_EQ(parsed->semantic.size(), 2u);
+  EXPECT_EQ(parsed->set[0].path, "report.md");
+  EXPECT_EQ(parsed->set[1].path, "existing");
+  EXPECT_EQ(parsed->semantic[0].path, "report.md");
+  EXPECT_EQ(parsed->semantic[1].path, "existing");
+  EXPECT_FALSE(parsed->empty());
+}
+
+TEST_F(ExpectTest, ACriterionOnAnAbsentPathIsRefusedAsUnsatisfiable) {
+  // The semantic judge answers a missing file Unmet, so `absent:x` beside
+  // `satisfies:x=...` is a set no run could ever satisfy -- refused where it was
+  // authored, before the cross-check loses sight of the criteria in the split.
+  auto parsed = parse_set({"absent:report.md", "satisfies:report.md=a summary"});
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error().spec, "report.md");
+}
+
+TEST_F(ExpectTest, ACriterionOnADirectoryIsRefusedAsUnsatisfiable) {
+  auto parsed = parse_set({"dir:archive", "satisfies:archive=holds the old logs"});
+  ASSERT_FALSE(parsed.has_value());
+}
+
+TEST_F(ExpectTest, TheObjectFormRefusesAKeyThatDoesNotMatchTheKind) {
+  // "other" is documented as a path, "criterion" as free text; accepting either for
+  // either would let a criterion slide through the two-path grammar unchecked.
+  const auto masquerade = nlohmann::json::parse(R"({
+    "expectations": [{"kind": "satisfies", "path": "x", "other": "a summary"}]
+  })");
+  auto a = parse_expectations_json(masquerade, *sandbox_);
+  ASSERT_FALSE(a.has_value());
+  EXPECT_NE(a.error().message.find("criterion"), std::string::npos);
+
+  const auto misapplied = nlohmann::json::parse(R"({
+    "expectations": [{"kind": "exists", "path": "x", "criterion": "a summary"}]
+  })");
+  auto b = parse_expectations_json(misapplied, *sandbox_);
+  ASSERT_FALSE(b.has_value());
+  EXPECT_NE(b.error().message.find("satisfies only"), std::string::npos);
 }
 
 }  // namespace
