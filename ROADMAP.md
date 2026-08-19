@@ -565,8 +565,27 @@ model calling this as a tool.
         The raw data — result files, per-run logs, the wire capture, and both quarantined
         collections — is published in the **hermit-bench** repository (the extraction
         DESIGN.md always planned); this repo keeps the suites and the analysis documents.
+      - [x] ~~**E3/E4/E5**~~ — **ran 2026-08-19** on Kitchen, out of the public
+        [hermit-bench](https://github.com/Jeagermeister/hermit-bench) repository where the
+        suites and results now live. E3, the E1 question at 27B: **105/105 in all three
+        cells**, verdict/referee agreement 70/70 — supervision cost nothing measurable, at a
+        ~3.5× wall-clock advantage. E4, four repository-scale tasks against a 30B coder: the
+        tier discriminates (55% baseline), supervision is a wash at five repeats, and D15's
+        first dogfooding measured its error mode in both directions — blind where the control
+        was unwired, false-unmet 14/40 where it judged. E5, three general agentic models on
+        the same tier: qwen3.8:27b near-ceilings it; every baseline failure lands on one
+        lockfile line of the judge-blind task (9 silent exit-0 failures in supervised cells);
+        the judge rider closed E4's question — **zero false unmets in 120 runs**, the
+        confabulation was the judge model, not D15's design; and the no-shell cost gained a
+        second, model-dependent witness. A same-day verification pass corrected the
+        retry-conversion narrative in both results documents before first push (every table
+        reproduced; the story around two of them did not). The supervisor-side work the
+        series priced is **"The measured levers"** below.
       - [ ] **E2, economics** — still blocked on `mcp.cpp` above, deliberately its first
-        real workout.
+        real workout. The E3–E5 series raises its priority: reliability is now measured
+        across two machines and five model tiers, so cost-per-completed-task is the
+        question the evidence base is missing (hermit-bench's TODO.md names it the next
+        experiment to freeze).
 
 ## Phase 3 — The supervisor (the actual product)
 
@@ -689,6 +708,53 @@ model calling this as a tool.
       backed up or non-destructive, so dry-run pays for itself the day a destructive tool
       lands.
 - [ ] **Bounded sessions** — fresh session per unit of work rather than one long autonomous run.
+
+---
+
+## The measured levers — what the 2026-08-19 series priced
+
+E3/E4/E5 ran from the public [hermit-bench](https://github.com/Jeagermeister/hermit-bench)
+repository (its `TODO.md` keeps the experiment-side docket: the E6 tier question, harness
+work, statistical power). This section is the supervisor-side half, in evidence order —
+every item cites the published result that motivates it, and none is scheduled by being
+listed here.
+
+- [ ] **D10 — kernel confinement, then a shell tool.** Two independent witnesses that the
+      no-shell surface costs real points at repository scale: E4's task 15 (baseline 4/5
+      against 1/5 and 2/5 supervised) and E5's Nemotron (16/20 → 13/20 in *both* supervised
+      cells, reverting to the coder's failure shapes). The cost is model-dependent —
+      qwen3.8 and Muse paid nothing for the same surface — which sharpens rather than
+      weakens the argument: the models that need supervision most are the ones that think
+      in shell. Already a Phase 2.5 gate; this is the priority argument for clearing it.
+- [ ] **A better exit for done-at-bound.** Eleven E5 runs (7 Muse, 4 Nemotron) bounded out
+      at 20 turns with the work already complete — re-verification loops cost exits, not
+      scores. The judge already knows every expectation is met; a fully-met verdict should
+      be able to end the run before the turn budget does. E1 called this "deserves a better
+      exit"; E5 added eleven exhibits.
+- [ ] **A stock `satisfies:` expectation library.** E5's judge-blind control produced 9
+      silent exit-0 failures over failing trees, and every baseline failure in the
+      three-model roster was the same lockfile line. Four models now show the same law:
+      where the judge sees, nothing slips silently; where it is blind, everything does. One
+      stock expectation on the lockfile would have made all nine visible to R7. Candidates:
+      version pins, changelog headings, lockfile/manifest consistency. (The benchmark keeps
+      its control blind regardless — that half stays in hermit-bench.)
+- [ ] **`--judge-model`: from flag to recommendation.** E5's pre-registered rider: zero
+      false unmets in 120 supervised runs across three general models judging their own
+      criteria, against the E4 coder-judge's 14/40 (10/10 on one task). The confabulation
+      was the judge model, not D15's design. The docs should say so and name what
+      "demonstrated agreement" means — qwen3.8: 39/40 on E5's criteria, over 70/70 in E3.
+- [ ] **Retry quality gating.** R7 already hands judge unmets to fresh sessions, but at the
+      30B tier that mostly burned attempts on confabulated unmets over already-correct
+      trees — E4's every task-13 retry converted nothing (the appearance of a conversion
+      mechanism was manufactured by the confabulation itself; caught in same-day
+      verification against the attempt-level logs). One genuine judge-era conversion in 160
+      supervised repo-scale runs, against E1's 4/4 structural. The lever is the quality of
+      what feeds R7: judge-model guidance first, expectation calibration beside it.
+- [ ] **Expectation calibration.** E5 surfaced a structural expectation stricter than the
+      task's real bar: a byte-identity string stays permanently unmet once the model
+      rewrites the file's content, so retries chase it without hope and verdict/referee
+      agreement is depressed on runs the referee passes. Expectations need the same
+      discipline as referees: assert the task's bar, not a stronger one.
 
 ---
 
