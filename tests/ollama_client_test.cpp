@@ -221,6 +221,16 @@ TEST(BuildChatOptions, CarriesTemperatureAndPredictBudget) {
   EXPECT_FALSE(options.contains("max_tokens")) << "that is the OpenAI name, not Ollama's";
 }
 
+TEST(BuildChatOptions, AnUnsetTemperatureIsNotSentAtAll) {
+  // The default. Sending any number pins sampling, and 0 pins it hardest -- which is
+  // what this client silently did to every run until bench/delta's first sweep showed
+  // hermit deterministic while the baseline arm sampled freely (2026-08-18). The
+  // model's own default is only reachable by omission, so omission must be
+  // representable, and must be what an untouched request does.
+  const hermit::ollama::ChatRequest request;
+  EXPECT_FALSE(hermit::ollama::build_chat_options(request, 65536).contains("temperature"));
+}
+
 // --- parse_model_card --------------------------------------------------------
 
 TEST(ParseModelCard, ReadsARealShowResponse) {

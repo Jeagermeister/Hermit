@@ -335,6 +335,25 @@ struct LoopOutcome {
   /// legitimately empty even then if the model answered with tool calls to the end.
   std::string final_content;
 
+  /// The thinking channel of the answering reply, alongside `final_content` and only
+  /// meaningful when the reason is `Answered`. Carried because a model can answer into
+  /// its scratchpad and stop -- measured, not hypothetical: `fsops-qwen3.5-9b` under
+  /// this loop's native `/api/chat` request shape ended every marker-task run with
+  /// empty content and the literal answer (`FILECOUNT=5`) as the last line of
+  /// `thinking`, 10 of 10 runs, 2026-08-18 (bench/delta E1). A frontend that shows
+  /// only `final_content` silently loses the model's answer on such a run.
+  ///
+  /// Never judged, like the content: D13 stands, verification observes the filesystem
+  /// and no reply channel is on the critical path.
+  ///
+  /// Known limit: a reply that hits the generation budget mid-thinking (truncated,
+  /// content empty, reasoning non-empty) still classifies as `Answered` -- `generated()`
+  /// is deliberately broad -- so what this carries is then an unfinished scratchpad,
+  /// not an answer. `ChatReply::truncated()` is the tell a frontend can check before
+  /// presenting it as one. Did not occur in the E1 collection; recorded so it is a
+  /// gate, not a surprise.
+  std::string final_reasoning;
+
   /// Why it stopped, for anything other than a clean `Answered`. One line, already
   /// carrying whatever the Session or the transport said.
   std::string detail;

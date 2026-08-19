@@ -652,6 +652,14 @@ int agent_command(std::span<const std::string_view> args) {
   if (!outcome.detail.empty()) std::cout << "detail  : " << outcome.detail << '\n';
   if (!outcome.final_content.empty()) {
     std::cout << "\nreply:\n" << outcome.final_content << '\n';
+  } else if (!outcome.final_reasoning.empty() && outcome.ran_to_completion()) {
+    // The model answered into its scratchpad and stopped -- measured behaviour, not a
+    // guess (LoopOutcome::final_reasoning). The channel is shown because the operator
+    // asked the model a question and this is where its answer went; the label keeps it
+    // from reading as an ordinary reply. R6/D13 unaffected: nothing here is judged.
+    std::cout << "\nreply: none -- the model emitted no content and answered into its "
+                 "thinking channel,\n       which follows verbatim:\n"
+              << outcome.final_reasoning << '\n';
   }
 
   if (verify) {

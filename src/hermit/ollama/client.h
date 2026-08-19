@@ -146,7 +146,14 @@ struct ChatMessage {
 struct ChatRequest {
   std::string model;
   std::vector<ChatMessage> messages;
-  double temperature = 0.0;
+
+  /// Unset sends no `temperature` at all, leaving the model's own default sampling in
+  /// force -- the production posture, and the one R7's premise depends on: a retry
+  /// exploits the independence of attempts, and a pinned 0 makes attempt two replay
+  /// attempt one. This was 0.0 (always sent, always pinned) until 2026-08-18, when
+  /// bench/delta's first sweep showed every hermit run silently deterministic while
+  /// the baseline arm sampled freely. Pin it deliberately or not at all.
+  std::optional<double> temperature{};
 
   /// Generation cap, sent as `options.num_predict`.
   ///

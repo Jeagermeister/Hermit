@@ -319,7 +319,10 @@ json render_message(const ChatMessage& message) {
 }
 
 json build_chat_options(const ChatRequest& request, std::uint64_t max_num_ctx) {
-  json options{{"temperature", request.temperature}};
+  // Absent means absent: an omitted temperature leaves the model's own sampling in
+  // force, which is not expressible by any value this could send instead.
+  json options = json::object();
+  if (request.temperature) options["temperature"] = *request.temperature;
   if (request.max_tokens) options["num_predict"] = *request.max_tokens;
 
   // The clamp. Ollama accepts any num_ctx it is given and makes no attempt to check
