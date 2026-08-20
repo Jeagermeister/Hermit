@@ -212,7 +212,7 @@ TEST(SessionPrepare, KeepsEverythingWhenItFits) {
   EXPECT_EQ(session.dropped(), 0u);
 }
 
-TEST(SessionPrepare, DropsTheOldestUnpinnedTurnToMakeRoom) {
+TEST(SessionPrepare, DropsToAMarginBelowTheBudgetAndHoldsSteadyBetweenTrims) {
   // Derived from the ratio rather than hand-written, so tightening the constant tunes
   // the estimate instead of breaking the test that checks the drop policy.
   auto session = small_session();
@@ -226,10 +226,21 @@ TEST(SessionPrepare, DropsTheOldestUnpinnedTurnToMakeRoom) {
 
   const auto request = session.prepare();
   ASSERT_TRUE(request.has_value());
-  EXPECT_EQ(session.dropped(), 1u);
-  EXPECT_EQ(request->messages.size(), fits + 1);  // system plus the survivors
+  // Trimmed past the exact fit, down to the hysteresis margin: an exact fit would
+  // re-trim on every later prepare(), changing the prompt's head every turn and
+  // defeating the server's prefix cache for the rest of the session.
+  EXPECT_GE(session.dropped(), 1u);
+  EXPECT_LE(session.estimated_prompt_tokens(),
+            session.prompt_budget() - session.prompt_budget() / 5);
   EXPECT_EQ(request->messages[0].role, "system");
-  EXPECT_LE(session.estimated_prompt_tokens(), session.prompt_budget());
+
+  // The margin's whole point: the following turns fit without another trim, so the
+  // surviving head stays byte-stable between trims.
+  const auto dropped_after_first_trim = session.dropped();
+  session.add_user(text_of(100));
+  const auto again = session.prepare();
+  ASSERT_TRUE(again.has_value());
+  EXPECT_EQ(session.dropped(), dropped_after_first_trim);
 }
 
 TEST(SessionPrepare, NeverDropsTheSystemPrompt) {

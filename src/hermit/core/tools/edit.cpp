@@ -123,16 +123,13 @@ std::expected<ToolOutput, ToolError> EditTool::run(const ToolArgs& args) {
   }
   observed_.record_present(target.relative(), tuple_from(back->meta));
 
-  const IdentityTuple t = tuple_from(back->meta);
+  // The fresh identity tuple is recorded above, supervisor-side; the rendered
+  // row carries only what the model can use.
   ToolOutput out;
   out.rows.push_back({{
       {"path", target.relative().string()},
       {"hash", sha256_hex(edited)},
-      {"dev", t.dev},
-      {"ino", t.ino},
-      {"size", t.size},
-      {"mtime_ns", t.mtime_ns},
-      {"ctime_ns", t.ctime_ns},
+      {"size", tuple_from(back->meta).size},
   }});
   return out;
 }

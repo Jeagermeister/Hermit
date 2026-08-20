@@ -171,17 +171,14 @@ std::expected<ToolOutput, ToolError> MoveTool::run(const ToolArgs& args) {
                   "(R3); the file is in an unexpected state");
   }
 
-  const IdentityTuple t = tuple_from(dest->meta);
+  // The fresh identity tuple is recorded above, supervisor-side; the rendered
+  // row carries only what the model can use.
   ToolOutput out;
   out.rows.push_back({{
       {"from", from.relative().string()},
       {"to", to.relative().string()},
       {"hash", *dest_hash},
-      {"dev", t.dev},
-      {"ino", t.ino},
-      {"size", t.size},
-      {"mtime_ns", t.mtime_ns},
-      {"ctime_ns", t.ctime_ns},
+      {"size", tuple_from(dest->meta).size},
   }});
   return out;
 }

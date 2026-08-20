@@ -65,7 +65,7 @@ makes R5's read-back compare against the wrong intent, and the guarantee is holl
 | Tool | The one whole job | Verification |
 |---|---|---|
 | `read` | Return exact bytes of one or more files | Returns content hash alongside |
-| `list` | Directory entries: type, size, identity tuple | `dev:ino:size:mtime:ctime` per entry |
+| `list` | Directory entries: type, size | `dev:ino:size:mtime:ctime` recorded per entry, supervisor-side (§5) -- the tuple feeds the staleness guard and is not rendered to the model, which cannot echo or act on it |
 | `find` | Paths matching a name/glob pattern | — |
 | `grep` | Content matches: path, line, text as sibling fields per match | — |
 | `hash` | Content hashes for a path set | *is* the verification (R3) |

@@ -297,27 +297,40 @@ SessionResult<ollama::ChatRequest> Session::prepare() {
   pin_latest_user();
 
   const std::uint64_t budget = prompt_budget();
-  while (estimated_prompt_tokens() > budget) {
-    const auto victim = std::find_if(turns_.begin(), turns_.end(),
-                                     [](const Turn& t) { return !t.pinned; });
-    if (victim == turns_.end()) {
-      // Everything left is pinned: the system prompt plus the message being answered.
-      // Nothing can be given up, so this is refused rather than handed to a server that
-      // would discard the middle of it and say nothing.
-      return std::unexpected(SessionProblem{
-          SessionError::MessageTooLarge,
-          "the system prompt and the current message need about " +
-              std::to_string(estimated_prompt_tokens()) + " tokens, but only " +
-              std::to_string(budget) + " are available in a window of " +
-              std::to_string(window_)});
+  if (estimated_prompt_tokens() > budget) {
+    // Trimmed with hysteresis: once over, drop down to a margin below the budget, not
+    // to an exact fit. An exact fit re-trims on every subsequent prepare() -- each
+    // exchange adds a group, so the rendered prompt would diverge from the previous
+    // request right after the system message, and the server's prefix cache would
+    // re-evaluate the whole prompt on every turn for the rest of the session. The
+    // margin gives up a little history a few turns early to keep the prompt
+    // byte-stable between trims.
+    const std::uint64_t target = budget - budget / 5;
+    while (estimated_prompt_tokens() > target) {
+      const auto victim = std::find_if(turns_.begin(), turns_.end(),
+                                       [](const Turn& t) { return !t.pinned; });
+      if (victim == turns_.end()) {
+        // Everything left is pinned: the system prompt plus the message being answered.
+        // Inside the budget that is simply a prompt that fits -- the margin is a
+        // preference, never a reason to refuse. Over the budget, nothing can be given
+        // up, so this is refused rather than handed to a server that would discard the
+        // middle of it and say nothing.
+        if (estimated_prompt_tokens() <= budget) break;
+        return std::unexpected(SessionProblem{
+            SessionError::MessageTooLarge,
+            "the system prompt and the current message need about " +
+                std::to_string(estimated_prompt_tokens()) + " tokens, but only " +
+                std::to_string(budget) + " are available in a window of " +
+                std::to_string(window_)});
+      }
+      // The whole group goes, or none of it. A pinned turn cannot appear inside a group --
+      // pin_latest_user pins only `system` and the latest `user`, and a group is an
+      // assistant turn followed by `tool` turns -- so this never erases something pinned.
+      const auto first = static_cast<std::size_t>(std::distance(turns_.begin(), victim));
+      const std::size_t count = group_size(turns_, first);
+      dropped_ += count;
+      turns_.erase(victim, victim + static_cast<std::ptrdiff_t>(count));
     }
-    // The whole group goes, or none of it. A pinned turn cannot appear inside a group --
-    // pin_latest_user pins only `system` and the latest `user`, and a group is an
-    // assistant turn followed by `tool` turns -- so this never erases something pinned.
-    const auto first = static_cast<std::size_t>(std::distance(turns_.begin(), victim));
-    const std::size_t count = group_size(turns_, first);
-    dropped_ += count;
-    turns_.erase(victim, victim + static_cast<std::ptrdiff_t>(count));
   }
 
   ollama::ChatRequest request;
