@@ -123,6 +123,27 @@ std::expected<std::filesystem::path, IoError> BackupStore::preserve_fd(
   if (fd < 0) return std::unexpected{IoError{.code = errno}};
   Fd owned{fd};
 
+  // Kernel-side first: on a reflinking filesystem (btrfs, XFS) copy_file_range is
+  // O(1) metadata that shares blocks until they diverge, and everywhere else it still
+  // spares every byte the round-trip through userspace. The explicit source offset
+  // leaves src_fd's file position untouched -- the same property pread gave the
+  // caller. A filesystem that refuses the call entirely falls through to the byte
+  // loop below; a refusal after bytes have moved is a real error.
+  off_t src_off = 0;
+  for (;;) {
+    const ssize_t n =
+        ::copy_file_range(src_fd, &src_off, owned.get(), nullptr, 1 << 30, 0);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      if (src_off == 0 && (errno == EXDEV || errno == EINVAL || errno == ENOSYS ||
+                           errno == EOPNOTSUPP)) {
+        break;
+      }
+      return discard(*target, IoError{.code = errno});
+    }
+    if (n == 0) return target;
+  }
+
   char buf[65536];
   off_t offset = 0;
   for (;;) {

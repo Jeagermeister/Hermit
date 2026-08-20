@@ -25,7 +25,7 @@ constexpr std::array<ArgSpec, 1> kArgs{{
 
 const ToolSpec kSpec{
     "list",
-    "Directory entries with type, size and the dev:ino:size:mtime:ctime identity tuple.",
+    "Directory entries with type and size.",
     kArgs};
 
 std::string_view type_of(mode_t mode) noexcept {
@@ -109,14 +109,14 @@ std::expected<ToolOutput, ToolError> ListTool::run(const ToolArgs& args) {
     if (S_ISREG(e.st.st_mode)) {
       observed_.record_present(entry_rel, t);
     }
+    // The identity tuple is recorded above, supervisor-side, which is the only
+    // place the staleness guard ever reads it. No tool accepts it back, so
+    // rendering it would spend ~35 tokens per row per turn for the session's
+    // life on numbers the model can neither echo nor act on.
     out.rows.push_back({{
         {"path", entry_rel.string()},
         {"type", std::string{type_of(e.st.st_mode)}},
-        {"dev", t.dev},
-        {"ino", t.ino},
         {"size", t.size},
-        {"mtime_ns", t.mtime_ns},
-        {"ctime_ns", t.ctime_ns},
     }});
   }
   return out;

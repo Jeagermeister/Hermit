@@ -323,10 +323,14 @@ class Session {
 
   /// The messages to send, compacted to fit if they did not.
   ///
-  /// Drops the oldest unpinned turns until the prompt fits, recording how many went.
-  /// Deliberately *not* summarisation: what to summarise and when is an open question
-  /// in ROADMAP.md, and quietly answering it here would be the wrong place. Dropping is
-  /// the honest interim policy, and the count is exposed so it cannot happen unnoticed.
+  /// Drops the oldest unpinned turns when the prompt outgrows the budget, recording how
+  /// many went. Trimmed with hysteresis, to a margin below the budget rather than to an
+  /// exact fit: an exact fit would re-trim on every subsequent call, and a prompt whose
+  /// head changes every turn defeats the server's prefix cache for the rest of the
+  /// session. Deliberately *not* summarisation: what to summarise and when is an open
+  /// question in ROADMAP.md, and quietly answering it here would be the wrong place.
+  /// Dropping is the honest interim policy, and the count is exposed so it cannot
+  /// happen unnoticed.
   ///
   /// **A call and its results are dropped together, never separately.** This was
   /// recorded as an open hazard in DECISIONS.md before tool messages existed, and it is

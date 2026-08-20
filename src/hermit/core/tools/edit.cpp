@@ -41,16 +41,6 @@ std::unexpected<ToolError> refuse(const SandboxPath& p, std::string_view why) {
       ToolError{"edit: " + p.relative().string() + ": " + std::string{why}}};
 }
 
-std::size_t count_occurrences(std::string_view haystack, std::string_view needle) {
-  std::size_t count = 0;
-  for (std::size_t pos = haystack.find(needle); pos != std::string_view::npos;
-       pos = haystack.find(needle, pos + 1)) {
-    ++count;
-    if (count > 1) break;  // two is already ambiguous; exact totals not needed
-  }
-  return count;
-}
-
 }  // namespace
 
 const ToolSpec& EditTool::spec() const noexcept { return kSpec; }
@@ -94,12 +84,13 @@ std::expected<ToolOutput, ToolError> EditTool::run(const ToolArgs& args) {
   auto bytes = read_all(*current, max_file_bytes_);
   if (!bytes) return refuse(target, to_string(bytes.error()));
 
-  const std::size_t occurrences = count_occurrences(*bytes, old_bytes);
-  if (occurrences == 0) {
+  // One scan settles both questions: where `old` is, and whether it is unique.
+  const std::size_t pos = bytes->find(old_bytes);
+  if (pos == std::string::npos) {
     return refuse(target, "`old` not found (0 occurrences); re-read the file "
                           "and match its bytes exactly");
   }
-  if (occurrences > 1) {
+  if (bytes->find(old_bytes, pos + 1) != std::string::npos) {
     return refuse(target, "`old` is ambiguous (2 or more occurrences); "
                           "include more surrounding context so it is unique");
   }
@@ -109,10 +100,11 @@ std::expected<ToolOutput, ToolError> EditTool::run(const ToolArgs& args) {
                               "; nothing was written");
   }
 
-  const std::size_t pos = bytes->find(old_bytes);
-  std::string edited = bytes->substr(0, pos);
+  std::string edited;
+  edited.reserve(bytes->size() - old_bytes.size() + new_bytes.size());
+  edited.append(*bytes, 0, pos);
   edited += new_bytes;
-  edited += bytes->substr(pos + old_bytes.size());
+  edited.append(*bytes, pos + old_bytes.size(), std::string::npos);
 
   auto temp = write_temp_beside(target, edited, current->meta.st_mode & 07777);
   if (!temp) return refuse(target, to_string(temp.error()));
@@ -131,16 +123,13 @@ std::expected<ToolOutput, ToolError> EditTool::run(const ToolArgs& args) {
   }
   observed_.record_present(target.relative(), tuple_from(back->meta));
 
-  const IdentityTuple t = tuple_from(back->meta);
+  // The fresh identity tuple is recorded above, supervisor-side; the rendered
+  // row carries only what the model can use.
   ToolOutput out;
   out.rows.push_back({{
       {"path", target.relative().string()},
       {"hash", sha256_hex(edited)},
-      {"dev", t.dev},
-      {"ino", t.ino},
-      {"size", t.size},
-      {"mtime_ns", t.mtime_ns},
-      {"ctime_ns", t.ctime_ns},
+      {"size", tuple_from(back->meta).size},
   }});
   return out;
 }

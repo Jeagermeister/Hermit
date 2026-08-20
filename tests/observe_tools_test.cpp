@@ -203,7 +203,7 @@ TEST_F(ObserveToolsTest, HashFailsClosedOnAMissingFile) {
 
 // --- list --------------------------------------------------------------------
 
-TEST_F(ObserveToolsTest, ListReturnsSortedEntriesWithIdentityTuple) {
+TEST_F(ObserveToolsTest, ListReturnsSortedEntriesWithTypeAndSize) {
   ListTool list{state_};
   auto out = call(list, {{"path", std::string{"."}}});
   ASSERT_TRUE(out.has_value()) << out.error().reason;
@@ -223,15 +223,13 @@ TEST_F(ObserveToolsTest, ListReturnsSortedEntriesWithIdentityTuple) {
 
   EXPECT_EQ(*uint(out->rows[0], "size"), 6u) << "alpha\\n is six bytes";
 
-  // The identity tuple, present and plausible: nonzero identity, timestamps
-  // after 2020 (1.577e18 ns) -- catches a forgotten field or unit mixup.
-  ASSERT_NE(uint(out->rows[0], "dev"), nullptr);
-  ASSERT_NE(uint(out->rows[0], "ino"), nullptr);
-  EXPECT_NE(*uint(out->rows[0], "ino"), 0u);
-  ASSERT_NE(integer(out->rows[0], "mtime_ns"), nullptr);
-  ASSERT_NE(integer(out->rows[0], "ctime_ns"), nullptr);
-  EXPECT_GT(*integer(out->rows[0], "mtime_ns"), 1'577'000'000'000'000'000);
-  EXPECT_GT(*integer(out->rows[0], "ctime_ns"), 1'577'000'000'000'000'000);
+  // The identity tuple is recorded supervisor-side, where the staleness guard
+  // reads it; no tool accepts it back, so a rendered copy would only spend
+  // prompt tokens on every later turn. Its absence from the row is the contract.
+  EXPECT_EQ(uint(out->rows[0], "dev"), nullptr);
+  EXPECT_EQ(uint(out->rows[0], "ino"), nullptr);
+  EXPECT_EQ(integer(out->rows[0], "mtime_ns"), nullptr);
+  EXPECT_EQ(integer(out->rows[0], "ctime_ns"), nullptr);
 }
 
 TEST_F(ObserveToolsTest, ListOfASubdirectoryPrefixesTheRelativePath) {
@@ -257,15 +255,23 @@ TEST_F(ObserveToolsTest, ListRefusesAFileTarget) {
   EXPECT_NE(out.error().reason.find("a.txt"), std::string::npos);
 }
 
-TEST_F(ObserveToolsTest, ListIdentityTupleIsStableAcrossCalls) {
+TEST_F(ObserveToolsTest, ListRecordsAStableIdentityTupleSupervisorSide) {
   ListTool list{state_};
   auto first = call(list, {{"path", std::string{"."}}});
+  ASSERT_TRUE(first.has_value());
+  const auto seen_first = state_.lookup("a.txt");
+  ASSERT_EQ(seen_first.status, hermit::ObservedState::Status::Present);
+
   auto second = call(list, {{"path", std::string{"."}}});
-  ASSERT_TRUE(first.has_value() && second.has_value());
-  ASSERT_EQ(first->rows.size(), second->rows.size());
-  EXPECT_EQ(*uint(first->rows[0], "ino"), *uint(second->rows[0], "ino"));
-  EXPECT_EQ(*integer(first->rows[0], "ctime_ns"), *integer(second->rows[0], "ctime_ns"))
+  ASSERT_TRUE(second.has_value());
+  const auto seen_second = state_.lookup("a.txt");
+  ASSERT_EQ(seen_second.status, hermit::ObservedState::Status::Present);
+
+  EXPECT_EQ(seen_first.tuple, seen_second.tuple)
       << "an untouched file keeps its tuple -- the staleness guard's premise";
+  EXPECT_NE(seen_first.tuple.ino, 0u);
+  EXPECT_GT(seen_first.tuple.ctime_ns, 1'577'000'000'000'000'000)
+      << "plausible timestamp -- catches a forgotten field or unit mixup";
 }
 
 // --- the three together ------------------------------------------------------

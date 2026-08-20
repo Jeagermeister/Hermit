@@ -42,19 +42,17 @@ std::unexpected<ToolError> refuse(const SandboxPath& p, std::string_view why) {
 }
 
 /// The rows every successful mutation returns: the resolved path, the new
-/// content's hash, and the fresh identity tuple in the same currency `list`
-/// speaks, so the observation is immediately usable again.
+/// content's hash, and the size. The fresh identity tuple is recorded in the
+/// observation set by the caller -- supervisor-side, the only place the
+/// staleness guard reads it -- so rendering it would only spend tokens on
+/// numbers the model cannot echo or act on.
 ToolRow result_row(const SandboxPath& p, bool created, const std::string& hash,
                    const IdentityTuple& t) {
   return {{
       {"path", p.relative().string()},
       {"created", created},
       {"hash", hash},
-      {"dev", t.dev},
-      {"ino", t.ino},
       {"size", t.size},
-      {"mtime_ns", t.mtime_ns},
-      {"ctime_ns", t.ctime_ns},
   }};
 }
 

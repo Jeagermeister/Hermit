@@ -17,8 +17,6 @@
 namespace hermit::supervisor {
 namespace {
 
-namespace fs = std::filesystem;
-
 /// Hash one regular file by streaming it, so a large file does not have to be held whole.
 ///
 /// Returns nullopt when the file could not be read, which the caller records as
@@ -31,7 +29,10 @@ std::optional<std::string> hash_regular(int dir_fd, const char* name,
   Fd owned{fd};
 
   Sha256 digest;
-  std::array<char, 64 * 1024> buffer{};
+  // Deliberately not value-initialised: read() defines every byte that update()
+  // consumes, and zeroing 64 KiB per hashed file costs more than the read for
+  // the small files repository trees are mostly made of.
+  std::array<char, 64 * 1024> buffer;
   while (true) {
     const ssize_t got = ::read(owned.get(), buffer.data(), buffer.size());
     if (got < 0) {
@@ -150,12 +151,17 @@ std::expected<TreeSnapshot, VerifyError> TreeVerifier::snapshot(
 
   // Explicit stack rather than recursion: a deep tree is attacker-influenced input here,
   // and a stack overflow is not a failure this can report.
+  //
+  // Relative paths travel as plain strings: entry names cannot contain '/' and "." /
+  // ".." are filtered at readdir, so parent + '/' + name already *is* the normal form
+  // fs::path::lexically_normal() would produce -- minus the two path re-parses and the
+  // handful of allocations they cost on every entry of the every-turn walk.
   struct Pending {
     Fd fd;
-    fs::path relative;
+    std::string relative;
   };
   std::vector<Pending> stack;
-  stack.push_back(Pending{Fd{root_fd}, fs::path{}});
+  stack.push_back(Pending{Fd{root_fd}, std::string{}});
 
   while (!stack.empty()) {
     Pending current = std::move(stack.back());
@@ -172,7 +178,7 @@ std::expected<TreeSnapshot, VerifyError> TreeVerifier::snapshot(
       const int failure = errno;
       ::close(dir_fd);
       return std::unexpected(VerifyError{.kind = VerifyErrorKind::DirectoryUnreadable,
-                                         .path = current.relative.string(),
+                                         .path = std::move(current.relative),
                                          .code = failure});
     }
     struct DirGuard {
@@ -189,7 +195,7 @@ std::expected<TreeSnapshot, VerifyError> TreeVerifier::snapshot(
     }
     if (errno != 0) {
       return std::unexpected(VerifyError{.kind = VerifyErrorKind::DirectoryUnreadable,
-                                         .path = current.relative.string(),
+                                         .path = std::move(current.relative),
                                          .code = errno});
     }
     // Sorted for a deterministic *walk*, not for a deterministic report -- `out` is a
@@ -201,18 +207,19 @@ std::expected<TreeSnapshot, VerifyError> TreeVerifier::snapshot(
 
     for (const std::string& name : names) {
       struct ::stat st {};
+      std::string key =
+          current.relative.empty() ? name : current.relative + '/' + name;
+
       if (::fstatat(::dirfd(dir), name.c_str(), &st, AT_SYMLINK_NOFOLLOW) != 0) {
         // A vanished entry between readdir and stat is a real event, not an error: the
         // tree is live and the model is working in it. It simply is not there now, and
         // the next snapshot's absence says so.
         if (errno == ENOENT) continue;
         return std::unexpected(VerifyError{.kind = VerifyErrorKind::DirectoryUnreadable,
-                                           .path = (current.relative / name).string(),
+                                           .path = std::move(key),
                                            .code = errno});
       }
 
-      const fs::path child = current.relative / name;
-      const std::string key = child.lexically_normal().string();
       ++entries_walked_;
 
       FileState state;
@@ -239,19 +246,18 @@ std::expected<TreeSnapshot, VerifyError> TreeVerifier::snapshot(
         }
       }
 
-      out.emplace(key, std::move(state));
-
       if (S_ISDIR(st.st_mode)) {
         const int child_fd = ::openat(::dirfd(dir), name.c_str(),
                                       O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-        if (child_fd < 0) {
-          if (errno == ENOENT) continue;  // vanished, as above
+        if (child_fd < 0 && errno != ENOENT) {  // vanished keeps the entry, as above
           return std::unexpected(VerifyError{.kind = VerifyErrorKind::DirectoryUnreadable,
-                                             .path = key,
+                                             .path = std::move(key),
                                              .code = errno});
         }
-        stack.push_back(Pending{Fd{child_fd}, child});
+        if (child_fd >= 0) stack.push_back(Pending{Fd{child_fd}, key});
       }
+
+      out.emplace(std::move(key), std::move(state));
     }
   }
 
