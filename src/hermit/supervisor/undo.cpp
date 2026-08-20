@@ -198,22 +198,43 @@ std::expected<Restored, std::string> restore(const fs::path& store, Sandbox& box
     return abandon("cannot set the mode of the restored file: " +
                    to_string(IoError{.code = errno}));
   }
-  char buf[65536];
-  off_t offset = 0;
-  for (;;) {
-    const ssize_t n = ::pread(src.get(), buf, sizeof buf, offset);
+  // Kernel-side first, the same rationale and fallback ladder as
+  // BackupStore::preserve_fd: reflink where the filesystem can, single kernel
+  // copy where it cannot, byte loop only where the call is refused outright.
+  bool copied = false;
+  off_t src_off = 0;
+  while (!copied) {
+    const ssize_t n =
+        ::copy_file_range(src.get(), &src_off, out.get(), nullptr, 1 << 30, 0);
     if (n < 0) {
       if (errno == EINTR) continue;
-      return abandon("reading " + source.string() + " failed: " +
+      if (src_off == 0 && (errno == EXDEV || errno == EINVAL || errno == ENOSYS ||
+                           errno == EOPNOTSUPP)) {
+        break;
+      }
+      return abandon("copying " + source.string() + " failed: " +
                      to_string(IoError{.code = errno}));
     }
-    if (n == 0) break;
-    if (auto written = write_all(out.get(), {buf, static_cast<std::size_t>(n)});
-        !written) {
-      return abandon("writing the restored content failed: " +
-                     to_string(written.error()));
+    if (n == 0) copied = true;
+  }
+  if (!copied) {
+    char buf[65536];
+    off_t offset = 0;
+    for (;;) {
+      const ssize_t n = ::pread(src.get(), buf, sizeof buf, offset);
+      if (n < 0) {
+        if (errno == EINTR) continue;
+        return abandon("reading " + source.string() + " failed: " +
+                       to_string(IoError{.code = errno}));
+      }
+      if (n == 0) break;
+      if (auto written = write_all(out.get(), {buf, static_cast<std::size_t>(n)});
+          !written) {
+        return abandon("writing the restored content failed: " +
+                       to_string(written.error()));
+      }
+      offset += n;
     }
-    offset += n;
   }
   if (::rename(temp.c_str(), target->path().c_str()) != 0) {
     return abandon("publishing the restored file failed: " +

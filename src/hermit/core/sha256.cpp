@@ -1,7 +1,14 @@
 #include <hermit/core/sha256.h>
 
 #include <bit>
+#include <cstdlib>
 #include <cstring>
+
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#define HERMIT_SHA256_X86 1
+#include <cpuid.h>
+#include <immintrin.h>
+#endif
 
 namespace hermit {
 namespace {
@@ -19,7 +26,8 @@ constexpr std::array<std::uint32_t, 64> kK{
     0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
     0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
-void process_block(std::array<std::uint32_t, 8>& state, const unsigned char* p) {
+void process_block_portable(std::array<std::uint32_t, 8>& state,
+                            const unsigned char* p) {
   std::uint32_t w[64];
   for (int i = 0; i < 16; ++i) {
     w[i] = (std::uint32_t{p[4 * i]} << 24) | (std::uint32_t{p[4 * i + 1]} << 16) |
@@ -61,6 +69,101 @@ void process_block(std::array<std::uint32_t, 8>& state, const unsigned char* p) 
   state[7] += h;
 }
 
+#ifdef HERMIT_SHA256_X86
+
+// The SHA extension path. Same FIPS 180-4 rounds the portable function runs, driven
+// through the CPU's dedicated instructions; both paths answer to the same test vectors,
+// and the round constants come from the one kK table above rather than being
+// re-transcribed into immediates.
+//
+// The message-schedule loop below is the standard formulation for these intrinsics:
+// four 128-bit lanes hold four rounds of W each, and lane g is rebuilt from lanes
+// g-4..g-1 exactly as the scalar recurrence builds w[i] from w[i-16..i-2].
+__attribute__((target("sha,sse4.1"))) void process_blocks_sha_ext(
+    std::array<std::uint32_t, 8>& state, const unsigned char* p, std::size_t count) {
+  // Big-endian words to native lanes, per 32-bit word.
+  const __m128i byteswap =
+      _mm_set_epi64x(0x0c0d0e0f08090a0bLL, 0x0405060700010203LL);
+
+  // state is {a..h}; the instructions want the ABEF / CDGH arrangement.
+  __m128i tmp = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&state[0]));
+  __m128i st1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&state[4]));
+  tmp = _mm_shuffle_epi32(tmp, 0xB1);
+  st1 = _mm_shuffle_epi32(st1, 0x1B);
+  __m128i st0 = _mm_alignr_epi8(tmp, st1, 8);
+  st1 = _mm_blend_epi16(st1, tmp, 0xF0);
+
+  while (count-- > 0) {
+    const __m128i save0 = st0;
+    const __m128i save1 = st1;
+
+    __m128i m[4];
+    __m128i round;
+    for (int g = 0; g < 16; ++g) {
+      if (g < 4) {
+        m[g] = _mm_shuffle_epi8(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(p + 16 * g)), byteswap);
+      } else {
+        __m128i sched = _mm_sha256msg1_epu32(m[g & 3], m[(g - 3) & 3]);
+        sched = _mm_add_epi32(sched, _mm_alignr_epi8(m[(g - 1) & 3], m[(g - 2) & 3], 4));
+        m[g & 3] = _mm_sha256msg2_epu32(sched, m[(g - 1) & 3]);
+      }
+      round = _mm_add_epi32(
+          m[g & 3], _mm_loadu_si128(reinterpret_cast<const __m128i*>(&kK[4 * g])));
+      st1 = _mm_sha256rnds2_epu32(st1, st0, round);
+      round = _mm_shuffle_epi32(round, 0x0E);
+      st0 = _mm_sha256rnds2_epu32(st0, st1, round);
+    }
+
+    st0 = _mm_add_epi32(st0, save0);
+    st1 = _mm_add_epi32(st1, save1);
+    p += 64;
+  }
+
+  tmp = _mm_shuffle_epi32(st0, 0x1B);
+  st1 = _mm_shuffle_epi32(st1, 0xB1);
+  st0 = _mm_blend_epi16(tmp, st1, 0xF0);
+  st1 = _mm_alignr_epi8(st1, tmp, 8);
+  _mm_storeu_si128(reinterpret_cast<__m128i*>(&state[0]), st0);
+  _mm_storeu_si128(reinterpret_cast<__m128i*>(&state[4]), st1);
+}
+
+#endif  // HERMIT_SHA256_X86
+
+// Decided once per process. HERMIT_SHA256_PORTABLE=1 forces the portable rounds -- the
+// escape hatch if a CPU misreports the extension, and what lets one machine's test run
+// exercise both paths.
+bool use_sha_extensions() {
+#ifdef HERMIT_SHA256_X86
+  if (const char* forced = std::getenv("HERMIT_SHA256_PORTABLE");
+      forced != nullptr && forced[0] != '\0' && forced[0] != '0') {
+    return false;
+  }
+  // CPUID.(EAX=7,ECX=0):EBX bit 29 is the architectural SHA flag; asked directly
+  // rather than through __builtin_cpu_supports, whose feature-name list varies
+  // across compiler versions.
+  unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
+  if (__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx) == 0) return false;
+  return (ebx & (1u << 29)) != 0;
+#else
+  return false;
+#endif
+}
+
+void process_blocks(std::array<std::uint32_t, 8>& state, const unsigned char* p,
+                    std::size_t count) {
+  static const bool hardware = use_sha_extensions();
+#ifdef HERMIT_SHA256_X86
+  if (hardware) {
+    process_blocks_sha_ext(state, p, count);
+    return;
+  }
+#else
+  (void)hardware;
+#endif
+  for (; count > 0; --count, p += 64) process_block_portable(state, p);
+}
+
 }  // namespace
 
 void Sha256::update(std::string_view bytes) {
@@ -75,14 +178,14 @@ void Sha256::update(std::string_view bytes) {
     p += take;
     n -= take;
     if (buffered_ == sizeof(buf_)) {
-      process_block(h_, buf_);
+      process_blocks(h_, buf_, 1);
       buffered_ = 0;
     }
   }
-  while (n >= sizeof(buf_)) {
-    process_block(h_, p);
-    p += sizeof(buf_);
-    n -= sizeof(buf_);
+  if (const std::size_t whole = n / sizeof(buf_); whole > 0) {
+    process_blocks(h_, p, whole);
+    p += whole * sizeof(buf_);
+    n -= whole * sizeof(buf_);
   }
   if (n > 0) {
     std::memcpy(buf_, p, n);

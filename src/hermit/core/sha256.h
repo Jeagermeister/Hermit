@@ -2,8 +2,11 @@
 
 // SHA-256 (FIPS 180-4), implemented here rather than pinned or vendored: R3
 // needs a content hash, the build has no crypto dependency, and the algorithm
-// is ~150 lines checked against published test vectors (the constants are the
-// standard ones; a single wrong digit fails every vector in the tests).
+// is a few hundred lines checked against published test vectors (the constants
+// are the standard ones; a single wrong digit fails every vector in the tests).
+// On x86-64 a runtime CPUID check selects the CPU's SHA extensions when present
+// -- same rounds, same digests, several times the throughput; the portable
+// rounds remain the fallback and can be forced with HERMIT_SHA256_PORTABLE=1.
 //
 // Not a security boundary, stated so the choice is not over-read: R3 compares
 // a file with itself across time, so the requirement is that any byte change
