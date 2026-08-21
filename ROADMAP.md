@@ -719,13 +719,23 @@ work, statistical power). This section is the supervisor-side half, in evidence 
 every item cites the published result that motivates it, and none is scheduled by being
 listed here.
 
-- [ ] **D10 — kernel confinement, then a shell tool.** Two independent witnesses that the
-      no-shell surface costs real points at repository scale: E4's task 15 (baseline 4/5
-      against 1/5 and 2/5 supervised) and E5's Nemotron (16/20 → 13/20 in *both* supervised
-      cells, reverting to the coder's failure shapes). The cost is model-dependent —
-      qwen3.8 and Muse paid nothing for the same surface — which sharpens rather than
-      weakens the argument: the models that need supervision most are the ones that think
-      in shell. Already a Phase 2.5 gate; this is the priority argument for clearing it.
+- [x] **D10 half one — the kernel confinement mechanism.** `core/confine.h`/`.cpp`: the
+      vendored Landlock launcher (`third_party/landlock-run/`, sha256-pinned) wired into
+      `run_confined` (fork, restrict, execvp) and `probe_confinement` (D10's own
+      EACCES-based probe, stronger than the vendored launcher's own `--probe`), plus the
+      pre-fork `/proc/self/fd` audit D10's implementation obligations require. Verified
+      end to end on this machine: writes inside the grant succeed, writes outside are
+      denied by the kernel, `/dev/null`'s narrowed grant and `/usr`-rooted exec both work.
+  - [ ] **D10 half two — the `shell` tool itself.** The `Tool` subclass, its `toolset.cpp`
+        registration, R8's wall-clock bound, stdout/stderr capture, and the MCP-exposure
+        config field gated on `probe_confinement()`'s result (ROUTING §8: "gate on the
+        probe, never on the platform"). Two independent witnesses that the no-shell
+        surface costs real points at repository scale motivate finishing this half: E4's
+        task 15 (baseline 4/5 against 1/5 and 2/5 supervised) and E5's Nemotron
+        (16/20 → 13/20 in *both* supervised cells, reverting to the coder's failure
+        shapes). The cost is model-dependent — qwen3.8 and Muse paid nothing for the same
+        surface — which sharpens rather than weakens the argument: the models that need
+        supervision most are the ones that think in shell.
 - [ ] **A better exit for done-at-bound.** Eleven E5 runs (7 Muse, 4 Nemotron) bounded out
       at 20 turns with the work already complete — re-verification loops cost exits, not
       scores. The judge already knows every expectation is met; a fully-met verdict should

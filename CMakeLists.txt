@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)  # SYSTEM on FetchContent_Declare
 project(hermit
   VERSION 0.0.1
   DESCRIPTION "Supervisor for local models doing bounded filesystem work"
-  LANGUAGES CXX)
+  LANGUAGES C CXX)  # C: the vendored Landlock launcher (D10) is C11
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -137,12 +137,36 @@ FetchContent_Declare(httplib
 
 FetchContent_MakeAvailable(nlohmann_json httplib)
 
+# --- vendored Landlock launcher (D10) -----------------------------------------
+# Not fetched via FetchContent: it is one file, pulled out of an unrelated monorepo, pinned to a
+# specific commit D10 records (third_party/landlock-run/NOTICE.md). The sha256 check below gives
+# it D3's "a dependency that differs silently is one more uncontrolled variable" guarantee by
+# another means -- FATAL_ERROR on any hand-edit of the vendored file, since confine.cpp's callers
+# only make sense if it is byte-identical to the audited, licensed source.
+file(SHA256 ${CMAKE_CURRENT_SOURCE_DIR}/third_party/landlock-run/main.c HERMIT_LANDLOCK_RUN_ACTUAL_SHA256)
+set(HERMIT_LANDLOCK_RUN_SHA256 c2d6f330e31924ccba7c9b70416e05b427bb7aacfc21dcd8d610cf22c20bd53a)
+if(NOT HERMIT_LANDLOCK_RUN_ACTUAL_SHA256 STREQUAL HERMIT_LANDLOCK_RUN_SHA256)
+  message(FATAL_ERROR
+    "third_party/landlock-run/main.c does not match the sha256 D10 pins "
+    "(got ${HERMIT_LANDLOCK_RUN_ACTUAL_SHA256}, expected ${HERMIT_LANDLOCK_RUN_SHA256}). "
+    "The vendored file must stay byte-identical to the audited source -- see NOTICE.md.")
+endif()
+
+# main -> landlock_run_cli_main at COMPILE TIME, not by editing the vendored file -- see
+# confine_internal.h and NOTICE.md for why. No hermit_warnings: this is audited, hash-pinned
+# third-party C, and our warning policy is for our own code, same reasoning already applied to
+# nlohmann/httplib above (SYSTEM).
+add_library(landlock_run_vendored third_party/landlock-run/main.c)
+set_target_properties(landlock_run_vendored PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+target_compile_definitions(landlock_run_vendored PRIVATE main=landlock_run_cli_main)
+
 # --- the library -------------------------------------------------------------
 # core knows nothing about models or the network (D7's layering table). The Ollama
 # client is a separate target for that reason, and it is the only one that links
 # httplib -- if core ever needs it, the layering has been broken.
 add_library(hermit_core
   src/hermit/core/backup.cpp
+  src/hermit/core/confine.cpp
   src/hermit/core/fsio.cpp
   src/hermit/core/observed.cpp
   src/hermit/core/sandbox.cpp
@@ -159,7 +183,7 @@ add_library(hermit_core
 
 target_include_directories(hermit_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(hermit_core
-  PRIVATE hermit_warnings
+  PRIVATE hermit_warnings landlock_run_vendored
   PUBLIC  hermit_sanitizers)
 add_library(hermit::core ALIAS hermit_core)
 

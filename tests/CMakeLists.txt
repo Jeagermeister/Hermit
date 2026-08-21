@@ -8,6 +8,7 @@ FetchContent_Declare(googletest
 FetchContent_MakeAvailable(googletest)
 
 add_executable(hermit_tests
+  confine_test.cpp
   sandbox_test.cpp
   tool_test.cpp
   fsio_test.cpp
