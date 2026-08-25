@@ -17,11 +17,12 @@ namespace {
 // Every key this understands, in one place. The unknown-key check reads these, so a
 // setting that is added here and nowhere else fails loudly rather than being accepted
 // and ignored -- which is the direction of failure worth having.
-constexpr std::string_view kTopLevelKeys[] = {"sandbox_root", "model",       "ollama",
-                                              "preflight",    "expectations", "unjudged"};
+constexpr std::string_view kTopLevelKeys[] = {"sandbox_root", "model",        "ollama",
+                                              "preflight",    "expectations", "unjudged", "shell"};
 constexpr std::string_view kOllamaKeys[] = {"base_url", "connect_timeout_s", "metadata_timeout_s",
                                             "chat_timeout_s", "max_num_ctx"};
 constexpr std::string_view kPreflightKeys[] = {"minimum_context", "require_tools", "warmup"};
+constexpr std::string_view kShellKeys[] = {"enabled", "timeout_s"};
 
 /// Every flag that consumes the argument after it.
 ///
@@ -41,7 +42,7 @@ constexpr std::string_view kPreflightKeys[] = {"minimum_context", "require_tools
 constexpr std::string_view kFlagsTakingAValue[] = {
     "--config",      "--root",             "--model",        "--url",
     "--max-num-ctx", "--min-context",      "--connect-timeout", "--metadata-timeout",
-    "--chat-timeout", "--expect",          "--unjudged",
+    "--chat-timeout", "--expect",          "--unjudged",       "--shell-timeout",
 };
 
 bool takes_a_value(std::string_view flag) {
@@ -313,6 +314,22 @@ ConfigResult<void> overlay_json(Config& config, const nlohmann::json& doc,
       return std::unexpected(p.error());
     } else if (*p) {
       config.set_origin(Field::Warmup, ConfigSource::File);
+    }
+  }
+
+  if (const auto it = doc.find("shell"); it != doc.end()) {
+    if (!it->is_object()) return std::unexpected(wrong_type("shell", "an object"));
+    if (auto ok = reject_unknown(*it, "shell", kShellKeys); !ok) return ok;
+
+    if (auto p = read_bool(*it, "enabled", "shell.enabled", config.shell.enabled); !p) {
+      return std::unexpected(p.error());
+    } else if (*p) {
+      config.set_origin(Field::ShellEnabled, ConfigSource::File);
+    }
+    if (auto p = read_seconds(*it, "timeout_s", "shell.timeout_s", config.shell.timeout); !p) {
+      return std::unexpected(p.error());
+    } else if (*p) {
+      config.set_origin(Field::ShellTimeout, ConfigSource::File);
     }
   }
 
@@ -628,6 +645,17 @@ ConfigResult<void> overlay_flags(Config& config, std::span<const std::string_vie
     } else if (flag == "--no-tools") {
       config.preflight.require_tools = false;
       config.set_origin(Field::RequireTools, ConfigSource::Flag);
+    } else if (flag == "--shell") {
+      config.shell.enabled = true;
+      config.set_origin(Field::ShellEnabled, ConfigSource::Flag);
+    } else if (flag == "--no-shell") {
+      config.shell.enabled = false;
+      config.set_origin(Field::ShellEnabled, ConfigSource::Flag);
+    } else if (flag == "--shell-timeout") {
+      const auto value = take_seconds();
+      if (!value) return std::unexpected(value.error());
+      config.shell.timeout = *value;
+      config.set_origin(Field::ShellTimeout, ConfigSource::Flag);
     } else {
       return std::unexpected(
           ConfigProblem{ConfigError::UnknownFlag, std::string{flag}});
@@ -702,6 +730,7 @@ ConfigResult<void> validate(const Config& config, const Requirements& required) 
   if (auto ok = bounded(config.client.connect_timeout, "connect_timeout"); !ok) return ok;
   if (auto ok = bounded(config.client.metadata_timeout, "metadata_timeout"); !ok) return ok;
   if (auto ok = bounded(config.client.chat_timeout, "chat_timeout"); !ok) return ok;
+  if (auto ok = bounded(config.shell.timeout, "shell.timeout_s"); !ok) return ok;
 
   return {};
 }
@@ -746,6 +775,8 @@ std::string Config::render() const {
                                             : std::to_string(expectations.size()) + " stated",
        Field::Expectations);
   line("unjudged", std::to_string(unjudged_requirements), Field::Unjudged);
+  line("shell.enabled", shell.enabled ? "true" : "false", Field::ShellEnabled);
+  line("shell.timeout_s", std::to_string(shell.timeout.count()), Field::ShellTimeout);
 
   // Printed as written rather than as parsed, which is the useful form here: this command
   // exists to show an operator which value is in force, and a spec that will be *rejected*
@@ -785,6 +816,17 @@ std::string Config::render() const {
     out << "\n  note: models are gated at " << preflight.minimum_context
         << " context but requests are clamped to " << client.max_num_ctx
         << ".\n    Legal -- big model, small window, to fit the card -- but rarely intended.\n";
+  }
+  if (shell.enabled) {
+    out << "\n  ⚠ shell is enabled: the model can run arbitrary commands, confined by the\n"
+           "    kernel (D10) to the sandbox root, bounded to " << shell.timeout.count()
+        << "s per call (R8).\n"
+           "    This flag alone does not register the tool -- startup also requires a live\n"
+           "    confinement probe to report Enforced, checked once, here, never assumed from\n"
+           "    the platform (ROUTING.md section 8; DECISIONS.md, D11).\n"
+           "    Landlock governs the filesystem only -- a confined command still reaches the\n"
+           "    network and pathname unix sockets (D10). Containment bounds what shell can\n"
+           "    touch; it says nothing about what shell can send.\n";
   }
 
   return out.str();

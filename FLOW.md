@@ -8,11 +8,12 @@ disagree, the source is right and the diagram is a bug. That constraint is delib
 place stating the architecture is a second place for it to drift, which is the failure
 [tool.h](./src/hermit/core/tool.h) exists to make unrepresentable elsewhere.
 
-**Dashed = not built yet.** Status as of 2026-08-17 — the sandbox, all eight Tier 0 tools with
-per-call verification, the staleness guard, the backup store **and the agent loop that drives the
-local model** are merged and tested. What is left dashed is the MCP server
-([ROUTING.md](./ROUTING.md) §12 step 6), `shell` and Tier 1, and — in diagram 3 — the
-verify-and-re-invoke ring that makes the loop a supervisor.
+**Dashed = not built yet.** Status as of 2026-08-25 — the sandbox, all eight Tier 0 tools with
+per-call verification, the staleness guard, the backup store, the agent loop that drives the
+local model, **and `shell`** (registered ninth, gated by an explicit config flag and a live
+confinement probe; see [ROUTING.md](./ROUTING.md) §12 step 3) are merged and tested. What is
+left dashed is the MCP server ([ROUTING.md](./ROUTING.md) §12 step 6) and Tier 1, and — in
+diagram 3 — the verify-and-re-invoke ring that makes the loop a supervisor.
 
 ---
 
@@ -49,10 +50,10 @@ flowchart TB
     SH --> OUT
     T1 --> OUT
     T2 --> OUT
-    T -.->|"waits on D7's gate"| SH
+    T -->|"one correct answer,<br/>when shell is enabled"| SH
 
     classDef pending stroke-dasharray:6
-    class MCP,SH,T1 pending
+    class MCP,T1 pending
 ```
 
 Tier 2 is a first-class path, not a failure. A decline that returns *"I could not answer this,

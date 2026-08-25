@@ -459,15 +459,16 @@ TEST(Config, EveryValueTakingFlagIsInTheSharedTable) {
   }
 }
 
-TEST(Config, TheSharedTableHoldsExactlyTheElevenValueTakingFlags) {
+TEST(Config, TheSharedTableHoldsExactlyTheTwelveValueTakingFlags) {
   // Pins the count so a flag silently dropped from the table is noticed even if no
-  // other test happens to exercise it. Nine until --expect and --unjudged arrived; this
-  // test is what caught them being added to apply_flags and not to the table.
-  EXPECT_EQ(hermit::app::flags_taking_a_value().size(), 11u);
+  // other test happens to exercise it. Eleven until --shell-timeout arrived; this test
+  // is what would catch it being added to apply_flags and not to the table.
+  EXPECT_EQ(hermit::app::flags_taking_a_value().size(), 12u);
 }
 
 TEST(Config, NoBooleanFlagIsListedAsValueTaking) {
-  for (const std::string_view boolean : {"--warmup", "--no-warmup", "--tools", "--no-tools"}) {
+  for (const std::string_view boolean :
+       {"--warmup", "--no-warmup", "--tools", "--no-tools", "--shell", "--no-shell"}) {
     for (const std::string_view listed : hermit::app::flags_taking_a_value()) {
       EXPECT_NE(boolean, listed) << boolean << " must not consume the next argument";
     }
@@ -829,6 +830,75 @@ TEST(Config, ADisabledContextGateIsCalledOut) {
 TEST(Config, ADisabledToolsGateIsCalledOut) {
   Config config;
   ASSERT_TRUE(apply(config, {"--no-tools"}));
+  EXPECT_NE(config.render().find("⚠"), std::string::npos);
+}
+
+// --- shell -------------------------------------------------------------------------
+
+TEST(Config, ShellDefaultsToDisabledWithASixtySecondBound) {
+  Config config;
+  EXPECT_FALSE(config.shell.enabled);
+  EXPECT_EQ(config.shell.timeout.count(), 60);
+}
+
+TEST(Config, ShellJsonRoundTrips) {
+  Config config;
+  ASSERT_TRUE(apply_json(
+      config, parse(R"({"shell": {"enabled": true, "timeout_s": 30}})"), kBase));
+  EXPECT_TRUE(config.shell.enabled);
+  EXPECT_EQ(config.shell.timeout.count(), 30);
+  EXPECT_EQ(config.origin(Field::ShellEnabled), ConfigSource::File);
+  EXPECT_EQ(config.origin(Field::ShellTimeout), ConfigSource::File);
+}
+
+TEST(Config, ShellUnknownKeyIsRejected) {
+  Config config;
+  const auto result =
+      apply_json(config, parse(R"({"shell": {"enable": true}})"), kBase);
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error().kind, ConfigError::UnknownKey);
+  EXPECT_NE(result.error().detail.find("shell.enable"), std::string::npos);
+}
+
+TEST(Config, ShellFlagsSetAndClearAndBoundTheTimeout) {
+  Config config;
+  ASSERT_TRUE(apply(config, {"--shell", "--shell-timeout", "15"}));
+  EXPECT_TRUE(config.shell.enabled);
+  EXPECT_EQ(config.shell.timeout.count(), 15);
+  EXPECT_EQ(config.origin(Field::ShellEnabled), ConfigSource::Flag);
+  EXPECT_EQ(config.origin(Field::ShellTimeout), ConfigSource::Flag);
+
+  ASSERT_TRUE(apply(config, {"--no-shell"}));
+  EXPECT_FALSE(config.shell.enabled);
+}
+
+TEST(Config, AFlagOverridesAFileEnablingShell) {
+  // Same precedence every other setting here has: defaults < file < environment < flags.
+  Config config;
+  ASSERT_TRUE(apply_json(config, parse(R"({"shell": {"enabled": true}})"), kBase));
+  ASSERT_TRUE(apply(config, {"--no-shell"}));
+  EXPECT_FALSE(config.shell.enabled);
+  EXPECT_EQ(config.origin(Field::ShellEnabled), ConfigSource::Flag);
+}
+
+TEST(Config, ShellTimeoutOfZeroIsRejectedLikeEveryOtherTimeout) {
+  // take_seconds() itself refuses 0 at flag-parsing time, the same as --connect-timeout
+  // and the rest -- there is no window where a zero shell timeout is "applied but not
+  // yet validated".
+  Config config;
+  const auto result = apply(config, {"--shell-timeout", "0"});
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error().kind, ConfigError::BadValue);
+}
+
+TEST(Config, RenderNamesShellSettingsAndCallsOutWhenEnabled) {
+  Config config;
+  const std::string disabled_text = config.render();
+  EXPECT_NE(disabled_text.find("shell.enabled"), std::string::npos);
+  EXPECT_NE(disabled_text.find("shell.timeout_s"), std::string::npos);
+  EXPECT_EQ(disabled_text.find("⚠"), std::string::npos);
+
+  ASSERT_TRUE(apply(config, {"--shell"}));
   EXPECT_NE(config.render().find("⚠"), std::string::npos);
 }
 

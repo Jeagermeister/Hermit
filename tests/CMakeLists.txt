@@ -8,6 +8,7 @@ FetchContent_Declare(googletest
 FetchContent_MakeAvailable(googletest)
 
 add_executable(hermit_tests
+  confine_test.cpp
   sandbox_test.cpp
   tool_test.cpp
   fsio_test.cpp
@@ -15,6 +16,7 @@ add_executable(hermit_tests
   observe_tools_test.cpp
   search_tools_test.cpp
   mutate_tools_test.cpp
+  shell_test.cpp
   ollama_client_test.cpp
   preflight_test.cpp
   config_test.cpp

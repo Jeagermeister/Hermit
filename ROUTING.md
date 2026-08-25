@@ -567,16 +567,20 @@ Ordered. Steps 1–5 are Phase 2 and 2.5 as already written; only the tool list 
 3. ~~**The eight Tier 0 tools**~~ in `core`, with tests. **Done 2026-08-16**: the observe
    surface (`read`, `hash`, `list`, `find`, `grep`) and the mutating trio (`write`, `edit`,
    `move`), with `ObservedState` carrying §4's staleness table, the backup store outside the
-   root, and the settled semantics recorded in §4. `shell` is deliberately not among them —
-   it waits on D7's gate (step 5), per §8.
+   root, and the settled semantics recorded in §4. `shell` was not among them at the time —
+   registered separately once D10 landed (step 5's *first* condition, kernel confinement;
+   done 2026-08-22) plus its own config flag and a live `probe_confinement()` check. Step 5's
+   *second* condition, the `openat` walk, gates `mcp.cpp` (step 6) specifically, per D7's own
+   text — not this registry, which this list corrected once it stopped being ambiguous which
+   frontend "the gate" meant.
 4. ~~**The agent loop**~~ — not in this list when it was written, because §12 tracks the tool
    surface and the loop is Phase 2's own bullet. Recorded here anyway, since the steps below now
    build on it. **Done 2026-08-17**: `supervisor/loop.cpp` drives the turn, `supervisor/wire.cpp`
    is the JSON bridge §7 above specified, `app/toolset.cpp` composes the eight tools in the order
    §4 lists them, and tool calls reached the wire for the first time under
    [D12](./DECISIONS.md) — which settled that `tools` and `format` cannot both be sent, and made
-   the combination unrepresentable rather than discouraged. `shell` is still absent, waiting on
-   step 5.
+   the combination unrepresentable rather than discouraged. `shell` was still absent at the time
+   this step was written; see step 3 above for where and when it landed.
 
 4b. ~~**The judgment half reaches a caller**~~ — numbered 4b rather than 5 because the steps
    below are cited by number elsewhere, and renumbering them would break those references.

@@ -228,13 +228,25 @@ struct VerifyError {
 /// outside the root, so a verifier can be pointed at a live tree a model is working in.
 class TreeVerifier {
  public:
-  explicit TreeVerifier(const Sandbox& sandbox) noexcept : sandbox_(&sandbox) {}
+  /// `force_rehash` closes the gate D13's amendment named: the incremental optimisation
+  /// below trusts an unchanged identity tuple as proof content did not move, and a writer
+  /// holding a `MAP_SHARED` mapping falsifies exactly that proof -- content changes with
+  /// *zero* movement in mtime or ctime, because the kernel stamps both on the page fault,
+  /// not on a later store to an already-dirty page (measured; DECISIONS.md D13's
+  /// amendment). Unreachable through the original eight-tool surface, which has no path
+  /// to an mmap write; reachable the moment `shell` is registered, so a caller composing
+  /// a `ToolSet` with `shell` present should pass `true` here -- trading the optimisation
+  /// away, not narrowing it, because there is no cheaper check that closes the same gap.
+  explicit TreeVerifier(const Sandbox& sandbox, bool force_rehash = false) noexcept
+      : sandbox_(&sandbox), force_rehash_(force_rehash) {}
 
   /// Walk the tree and record every entry.
   ///
   /// `previous` is the optimisation and the reason this is not a free function: entries
-  /// whose identity tuple matches `previous` keep its hash instead of being re-read. Pass
-  /// nullptr for a cold baseline, which hashes everything.
+  /// whose identity tuple matches `previous` keep its hash instead of being re-read, unless
+  /// `force_rehash` was set at construction, in which case every regular file is read and
+  /// hashed regardless of whether its tuple moved. Pass nullptr for a cold baseline, which
+  /// hashes everything either way.
   ///
   /// Symlinks are recorded, never followed -- the walk uses `O_NOFOLLOW` on every descent
   /// and `AT_SYMLINK_NOFOLLOW` on every stat, so a directory swapped for a symlink between
@@ -251,6 +263,7 @@ class TreeVerifier {
 
  private:
   const Sandbox* sandbox_;
+  bool force_rehash_ = false;
   mutable std::uint64_t hashed_bytes_ = 0;
   mutable std::size_t entries_walked_ = 0;
 };

@@ -600,8 +600,14 @@ model calling this as a tool.
 - [ ] **Verifier gaps found by review 2026-08-17**, recorded so they are gates rather than
       surprises. None is reachable through the current eight-tool surface; each becomes
       reachable with `shell`, a hostile filesystem layout, or an operator mistake.
-      - The identity tuple does not detect a write made through a held `MAP_SHARED` mapping
-        (demonstrated; see [D13](./DECISIONS.md)'s amendment). Gates the `shell` tool.
+      - ~~The identity tuple does not detect a write made through a held `MAP_SHARED`
+        mapping~~ (demonstrated; see [D13](./DECISIONS.md)'s amendment). Gated the `shell`
+        tool, closed the same day `shell` landed (2026-08-26): `TreeVerifier` gained a
+        `force_rehash` mode, on whenever `shell` is actually registered, that skips the
+        tuple-reuse shortcut and hashes every regular file unconditionally. Detail and a new,
+        separately-dated finding (this session's kernel does not reproduce the original
+        repro's timestamp invariance, which does not mean the gap is closed in general) are
+        in D13 itself.
       - The walk crosses mount points — no `st_dev` check, no `RESOLVE_NO_XDEV` — so a bind
         mount or a mounted share under `--root` is read, contradicting verify.h's "never opens
         anything outside the root". Lands with D7's `openat2` gate.
@@ -719,13 +725,43 @@ work, statistical power). This section is the supervisor-side half, in evidence 
 every item cites the published result that motivates it, and none is scheduled by being
 listed here.
 
-- [ ] **D10 — kernel confinement, then a shell tool.** Two independent witnesses that the
-      no-shell surface costs real points at repository scale: E4's task 15 (baseline 4/5
-      against 1/5 and 2/5 supervised) and E5's Nemotron (16/20 → 13/20 in *both* supervised
-      cells, reverting to the coder's failure shapes). The cost is model-dependent —
-      qwen3.8 and Muse paid nothing for the same surface — which sharpens rather than
-      weakens the argument: the models that need supervision most are the ones that think
-      in shell. Already a Phase 2.5 gate; this is the priority argument for clearing it.
+- [x] **D10 half one — the kernel confinement mechanism.** `core/confine.h`/`.cpp`: the
+      vendored Landlock launcher (`third_party/landlock-run/`, sha256-pinned) wired into
+      `run_confined` (fork, restrict, execvp) and `probe_confinement` (D10's own
+      EACCES-based probe, stronger than the vendored launcher's own `--probe`), plus the
+      pre-fork `/proc/self/fd` audit D10's implementation obligations require. Verified
+      end to end on this machine: writes inside the grant succeed, writes outside are
+      denied by the kernel, `/dev/null`'s narrowed grant and `/usr`-rooted exec both work.
+  - [x] **D10 half two — the `shell` tool itself.** `core/tools/shell.{h,cpp}`: the `Tool`
+        subclass (one `command` string arg, run via `/usr/bin/sh -c`), registered ninth in
+        `app/toolset.cpp`, conditional on a `shell.enabled` config flag (default off) AND a
+        live `probe_confinement()` reporting `Enforced` at startup, checked once in
+        `main.cpp` — refuses to start rather than register unconfined, never a
+        warn-and-continue. The MCP-exposure config field this bullet named separately turned
+        out to be the same flag: there is exactly one frontend today, so a second,
+        MCP-scoped setting would have been speculative design against a frontend
+        (`mcp.cpp`, ROUTING §12 step 6) that does not exist yet.
+        R8's wall-clock bound and stdout/stderr capture both landed in `core/confine.h`/
+        `.cpp` as `ConfineLimits`/`fork_exec_wait_bounded`, a `poll()`-driven loop (D1 stays
+        single-threaded, so no signal handler) that also fixed a real gap found while
+        building this: the vendored launcher never `setpgid`s the confined child, so
+        nothing could previously reach a command's own backgrounded grandchildren — fixed
+        with `setpgid` on both sides of the fork and `killpg` on timeout, covered by a test
+        that specifically proves a backgrounded grandchild does not survive the timeout, not
+        just the immediate process. A second real gap surfaced by the shell tool's own
+        tests: `run_confined` never `chdir`'d into `root` before exec, so a command built
+        from relative paths — the natural way a model writes one — failed even though every
+        prior test happened to use absolute paths; fixed with a fail-closed `chdir` in the
+        confined child (exit 126 on failure, documented alongside D10's existing 125).
+        Verified end to end by hand against `fsops-qwen3.5-9b:64k` on 2026-08-25 (one
+        session, not a `bench/fsops` sweep): the model called `shell` for `wc -l`, wrote
+        the result to a new file, and it read back R6-verified.
+        Two independent witnesses that the no-shell surface costs real points at repository
+        scale motivated finishing this half: E4's task 15 (baseline 4/5 against 1/5 and 2/5
+        supervised) and E5's Nemotron (16/20 → 13/20 in *both* supervised cells, reverting
+        to the coder's failure shapes). The cost is model-dependent — qwen3.8 and Muse paid
+        nothing for the same surface — which sharpens rather than weakens the argument: the
+        models that need supervision most are the ones that think in shell.
 - [ ] **A better exit for done-at-bound.** Eleven E5 runs (7 Muse, 4 Nemotron) bounded out
       at 20 turns with the work already complete — re-verification loops cost exits, not
       scores. The judge already knows every expectation is met; a fully-met verdict should

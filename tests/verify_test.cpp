@@ -7,9 +7,12 @@
 
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -213,6 +216,29 @@ class VerifyFixture : public ::testing::Test {
     out << bytes;
   }
 
+  /// D13's amendment, reproduced: overwrite `rel` in place through a `MAP_SHARED` mapping
+  /// rather than through `write()`/`open(O_TRUNC)`. `replacement` must be the same length
+  /// as the file's current content -- this is what keeps `st_size` (and with it the whole
+  /// identity tuple) from moving, which is the entire point of the repro. The kernel stamps
+  /// mtime/ctime on the page *fault*, not on a later store to an already-dirty page, so this
+  /// changes the file's bytes with no timestamp movement at all.
+  void overwrite_via_mmap_shared(const std::string& rel, std::string_view replacement) {
+    const fs::path path = root_ / rel;
+    const int fd = ::open(path.c_str(), O_RDWR);
+    ASSERT_GE(fd, 0) << "open: " << std::strerror(errno);
+    struct ::stat st {};
+    ASSERT_EQ(::fstat(fd, &st), 0);
+    ASSERT_EQ(static_cast<std::uint64_t>(st.st_size), replacement.size())
+        << "the repro requires an in-place, same-length overwrite -- a size change would "
+           "move the identity tuple through st_size, which is not the gap being tested";
+    void* mapping = ::mmap(nullptr, replacement.size(), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    ASSERT_NE(mapping, MAP_FAILED) << "mmap: " << std::strerror(errno);
+    std::memcpy(mapping, replacement.data(), replacement.size());
+    ASSERT_EQ(::msync(mapping, replacement.size(), MS_SYNC), 0);
+    ::munmap(mapping, replacement.size());
+    ::close(fd);
+  }
+
   fs::path root_;
   std::unique_ptr<Sandbox> sandbox_;
   std::unique_ptr<TreeVerifier> verifier_;
@@ -311,6 +337,67 @@ TEST_F(VerifyFixture, ALargeUnchangedFileIsNotReReadWhenASmallOneMoves) {
   EXPECT_EQ(verifier_->last_hashed_bytes(), 8u)
       << "the 200 KiB file was re-read; carrying hashes forward is what makes a walk cheap";
   EXPECT_EQ(verifier_->last_entries_walked(), before->size()) << "every entry is still stat'd";
+}
+
+// --- D13's amendment: MAP_SHARED writes and force_rehash ---------------------
+
+TEST_F(VerifyFixture, DefaultReuseMissesAMapSharedWrite) {
+  // Documents the gap as an executable fact, not just prose: this is what a caller gets
+  // if `shell` is registered without also turning force_rehash on. notes.txt is 11 bytes
+  // ("alpha\nbeta\n"); the replacement keeps that length so the identity tuple genuinely
+  // does not move.
+  const auto before = verifier_->snapshot();
+  ASSERT_TRUE(before.has_value()) << before.error().message();
+  const std::string original_hash = before->at("notes.txt").sha256;
+
+  overwrite_via_mmap_shared("notes.txt", "PWNED!!!!!!");
+
+  struct ::stat st_after {};
+  ASSERT_EQ(::stat((root_ / "notes.txt").c_str(), &st_after), 0);
+  // The repro's own precondition, checked rather than assumed. D13's amendment measured
+  // mtime/ctime staying byte-identical across a MAP_SHARED write on the kernel it was
+  // written against; this session's own kernel (7.2.0-1-cachyos) was independently
+  // checked by hand -- on both tmpfs and this repo's own btrfs -- and does NOT reproduce
+  // that: mtime moves on this kernel even with no msync() at all. That is new, dated
+  // information (2026-08-26), not a contradiction of what D13 measured on an earlier one --
+  // recorded in DECISIONS.md rather than silently assumed to still hold everywhere. A skip
+  // here is the honest response to "could not reproduce today", per this codebase's own
+  // D11 vocabulary -- not a claim that the gap is closed, which is exactly why force_rehash
+  // stays unconditional rather than gated on a live check of this behavior.
+  if (static_cast<std::int64_t>(st_after.st_mtim.tv_sec) * 1000000000 + st_after.st_mtim.tv_nsec !=
+      before->at("notes.txt").tuple.mtime_ns) {
+    GTEST_SKIP() << "this kernel/filesystem moves mtime on a MAP_SHARED write, so the "
+                    "reuse-blind-spot this test demonstrates does not reproduce here today "
+                    "(see DECISIONS.md D13's amendment, and the note dated 2026-08-26 beside it)";
+  }
+
+  const auto after = verifier_->snapshot(&*before);
+  ASSERT_TRUE(after.has_value()) << after.error().message();
+  EXPECT_EQ(after->at("notes.txt").sha256, original_hash)
+      << "the reused (stale) hash, not the true content -- this is the gap D13 named, "
+         "reachable once shell lands and force_rehash is not on";
+  EXPECT_TRUE(diff(*before, *after).empty())
+      << "the report says nothing changed, even though it did";
+}
+
+TEST_F(VerifyFixture, ForceRehashCatchesAMapSharedWriteTheDefaultMisses) {
+  TreeVerifier rehashing{*sandbox_, /*force_rehash=*/true};
+
+  const auto before = rehashing.snapshot();
+  ASSERT_TRUE(before.has_value()) << before.error().message();
+  const std::string original_hash = before->at("notes.txt").sha256;
+
+  overwrite_via_mmap_shared("notes.txt", "PWNED!!!!!!");
+
+  const auto after = rehashing.snapshot(&*before);
+  ASSERT_TRUE(after.has_value()) << after.error().message();
+  EXPECT_NE(after->at("notes.txt").sha256, original_hash)
+      << "force_rehash must re-read every regular file regardless of its identity tuple";
+
+  const Changeset set = diff(*before, *after);
+  const Change* change = find_change(set, "notes.txt");
+  ASSERT_NE(change, nullptr) << "the write must be visible in the report";
+  EXPECT_EQ(change->kind, ChangeKind::Modified);
 }
 
 TEST_F(VerifyFixture, SeesAMutationNoToolReportedAndNoModelMentioned) {

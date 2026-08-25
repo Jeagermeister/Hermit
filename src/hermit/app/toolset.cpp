@@ -9,6 +9,7 @@
 #include <hermit/core/tools/list.h>
 #include <hermit/core/tools/move.h>
 #include <hermit/core/tools/read.h>
+#include <hermit/core/tools/shell.h>
 #include <hermit/core/tools/write.h>
 
 namespace hermit::app {
@@ -21,6 +22,7 @@ ToolSet::ToolSet(std::unique_ptr<ObservedState> observed,
       registry_(std::move(registry)) {}
 
 std::expected<ToolSet, RegistryError> ToolSet::tier0(std::filesystem::path backup_dir,
+                                                     std::optional<ShellOptions> shell,
                                                      std::uint64_t max_read_bytes) {
   auto observed = std::make_unique<ObservedState>();
   auto backups = std::make_unique<BackupStore>(std::move(backup_dir));
@@ -50,6 +52,18 @@ std::expected<ToolSet, RegistryError> ToolSet::tier0(std::filesystem::path backu
   }
   if (auto ok = add(std::make_unique<MoveTool>(*observed)); !ok) {
     return std::unexpected(ok.error());
+  }
+
+  // Ninth and last, and only when the caller supplies it: appending rather than
+  // interleaving keeps the first eight's prompt bytes -- and with them the server's
+  // prompt-cache hit -- exactly what they were before this parameter existed. The
+  // caller (main.cpp) is where the actual gate lives: an explicit config flag plus a
+  // live probe_confinement() reporting Enforced, checked once at startup.
+  if (shell) {
+    if (auto ok = add(std::make_unique<ShellTool>(shell->root, shell->timeout, max_read_bytes));
+        !ok) {
+      return std::unexpected(ok.error());
+    }
   }
 
   return ToolSet{std::move(observed), std::move(backups), std::move(registry)};

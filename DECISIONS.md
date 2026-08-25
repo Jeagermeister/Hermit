@@ -858,6 +858,33 @@ this layer exists to cover, so it is a gate on that work rather than a defect to
 honest fix when it matters is to stop trusting the tuple for reuse and hash unconditionally,
 trading the optimisation for the guarantee.
 
+**Closed 2026-08-26, when `shell` landed.** `TreeVerifier` gained a `force_rehash` constructor
+flag (`supervisor/verify.h`/`.cpp`) that skips the tuple-reuse shortcut entirely -- every regular
+file is read and hashed on every walk, regardless of whether its identity tuple moved. `main.cpp`
+passes `true` whenever `shell` was actually registered (not merely whether the config flag was
+set -- `shell_options.has_value()`, which only carries a value once the confinement probe also
+reported `Enforced`), so the honest fix this amendment named is exactly what runs, exactly when
+the gate it names applies, and the incremental optimisation stays intact on every session where
+`shell` is off. `TheSecondWalkHashesOnlyWhatMoved` and its siblings are unaffected: they exercise
+the default (`force_rehash = false`) path, which is unchanged.
+
+**Also recorded 2026-08-26, independent of the fix above.** Reproducing this amendment's own
+repro by hand on this session's kernel (`7.2.0-1-cachyos`) — a `MAP_SHARED` write of the same
+byte length as the original content, both with and without an explicit `msync(MS_SYNC)` — did
+**not** reproduce the invariant timestamp this amendment measured: `mtime`/`ctime` moved on every
+attempt, on both `tmpfs` and this repo's own `btrfs`. Whether that is a kernel change since
+whatever this amendment was originally measured against, a filesystem-configuration difference,
+or something else was not investigated further. This is *not* read as "the gap is closed on its
+own" -- one machine failing to reproduce a timestamp-invariance bug is exactly the kind of claim
+that does not generalize, and D11's own vocabulary says a `MAP_SHARED` write that manages to move
+neither `mtime` nor `ctime` on some other kernel, filesystem, or write pattern remains entirely
+plausible. It is why `force_rehash` above is unconditional on `shell` being present rather than
+gated on a live re-check of this specific timestamp behavior. `tests/verify_test.cpp`'s
+`DefaultReuseMissesAMapSharedWrite` reproduces the same experiment as an executable test and
+skips, rather than failing, when it does not observe the invariance it is checking for -- so a
+future kernel or filesystem where this amendment's original finding holds again will make that
+test start running for real rather than silently staying green for the wrong reason.
+
 Worth recording what did **not** break, because it was the failure I predicted and it was the
 wrong one: coarse, jiffy-granular `ctime` does not defeat the tuple on this kernel. 200,000
 same-size in-place rewrites produced 200,000 distinct ctimes on both tmpfs and btrfs, zero
