@@ -22,6 +22,7 @@
 #include <hermit/app/config.h>
 #include <hermit/app/expect.h>
 #include <hermit/app/toolset.h>
+#include <hermit/core/confine.h>
 #include <hermit/core/sandbox.h>
 #include <hermit/ollama/preflight.h>
 #include <hermit/supervisor/loop.h>
@@ -72,6 +73,11 @@ int usage(std::ostream& to = std::cerr) {
       "  --chat-timeout N       seconds\n"
       "  --warmup / --no-warmup     R9 inference check; off by default\n"
       "  --tools   / --no-tools     R9 tools-capability gate; on by default\n"
+      "  --shell / --no-shell       register the shell tool, kernel-confined (D10); off by\n"
+      "                             default, and refused at startup unless this machine's\n"
+      "                             confinement probe reports Enforced\n"
+      "  --shell-timeout N          seconds; R8 per-call wall-clock bound for shell\n"
+      "                             (default 60)\n"
       "\n"
       "agent only:\n"
       "  --max-turns N          turn bound for one run (default 12)\n"
@@ -573,7 +579,27 @@ int agent_command(std::span<const std::string_view> args) {
     return 1;
   }
 
-  auto tools = hermit::app::ToolSet::tier0(*store_dir);
+  // Registration is gated on a LIVE probe, never on the config flag alone: an operator
+  // who turned shell on and got a run that quietly never had it is the exact "believed
+  // it was checked when it was not" failure R9 exists to prevent (ROUTING.md section 8:
+  // "gate on the probe, never on the platform"). Hard refusal, not a warn-and-continue,
+  // for the same reason --judge-model without satisfies: refuses above rather than
+  // silently judging nothing.
+  std::optional<hermit::app::ShellOptions> shell_options;
+  if (config->shell.enabled) {
+    auto probe = hermit::probe_confinement();
+    if (!probe || *probe != hermit::ConfinementProbeResult::Enforced) {
+      std::cerr << "error: shell is enabled in configuration, but kernel confinement could "
+                   "not be confirmed enforced on this machine ("
+                << (probe ? std::string{hermit::to_string(*probe)} : hermit::to_string(probe.error()))
+                << "). Refusing to start rather than expose shell unconfined (DECISIONS.md, D11).\n";
+      return 1;
+    }
+    shell_options = hermit::app::ShellOptions{
+        box->root(), std::chrono::duration_cast<std::chrono::milliseconds>(config->shell.timeout)};
+  }
+
+  auto tools = hermit::app::ToolSet::tier0(*store_dir, shell_options);
   if (!tools) {
     std::cerr << "error: composing the tool set failed: "
               << hermit::to_string(tools.error().kind) << '\n';
@@ -652,8 +678,13 @@ int agent_command(std::span<const std::string_view> args) {
     }
   };
 
-  // Held here so it outlives the loop, which holds it by pointer.
-  hermit::supervisor::TreeVerifier verifier{*box};
+  // Held here so it outlives the loop, which holds it by pointer. force_rehash tracks
+  // whether `shell` actually got registered above -- not just whether the flag was set --
+  // since `shell_options` only carries a value once the confinement probe also passed;
+  // D13's amendment: shell is what makes a MAP_SHARED write to the tree reachable at all,
+  // and the incremental hash-reuse optimisation cannot tell that kind of write from no
+  // write at all.
+  hermit::supervisor::TreeVerifier verifier{*box, shell_options.has_value()};
   if (verify) loop_options.verifier = &verifier;
 
   hermit::supervisor::ReinvokeOptions reinvoke_options;

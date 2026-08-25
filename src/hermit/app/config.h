@@ -110,6 +110,8 @@ enum class Field {
   Warmup,
   Expectations,
   Unjudged,
+  ShellEnabled,
+  ShellTimeout,
   kCount,
 };
 
@@ -130,6 +132,20 @@ struct Requirements {
   /// never used cannot leak anything; `render()` marks a non-loopback one instead, and
   /// the commands that dial it still refuse.
   bool ollama = false;
+};
+
+/// Whether `shell` is registered at all, and R8's per-call bound when it is. Off by
+/// default: D10's kernel confinement exists, but registration also needs a live
+/// probe_confinement() to report Enforced, checked at startup once this is on -- an
+/// operator who set this true on a machine that cannot actually enforce it is exactly
+/// the "believed it was checked when it was not" failure R9 exists to prevent.
+///
+/// A plain struct here rather than in ollama:: -- this is app-layer policy about which
+/// tool exists, not anything the transport or the model card knows about. No existing
+/// number to anchor `timeout`'s default to; 60s is a judgment call, not a measurement.
+struct ShellConfig {
+  bool enabled = false;
+  std::chrono::seconds timeout{60};
 };
 
 struct Config {
@@ -153,6 +169,7 @@ struct Config {
 
   ollama::ClientOptions client;
   ollama::Policy preflight;
+  ShellConfig shell;
 
   /// The file that was read, if one was named. `nullopt` means none was, which is the
   /// normal case rather than a degraded one.

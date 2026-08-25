@@ -16,6 +16,7 @@ add_executable(hermit_tests
   observe_tools_test.cpp
   search_tools_test.cpp
   mutate_tools_test.cpp
+  shell_test.cpp
   ollama_client_test.cpp
   preflight_test.cpp
   config_test.cpp

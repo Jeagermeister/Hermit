@@ -179,6 +179,7 @@ add_library(hermit_core
   src/hermit/core/tools/list.cpp
   src/hermit/core/tools/move.cpp
   src/hermit/core/tools/read.cpp
+  src/hermit/core/tools/shell.cpp
   src/hermit/core/tools/write.cpp)
 
 target_include_directories(hermit_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)

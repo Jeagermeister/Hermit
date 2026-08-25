@@ -232,9 +232,12 @@ std::expected<TreeSnapshot, VerifyError> TreeVerifier::snapshot(
       if (S_ISREG(st.st_mode)) {
         // The incremental step: an unchanged identity tuple means the content cannot have
         // moved without ctime moving with it, so the previous hash still describes this
-        // file and does not need recomputing.
+        // file and does not need recomputing. `force_rehash_` is the exception -- a held
+        // `MAP_SHARED` mapping is exactly a writer that moves content without moving the
+        // tuple (D13's amendment), so a caller that turned this on has already decided the
+        // tuple cannot be trusted for reuse and every regular file pays the full read.
         const auto seen = previous != nullptr ? previous->find(key) : TreeSnapshot::const_iterator{};
-        const bool reusable = previous != nullptr && seen != previous->end() &&
+        const bool reusable = !force_rehash_ && previous != nullptr && seen != previous->end() &&
                               !seen->second.is_dir && !seen->second.is_symlink &&
                               seen->second.readable && seen->second.tuple == state.tuple;
         if (reusable) {

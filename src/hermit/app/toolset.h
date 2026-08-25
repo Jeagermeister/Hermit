@@ -17,13 +17,23 @@
 // ToolSet would relocate the state while the tools inside the registry went on
 // referring to where it used to be.
 //
-// `shell` is deliberately not here. It waits on D7's gate -- kernel confinement plus
-// the `openat` component walk -- per ROUTING.md section 12 step 5.
+// `shell` is conditional, not unconditional like the other eight: pass `shell` to
+// tier0() and it is registered ninth. The gate this was once described as waiting on
+// was broader than it turned out to be -- DECISIONS.md's own D7 text says the
+// `openat(O_NOFOLLOW)` component walk (ROUTING.md section 12 step 5's second condition)
+// gates *the programmatic frontend* specifically (`mcp.cpp`, step 6, still unbuilt),
+// not this registry. D10's kernel confinement (step 5's first condition) is the half
+// that actually applies here, and it is done. What still gates registration is narrower
+// and lives at the call site, not in this file: an explicit config flag, plus a live
+// probe_confinement() reporting Enforced, checked once at startup (ROUTING.md section 8:
+// "gate on the probe, never on the platform").
 
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <optional>
 
 #include <hermit/core/backup.h>
 #include <hermit/core/fsio.h>
@@ -32,11 +42,24 @@
 
 namespace hermit::app {
 
+/// What `shell` needs beyond what the other eight tools share. `root` is
+/// confine::run_confined's writable grant -- the sandbox root itself, not a per-call
+/// resolved path, since shell has no Path argument to resolve one from. A plain path
+/// rather than a `const Sandbox&`: unlike ObservedState/BackupStore this value never
+/// changes after composition, so storing a reference would add a lifetime coupling nothing
+/// else here needs.
+struct ShellOptions {
+  std::filesystem::path root;
+  std::chrono::milliseconds timeout;
+};
+
 class ToolSet {
  public:
   /// The eight Tier 0 tools: `read`, `hash`, `list`, `find`, `grep`, `write`, `edit`,
   /// `move`, registered in that order -- observe before mutate, which is also the order
-  /// ROUTING.md section 4's table reads in.
+  /// ROUTING.md section 4's table reads in. `shell`, ninth and last when `shell` is
+  /// supplied, so the first eight's prompt bytes stay exactly what they were before this
+  /// parameter existed.
   ///
   /// Order is part of the contract, not an accident: it fixes the byte order of the tool
   /// definitions in every prompt, and a moving tool list moves the prompt bytes and with
@@ -50,7 +73,7 @@ class ToolSet {
   /// which are wiring bugs and are meant to surface at composition time rather than
   /// mid-session.
   [[nodiscard]] static std::expected<ToolSet, RegistryError> tier0(
-      std::filesystem::path backup_dir,
+      std::filesystem::path backup_dir, std::optional<ShellOptions> shell = std::nullopt,
       std::uint64_t max_read_bytes = kDefaultMaxReadBytes);
 
   [[nodiscard]] ToolRegistry& registry() noexcept { return *registry_; }

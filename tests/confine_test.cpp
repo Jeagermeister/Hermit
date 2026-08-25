@@ -3,11 +3,13 @@
 #include <gtest/gtest.h>
 
 #include <charconv>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #include <dirent.h>
@@ -174,6 +176,82 @@ TEST_F(ConfineLandlockTest, ExecUnderUsrWorks) {
   auto result = run_confined(root_, std::vector<std::string>{"/usr/bin/true"}, baseline_);
   ASSERT_TRUE(result.has_value()) << (result ? "" : to_string(result.error()));
   EXPECT_EQ(result->exit_code, 0);
+}
+
+// --- R8: timeout + capture -------------------------------------------------------
+
+using hermit::ConfineLimits;
+
+TEST_F(ConfineLandlockTest, TimeoutKillsAHangingProcessAndReportsIt) {
+  ConfineLimits limits{.timeout = std::chrono::milliseconds{200}};
+  const auto started = std::chrono::steady_clock::now();
+  auto result = run_confined(root_, std::vector<std::string>{"/bin/sh", "-c", "sleep 30"},
+                              baseline_, limits);
+  const auto elapsed = std::chrono::steady_clock::now() - started;
+  ASSERT_TRUE(result.has_value()) << (result ? "" : to_string(result.error()));
+  EXPECT_TRUE(result->timed_out);
+  // Well under the 30s the command itself asked to sleep -- proof the kill actually fired
+  // rather than merely that the timeout field defaults true or the call happened to finish.
+  EXPECT_LT(elapsed, std::chrono::seconds{10});
+}
+
+TEST_F(ConfineLandlockTest, TimeoutKillsTheWholeProcessGroup) {
+  fs::path marker = root_ / "marker";
+  ConfineLimits limits{.timeout = std::chrono::milliseconds{200}};
+  // The `sh -c` command itself returns almost immediately (backgrounding is asynchronous), so a
+  // 200ms timeout on the *parent* call proves nothing about the grandchild unless that
+  // grandchild is also swept -- which is exactly what setpgid/killpg is for. If the group kill
+  // did not work, the grandchild's `sleep 2 && touch marker` would go on to create the marker
+  // long after this call returns.
+  auto result = run_confined(
+      root_,
+      std::vector<std::string>{"/bin/sh", "-c",
+                               "(sleep 2 && touch " + marker.string() + ") & sleep 30"},
+      baseline_, limits);
+  ASSERT_TRUE(result.has_value()) << (result ? "" : to_string(result.error()));
+  EXPECT_TRUE(result->timed_out);
+
+  std::this_thread::sleep_for(std::chrono::seconds{3});  // past the grandchild's own 2s sleep
+  EXPECT_FALSE(fs::exists(marker))
+      << "the backgrounded grandchild survived the timeout and created its marker";
+}
+
+TEST_F(ConfineLandlockTest, CapturesStdoutAndStderrExactly) {
+  ConfineLimits limits{.stdout_cap = 4096, .stderr_cap = 4096};
+  auto result = run_confined(
+      root_, std::vector<std::string>{"/bin/sh", "-c", "printf hello; printf world 1>&2"},
+      baseline_, limits);
+  ASSERT_TRUE(result.has_value()) << (result ? "" : to_string(result.error()));
+  EXPECT_FALSE(result->timed_out);
+  EXPECT_EQ(result->exit_code, 0);
+  EXPECT_EQ(result->stdout_capture.bytes, "hello");
+  EXPECT_FALSE(result->stdout_capture.truncated);
+  EXPECT_EQ(result->stderr_capture.bytes, "world");
+  EXPECT_FALSE(result->stderr_capture.truncated);
+}
+
+TEST_F(ConfineLandlockTest, CaptureTruncatesAtCapAndFlags) {
+  // A pure shell loop, not `/dev/zero` or an external generator: D10's fixed grant table has no
+  // /dev entry that permits reading arbitrary device data, only `--rw /dev/null` and
+  // `--ro /dev/urandom` (neither fits here), so the generator has to be something already
+  // reachable under the standard grants -- the confined `sh` itself, looping. 50000 lines of 40
+  // 'x's each is ~2MB, comfortably over both the 16-byte cap and a typical 64KiB pipe buffer, so
+  // this is also the regression test for the back-pressure fix (draining past the cap instead of
+  // stopping there): the old "stop reading at the cap" design would have deadlocked this child on
+  // a full pipe instead of letting it finish.
+  ConfineLimits limits{.stdout_cap = 16};
+  auto result = run_confined(
+      root_,
+      std::vector<std::string>{
+          "/bin/sh", "-c",
+          "i=0; while [ $i -lt 50000 ]; do "
+          "printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; i=$((i+1)); done"},
+      baseline_, limits);
+  ASSERT_TRUE(result.has_value()) << (result ? "" : to_string(result.error()));
+  EXPECT_FALSE(result->timed_out);
+  EXPECT_EQ(result->exit_code, 0);
+  EXPECT_LE(result->stdout_capture.bytes.size(), 16u);
+  EXPECT_TRUE(result->stdout_capture.truncated);
 }
 
 TEST(ConfinementProbe, ReportsEnforcedOnThisMachine) {
