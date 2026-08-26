@@ -76,9 +76,15 @@ option(HERMIT_LTO         "Build with link-time (interprocedural) optimization" 
 # Measured in PERFORMANCE.md: ~37% smaller unstripped binary, ~42% stripped, no build-time
 # cost on the machine it was measured on. Left opt-in rather than default-on because that
 # result is one machine's number, not a promise -- see PERFORMANCE.md before flipping the
-# default. Setting the CACHE variable (not just add_compile_options) here, before any target
-# is declared, is what makes CMake's own IPO support apply it to every target below,
-# hermit_core through the final hermit_tests binary, not just the top-level executable.
+# default.
+#
+# A plain variable, set before any target is declared -- deliberately not a CACHE one.
+# add_library/add_executable read it when the target is created, and add_subdirectory hands
+# it down, so it reaches hermit_core through hermit_tests without being named per target.
+# Keeping it out of the cache keeps it scoped to us and our children rather than leaking
+# into a superproject that add_subdirectory'd this one. Note the reach is everything built
+# from source below, which includes the vendored landlock C file and googletest; the
+# header-only dependencies have no objects for it to touch.
 if(HERMIT_LTO)
   include(CheckIPOSupported)
   check_ipo_supported(RESULT HERMIT_IPO_SUPPORTED OUTPUT HERMIT_IPO_ERROR)

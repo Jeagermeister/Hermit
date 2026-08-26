@@ -187,11 +187,12 @@ cmake --build build-asan && ./build-asan/tests/hermit_tests
 ```
 
 With link-time optimization (smaller binary, see [PERFORMANCE.md](./PERFORMANCE.md); opt-in, not
-the default):
+the default). Its own directory, like the sanitizer build — `HERMIT_LTO` is cached, so pointing
+this at `build` would quietly turn the plain build above into an LTO one and leave it that way:
 
 ```bash
-cmake -S . -B build -G Ninja -DHERMIT_LTO=ON
-cmake --build build
+cmake -S . -B build-lto -G Ninja -DHERMIT_LTO=ON
+cmake --build build-lto
 ```
 
 The binary is a manual harness for the pieces that exist, not the product's CLI:
