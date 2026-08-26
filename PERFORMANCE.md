@@ -30,14 +30,11 @@ parallelizing well on a 24-core box for a project this size (~20 translation uni
 assume that holds on a smaller machine, and re-time it before treating "LTO is free" as settled
 across every machine this is built on (MSI laptop, kitchen-desktop).
 
-**Not yet applied.** It's a two-line CMakeLists.txt change with no observed downside here, but
-two things are genuinely the maintainer's call, not a default worth setting unilaterally:
-
-- Whether the size win is worth caring about at all for a tool that isn't distributed anywhere
-  — it changes nothing about correctness or the local dev loop.
-- Whether to make it the *default* (risking a slower or misbehaving link on a machine that
-  hasn't been measured — the MSI laptop is unverified) or an opt-in `HERMIT_LTO` cache option,
-  same shape as `HERMIT_SANITIZE`.
+**Applied 2026-08-26**, as an opt-in `HERMIT_LTO` CMake option (default `OFF`), same shape as
+`HERMIT_SANITIZE` — decision and reasoning recorded in [D16](./DECISIONS.md). `cmake -B build
+-DHERMIT_LTO=ON` turns it on; nothing changes for anyone who doesn't pass that flag. Left
+opt-in rather than default-on because the numbers above are one machine's measurement, not a
+cross-machine promise — see D16 for what would move it to the default.
 
 The runtime win is genuinely unmeasured, and unlikely to matter: the `.text` shrink is
 cross-archive dead-code and duplicate-inlining removal (4 static archives linked into one
@@ -96,9 +93,7 @@ binary is free — no case was found for changing the default RelWithDebInfo bui
 
 ## What this file is not
 
-Not a commitment to do the LTO change, and not a scheduled phase item — see the linked entry
-in [ROADMAP.md](./ROADMAP.md) under "Open questions." If the maintainer decides it's worth it,
-applying it is small: add the CMake option, rebuild all three trees (`build`, `build-asan`,
-`build-clang`), confirm `ctest` still passes in each (LTO can occasionally surface an ODR
-violation or missing-symbol bug that a non-LTO build hid — that's the actual risk, not size or
-speed), and record the decision in DECISIONS.md if it's kept.
+Not a record of everything worth optimizing, and not a promise that a future pass over this
+codebase won't find something new — it's a snapshot of one review, on one day, against the
+code as it stood then. The LTO finding was applied and is tracked in [D16](./DECISIONS.md),
+not here; this file stays the measurement record it started as.

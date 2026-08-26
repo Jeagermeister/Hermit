@@ -1114,6 +1114,40 @@ the mechanism exists end to end.
 
 ---
 
+## D16 — Link-time optimization: measured, real, and opt-in via `HERMIT_LTO`
+
+**Decided 2026-08-26.** A full build/size and runtime-hot-path review, recorded in
+[PERFORMANCE.md](./PERFORMANCE.md), found exactly one real win: `CMAKE_INTERPROCEDURAL_OPTIMIZATION`
+shrinks the `hermit` binary 37% unstripped (42% stripped), with no build-time cost measured on
+the machine it was tested on. Everything else the review looked at — the gcc/clang size gap,
+every runtime hot path — came back clean; nothing else there needed a decision.
+
+Wired in as `HERMIT_LTO`, same shape as `HERMIT_SANITIZE`: an `option()` in `CMakeLists.txt`,
+default `OFF`, gated behind `check_ipo_supported()` so a toolchain without IPO support fails
+loudly at configure time instead of silently building without it.
+
+**Why opt-in, not the default.** The 37%/42% numbers are one machine's measurement, not a
+cross-machine promise — see PERFORMANCE.md's own caveat about not generalizing the build-time
+result to the MSI laptop or kitchen-desktop without re-timing there. LTO's real risk isn't size
+or speed, it's correctness: whole-program optimization can surface an ODR violation or a
+missing-symbol bug a non-LTO build hides. `HERMIT_SANITIZE` earned default-off for the same
+reason — a build variant that changes what the compiler is allowed to assume shouldn't be the
+one everyone gets without asking for it.
+
+**Verified before deciding.** Built a fresh tree with `-DHERMIT_LTO=ON`, full clean build,
+`ctest` — 693/693, the same 8 environment-gated skips every other tree shows. Binary sizes
+matched PERFORMANCE.md's table almost exactly (23,750,680 B unstripped vs. its 23,751,272 B —
+drift from commits since the original measurement, not a discrepancy; 974,736 B stripped, both
+runs, identical).
+
+**What would overturn it.** A measured build failure or test regression on either the MSI
+laptop or kitchen-desktop with `HERMIT_LTO=ON` would say the win doesn't generalize and the
+option should stay a documented curiosity rather than something anyone reaches for. A future
+case where distributing this binary externally starts to matter would be the argument for
+flipping the default to `ON` — nothing today reaches that bar.
+
+---
+
 ## Still open
 
 ### ~~Which chat endpoint~~ — settled as D8

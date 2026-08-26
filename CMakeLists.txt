@@ -71,6 +71,22 @@ endif()
 
 option(HERMIT_BUILD_TESTS "Build the test suite" ${PROJECT_IS_TOP_LEVEL})
 option(HERMIT_SANITIZE    "Build with ASan + UBSan"             OFF)
+option(HERMIT_LTO         "Build with link-time (interprocedural) optimization" OFF)
+
+# Measured in PERFORMANCE.md: ~37% smaller unstripped binary, ~42% stripped, no build-time
+# cost on the machine it was measured on. Left opt-in rather than default-on because that
+# result is one machine's number, not a promise -- see PERFORMANCE.md before flipping the
+# default. Setting the CACHE variable (not just add_compile_options) here, before any target
+# is declared, is what makes CMake's own IPO support apply it to every target below,
+# hermit_core through the final hermit_tests binary, not just the top-level executable.
+if(HERMIT_LTO)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT HERMIT_IPO_SUPPORTED OUTPUT HERMIT_IPO_ERROR)
+  if(NOT HERMIT_IPO_SUPPORTED)
+    message(FATAL_ERROR "HERMIT_LTO=ON but this toolchain doesn't support IPO: ${HERMIT_IPO_ERROR}")
+  endif()
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+endif()
 
 # --- warning/sanitizer policy, applied via link rather than globally ----------
 # Two targets, not one: warnings are our business and stay PRIVATE, while sanitizer
