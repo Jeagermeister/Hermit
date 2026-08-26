@@ -3,7 +3,6 @@
 #include <array>
 #include <cerrno>
 #include <cstdio>
-#include <filesystem>
 #include <string>
 #include <utility>
 
@@ -16,8 +15,6 @@
 
 namespace hermit {
 namespace {
-
-namespace fs = std::filesystem;
 
 constexpr std::array<ArgSpec, 2> kArgs{{
     {.name = "from",
@@ -57,10 +54,11 @@ std::expected<std::string, IoError> hash_fd(int fd) {
 }
 
 /// The suggestion half of the no-replace refusal: the first free
-/// "stem (N)extension" beside the requested destination. A stat race on the
-/// probe is harmless -- this is guidance, and the eventual move re-checks
-/// with RENAME_NOREPLACE either way.
-std::string suggest_free_name(const SandboxPath& to) {
+/// "stem (N)extension" beside the requested destination, probed via
+/// `to_parent_fd` rather than an absolute path. A stat race on the probe is
+/// harmless -- this is guidance, and the eventual move re-checks with
+/// RENAME_NOREPLACE either way.
+std::string suggest_free_name(int to_parent_fd, const SandboxPath& to) {
   // The sandbox root itself as a destination has no sibling namespace to
   // probe -- its parent is outside the root, which no probe should touch.
   if (to.relative().empty() || to.relative() == ".") return {};
@@ -68,9 +66,8 @@ std::string suggest_free_name(const SandboxPath& to) {
   const std::string ext = to.path().extension().string();
   for (int n = 1; n < 100; ++n) {
     const std::string name = stem + " (" + std::to_string(n) + ")" + ext;
-    const fs::path candidate = to.path().parent_path() / name;
     struct ::stat st {};
-    if (::fstatat(AT_FDCWD, candidate.c_str(), &st, AT_SYMLINK_NOFOLLOW) != 0 &&
+    if (::fstatat(to_parent_fd, name.c_str(), &st, AT_SYMLINK_NOFOLLOW) != 0 &&
         errno == ENOENT) {
       return (to.relative().parent_path() / name).lexically_normal().string();
     }
@@ -100,22 +97,31 @@ std::expected<ToolOutput, ToolError> MoveTool::run(const ToolArgs& args) {
     return refuse(from.relative().string() + ": " + to_string(source_hash.error()));
   }
 
-  std::error_code ec;
-  fs::create_directories(to.path().parent_path(), ec);
-  if (ec) {
+  // Walked from sandbox_root(), not from.path()/to.path()'s strings -- an interior
+  // symlink swapped in after resolve() is refused here, never followed (ROUTING.md
+  // section 12 step 5). `from` never creates parents; `to` does, matching the existing
+  // "missing destination parents are created" contract.
+  auto from_parent = open_parent_in_root(from, /*create_missing=*/false);
+  if (!from_parent) {
+    return refuse(from.relative().string() +
+                  ": cannot reach parent directory: " + to_string(from_parent.error()));
+  }
+  auto to_parent = open_parent_in_root(to, /*create_missing=*/true);
+  if (!to_parent) {
     return refuse(to.relative().string() +
-                  ": cannot create parent directories: " + ec.message());
+                  ": cannot reach parent directory: " + to_string(to_parent.error()));
   }
 
-  if (::renameat2(AT_FDCWD, from.path().c_str(), AT_FDCWD, to.path().c_str(),
-                  RENAME_NOREPLACE) != 0) {
+  if (::renameat2(from_parent->dir.get(), from_parent->name.c_str(), to_parent->dir.get(),
+                  to_parent->name.c_str(), RENAME_NOREPLACE) != 0) {
     const int e = errno;
     if (e == EEXIST) {
       // A directory collider gets different guidance: the model almost
       // certainly meant "into", and a "(1)" sibling of a directory is never
       // what it wants.
       struct ::stat st {};
-      if (::fstatat(AT_FDCWD, to.path().c_str(), &st, AT_SYMLINK_NOFOLLOW) == 0 &&
+      if (::fstatat(to_parent->dir.get(), to_parent->name.c_str(), &st,
+                    AT_SYMLINK_NOFOLLOW) == 0 &&
           S_ISDIR(st.st_mode)) {
         const std::string inside =
             (to.relative() / from.path().filename()).lexically_normal().string();
@@ -126,7 +132,8 @@ std::expected<ToolOutput, ToolError> MoveTool::run(const ToolArgs& args) {
       }
       std::string why = to.relative().string() +
                         ": destination exists -- refusing to replace it";
-      if (const std::string free_name = suggest_free_name(to); !free_name.empty()) {
+      if (const std::string free_name = suggest_free_name(to_parent->dir.get(), to);
+          !free_name.empty()) {
         why += "; '" + free_name +
                "' is free: move there explicitly if a renamed copy is wanted, "
                "or read and write the destination to replace its content";

@@ -4,7 +4,6 @@
 #include <array>
 #include <cerrno>
 #include <cstdio>
-#include <filesystem>
 #include <string>
 #include <string_view>
 
@@ -17,8 +16,6 @@
 
 namespace hermit {
 namespace {
-
-namespace fs = std::filesystem;
 
 constexpr std::array<ArgSpec, 2> kArgs{{
     {.name = "path",
@@ -65,9 +62,11 @@ std::expected<ToolOutput, ToolError> WriteTool::run(const ToolArgs& args) {
   const std::string& content = *args.string("content");
   const auto view = observed_.lookup(target.relative());
 
-  std::error_code ec;
-  fs::create_directories(target.path().parent_path(), ec);
-  if (ec) return refuse(target, "cannot create parent directories: " + ec.message());
+  // Walked from sandbox_root(), not target.path()'s string -- an interior symlink
+  // swapped in after resolve() is refused here, never followed (ROUTING.md section 12
+  // step 5). `true`: missing parents are created, matching the existing contract.
+  auto parent = open_parent_in_root(target, /*create_missing=*/true);
+  if (!parent) return refuse(target, "cannot reach parent directory: " + to_string(parent.error()));
 
   bool created = false;
   if (view.status == ObservedState::Status::Present) {
@@ -100,12 +99,13 @@ std::expected<ToolOutput, ToolError> WriteTool::run(const ToolArgs& args) {
     // Permission bits only: carrying setuid/setgid/sticky onto model-chosen
     // content would be granting privilege nobody asked for. Recorded in
     // ROUTING.md section 4.
-    auto temp = write_temp_beside(target, content,
+    auto temp = write_temp_in_dir(parent->dir.get(), parent->name, content,
                                   current->meta.st_mode & 0777);
     if (!temp) return refuse(target, to_string(temp.error()));
-    if (::rename(temp->c_str(), target.path().c_str()) != 0) {
+    if (::renameat2(parent->dir.get(), temp->c_str(), parent->dir.get(),
+                    parent->name.c_str(), 0) != 0) {
       const int e = errno;
-      ::unlink(temp->c_str());
+      ::unlinkat(parent->dir.get(), temp->c_str(), 0);
       return refuse(target, to_string(IoError{.code = e}));
     }
   } else {
@@ -115,15 +115,16 @@ std::expected<ToolOutput, ToolError> WriteTool::run(const ToolArgs& args) {
     // ask, and single-threaded D1 makes the empty window harmless.
     ::mode_t mask = ::umask(0);
     ::umask(mask);
-    auto temp = write_temp_beside(target, content, 0666 & ~mask);
+    auto temp = write_temp_in_dir(parent->dir.get(), parent->name, content, 0666 & ~mask);
     if (!temp) return refuse(target, to_string(temp.error()));
-    const int linked = ::link(temp->c_str(), target.path().c_str());
+    const int linked = ::linkat(parent->dir.get(), temp->c_str(), parent->dir.get(),
+                                parent->name.c_str(), 0);
     const int link_errno = errno;
-    ::unlink(temp->c_str());
+    ::unlinkat(parent->dir.get(), temp->c_str(), 0);
     if (linked != 0) {
       if (link_errno == EEXIST) {
         struct ::stat st {};
-        if (::fstatat(AT_FDCWD, target.path().c_str(), &st,
+        if (::fstatat(parent->dir.get(), parent->name.c_str(), &st,
                       AT_SYMLINK_NOFOLLOW) == 0 &&
             S_ISDIR(st.st_mode)) {
           // "read it first" is unfollowable advice for a directory -- read

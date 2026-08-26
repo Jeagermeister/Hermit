@@ -1,16 +1,17 @@
 #pragma once
 
-// The one open primitive -- ROUTING.md section 12 step 5, settled 2026-08-16:
-// allow the semantics, funnel the spelling. Tools never spell ::open
-// themselves; every open of a SandboxPath goes through open_in_root, so when
-// D7's gate lands, the openat(O_NOFOLLOW) component walk replaces this one
-// function body and no tool changes. Until then the body is a plain open with
-// O_NOFOLLOW forced on the final component -- free, and it already refuses the
-// final-component swap, the cheapest slice of the race D6 accepts today.
+// The one open primitive -- ROUTING.md section 12 step 5. Tools never spell
+// ::open/::openat themselves; every open of a SandboxPath goes through
+// open_in_root (reads and publication's parent directory both), which walks
+// from SandboxPath::sandbox_root() one openat(O_NOFOLLOW) component at a time
+// instead of trusting the pre-expanded absolute path string. A symlink swapped
+// into any component -- not just the final one -- after resolve() and before
+// this call is refused (ELOOP), never followed: this is what closes D6's
+// worked example ("link -> a/b", right filename wrong directory) rather than
+// merely documenting it.
 
 #include <cstdint>
 #include <expected>
-#include <filesystem>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -76,11 +77,28 @@ struct IoError {
 /// except those constructors' defaults.
 inline constexpr std::uint64_t kDefaultMaxReadBytes = 16u * 1024 * 1024;
 
-/// Open `path`. O_NOFOLLOW and O_CLOEXEC are OR'd in unconditionally: the
-/// resolved path had its symlinks expanded at resolve time, so a symlink in
-/// the final component now means the name was retargeted afterwards --
-/// refused (ELOOP), never followed.
+/// Open `path`, re-walked fresh from sandbox_root() -- see the file header. O_NOFOLLOW
+/// and O_CLOEXEC are OR'd in unconditionally at every component, not just the last.
 [[nodiscard]] std::expected<Fd, IoError> open_in_root(const SandboxPath& path, int flags);
+
+/// An open directory, plus the bare name of the entry inside it that `target` names --
+/// what publication (mkdirat/linkat/renameat2) anchors on instead of an absolute path.
+struct ParentHandle {
+  Fd dir;
+  std::string name;
+};
+
+/// Walk to `target`'s containing directory the same way open_in_root does, without
+/// opening `target` itself -- for callers that publish into it rather than read it.
+/// `create_missing` mkdirat's any missing intermediate directory as the walk reaches
+/// it (mode 0777, matching write's/move's existing "missing parents are created"
+/// contract); with it false, a missing intermediate directory is refused (ENOENT),
+/// matching edit's "never creates parents" contract.
+///
+/// Refused with IoError::Kind::Refused if `target` names the sandbox root itself --
+/// the root has no in-root parent to publish into.
+[[nodiscard]] std::expected<ParentHandle, IoError> open_parent_in_root(
+    const SandboxPath& target, bool create_missing);
 
 /// A regular file, open, with the stat taken from that fd -- the same object
 /// even if the name has since been retargeted.
@@ -116,18 +134,19 @@ struct FileContent {
 /// Write every byte or say why not. EINTR is retried; a short write continues.
 [[nodiscard]] std::expected<void, IoError> write_all(int fd, std::string_view bytes);
 
-/// Create an exclusive temp file in `target`'s directory -- same directory so
-/// the later link()/rename() publication is same-filesystem and atomic --
-/// fill it with `bytes`, and set `mode` exactly (fchmod, not umask-masked).
-/// Returns the temp's absolute path; the caller publishes or unlinks it. A
-/// crash in between leaves a ".hermit-tmp." orphan beside the target, which
-/// is visible, greppable, and harmless.
+/// Create an exclusive temp file inside `parent_fd` -- same directory as
+/// `target_name` so the later linkat()/renameat2() publication is
+/// same-filesystem and atomic -- fill it with `bytes`, and set `mode` exactly
+/// (fchmod, not umask-masked). Returns the temp's bare filename, relative to
+/// `parent_fd`; the caller publishes or unlinks it there. A crash in between
+/// leaves a ".hermit-tmp." orphan beside the target, which is visible,
+/// greppable, and harmless.
 ///
 /// Durability posture, deliberate: no fsync anywhere on this path. R5's
 /// read-back verifies content, R4 keeps the old bytes recoverable, and
 /// crash-durability of the new bytes is a claim this codebase has not made;
 /// if it ever does, that is a decision for DECISIONS.md, not a flag here.
-[[nodiscard]] std::expected<std::filesystem::path, IoError> write_temp_beside(
-    const SandboxPath& target, std::string_view bytes, ::mode_t mode);
+[[nodiscard]] std::expected<std::string, IoError> write_temp_in_dir(
+    int parent_fd, std::string_view target_name, std::string_view bytes, ::mode_t mode);
 
 }  // namespace hermit

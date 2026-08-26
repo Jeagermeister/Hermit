@@ -628,14 +628,14 @@ Ordered. Steps 1–5 are Phase 2 and 2.5 as already written; only the tool list 
      exist" alone does not say what the file should contain; the task does. Composed from
      the original task every time, so the framing cannot nest by the third attempt.
 
-5. **Clear D7's gate, which is two conditions and not one.**
-   ⚠️ Both are required before the programmatic frontend ships; a programmatic caller is exactly
+5. ~~**Clear D7's gate, which is two conditions and not one.**~~ **Done 2026-08-26.**
+   ⚠️ Both were required before the programmatic frontend ships; a programmatic caller is exactly
    the one D6's threat model did not cover.
    - **Kernel confinement** — vendor D10's Landlock routine, `fork` → restrict → `exec`, one
      writable directory. Probe by attempting a denied write and requiring `EACCES`, not by
      running a command that succeeds. This also disposes of the hardlink gap's *creation* half;
      a link planted before the sandbox starts is still reachable, and that is now recorded
-     rather than open.
+     rather than open. **Done 2026-08-22.**
    - **`openat(O_NOFOLLOW)` component-walking** — the in-root correctness half, which
      confinement does not supply. A swap that redirects to a different file *inside* the root is
      permitted by the kernel and is D6's own worked example.
@@ -659,6 +659,26 @@ Ordered. Steps 1–5 are Phase 2 and 2.5 as already written; only the tool list 
      model — can exploit it. Clearing this gate therefore means converting publication to
      `mkdirat`/`linkat`/`renameat2` under the same walked root descriptor, not just swapping
      `open_in_root`'s body. Until then the window is accepted *and named*, here.
+
+     **Done 2026-08-26.** `fsio.h`'s `open_in_root` and new `open_parent_in_root` both walk
+     from `SandboxPath::sandbox_root()` — a copy of the root each resolved path now carries,
+     added rather than threading `Sandbox&` through every one of the eight tools plus
+     `supervisor/semantic.cpp` and `supervisor/undo.cpp` that already call these primitives.
+     Each walk opens one component at a time via `openat(O_DIRECTORY | O_NOFOLLOW)`, from a
+     freshly-opened root directory fd — not from `SandboxPath::path()`'s pre-expanded string —
+     so a symlink swapped into any component after `resolve()` is refused at that hop
+     (`ELOOP` on the final component, `ENOTDIR` on an interior one, verified against this
+     kernel rather than assumed) and never followed. Publication now goes through
+     `open_parent_in_root` plus `mkdirat`/`linkat`/`renameat2` on the walked directory fd,
+     exactly as this step named: `write.cpp`, `edit.cpp`, `move.cpp`. The "post-open identity
+     check" this step's original text names is the walk itself — every component is
+     re-derived fresh at open time, so there is no separate stat-then-open step for a
+     concurrent swap to race against; no new mechanism was added. What the walk cannot see
+     either way — unlink-then-recreate under an unchanged name — stays `ObservedState`'s job,
+     unchanged. New coverage: `fsio_test.cpp` at the primitive level, `mutate_tools_test.cpp`
+     end to end through the actual tools, each planting the swap in the real parse-to-use
+     window (`parse_args` resolves, then the filesystem changes, then `invoke` runs). Full
+     account in [DECISIONS.md](./DECISIONS.md) D6's "Closed 2026-08-26" paragraph.
 6. **`mcp.cpp`** in `app`. Callable from here on. Cheaper than it was: the tool definitions it
    must publish are already rendered by `supervisor/wire.cpp`, from the same descriptors, so
    D4's one-declaration guarantee reaches the MCP surface without a second schema.
