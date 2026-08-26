@@ -1,5 +1,18 @@
 # fsops — filesystem primitives for small models under Hermes
 
+> ### ⚠ This copy is legacy. The suite lives in `hermit-bench`.
+>
+> The canonical suite is `hermit-bench/fsops/` — sixteen tasks there against twelve here, and
+> results are published there from 2026-08-18 on. This copy is kept because the in-repo docs
+> cite its legacy sweeps; the twelve core tasks are byte-identical, so old numbers still mean
+> what they said.
+>
+> **Latest run: sweep 3, 2026-08-26** (`hermit-bench/fsops/SWEEP3.md`) — 360 runs, pinned
+> sampling, five repeats. `gemma-e4b` wins the suite at 90%; the working-directory escape is
+> confirmed fixed; and two harness defects mean reasoning has never been a controlled variable
+> in any sweep. Corrections are mirrored into this copy's `RESULTS.md` and `SWEEP2.md`, but
+> **make changes in `hermit-bench` first** — this one drifts.
+
 **This is not Phase 0.** [`../run_hermit_diagnostic.py`](../run_hermit_diagnostic.py) replays the
 OpenCode stages byte-for-byte to isolate harness effects, and `../stages.py` must never change.
 This suite is independent, has no external baseline, and is free to evolve.

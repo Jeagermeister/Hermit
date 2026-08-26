@@ -10,6 +10,30 @@
 > *does this model emit absolute paths*. Working trees now run outside the repo.
 > Re-run before treating any per-task number as settled.
 
+> ### ⚠ These runs were not at `reasoning_effort=none`, despite saying so
+>
+> Found by review 2026-08-26. `run_fsops.py`'s `--reasoning` defaulted to Python `None`, and
+> the flag is only passed to hermes when truthy — so it was never passed at all, and Hermes
+> fell back to `~/.hermes/config.yaml`'s `reasoning_effort: medium`. Every sweep before that
+> date ran at **medium** while its own provenance recorded `"reasoning": null`, which reads as
+> "none" and was taken that way.
+>
+> The scores below are still real measurements. What is wrong is the label — and with it the
+> stated reason for preferring non-thinking models, since the control that was supposed to
+> hold reasoning budget constant was never applied.
+>
+> Defaulting to `"none"` fixes half of it. The other half is not fixed: the level does not
+> reach the wire under `--provider custom` either way — transcripts at `none` and at `medium`
+> are byte-identical. **Reasoning has never been a controlled variable in this suite.**
+
+> ### Superseded by sweep 3 — `hermit-bench/fsops/SWEEP3.md`, 2026-08-26
+>
+> 360 runs, pinned sampling, five repeats, trees outside any repo. `gemma-e4b` — absent from
+> both sweeps here — wins the suite at 90% on a 9.4s median. The escape fix is confirmed: the
+> control's 3/3 → 0/3 swing on `01_create_file` resolves to a clean 5/5, and the escape
+> depressed sweep 2 beyond the three tasks named above. Treat these totals as lower bounds by
+> an unknown margin.
+
 
 **Two sweeps, 252 runs.** Sweep 1 (qwen + llama floor) below; sweep 2 (three non-thinking
 models + control) in [SWEEP2.md](./SWEEP2.md). Read SWEEP2 first — it corrects two

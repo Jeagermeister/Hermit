@@ -515,12 +515,24 @@ def main() -> int:
                          "went 32/62/127s with zero timeouts without it, and hit the 240s timeout "
                          "4 times in 7 runs with it. Use it for targeted diagnosis of a single "
                          "failing task, not for a full sweep.")
-    ap.add_argument("--reasoning", default=None,
+    ap.add_argument("--reasoning", default="none",
                     help="Hermes --reasoning level (none/minimal/low/medium/high/...). "
-                         "Defaults to none: llama3.2 and gemma4-e4b are not thinking models, so "
-                         "leaving qwen's reasoning on would conflate reasoning budget with "
-                         "tool-use ability. Measured 2026-08-12: reasoning_effort=none took a "
-                         "trivial qwen3.5:4b prompt from 17.8s to 0.3s.")
+                         "Defaults to none so a reasoning budget is not read as tool-use "
+                         "ability: qwen3.5 and gemma4-e4b are thinking models, the other four "
+                         "are not, and leaving it on measures the two together. Measured "
+                         "2026-08-12: reasoning_effort=none took a trivial qwen3.5:4b prompt "
+                         "from 17.8s to 0.3s. Must stay truthy -- the flag is only passed to "
+                         "hermes when it is, and a falsy value falls through to "
+                         "~/.hermes/config.yaml's own reasoning_effort instead of doing "
+                         "nothing. That is not hypothetical: this defaulted to None until "
+                         "2026-08-26, so every sweep before that date silently ran at the "
+                         "config's `medium` while its own provenance recorded `none`. "
+                         "Fixing that is necessary but not sufficient -- under "
+                         "`--provider custom` the level does not reach the wire either way "
+                         "(transcripts at `none` and `medium` are byte-identical, carrying "
+                         "only options.num_ctx), so the flag records intent, not effect. "
+                         "Ollama honours reasoning_effort when it is genuinely sent; the "
+                         "remaining fix belongs in the provider layer or the Modelfile.")
     ap.add_argument("--plan", action="store_true", help="print the run plan and exit")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()

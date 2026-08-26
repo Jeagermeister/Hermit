@@ -1,5 +1,15 @@
 # The next run — deterministic pass
 
+> ### ✅ Run 2026-08-26. This copy is legacy — see `hermit-bench/fsops/NEXT-RUN.md`.
+>
+> The deterministic pass ran: 360 runs, six models, five repeats, results and full write-up in
+> `hermit-bench/fsops/SWEEP3.md`. `gemma-e4b` is **no longer untested** — it won the suite at
+> 90%, and the `ollama pull` this document predicted would be near-instant took 4.4 seconds.
+> The escape fix is confirmed. Two things below are wrong and are corrected in the canonical
+> copy, not here: repeats measure path sensitivity rather than sampling noise, and reasoning
+> was never actually controlled. **Do not run from this copy** — it has twelve tasks to the
+> canonical sixteen.
+
 **Do this on an idle GPU.** Both sweeps so far ran at model-default sampling, so every score
 mixes two different things: whether the model *can* do the task, and whether the dice landed.
 39% of model×task cells in sweep 1 were unstable, and the control swung 3/3 → 0/3 on the

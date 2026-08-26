@@ -698,7 +698,37 @@ Ordered. Steps 1–5 are Phase 2 and 2.5 as already written; only the tool list 
 
 Independent of the above, and cheap:
 
-8. **Re-run `bench/fsops/`.** Both sweep documents carry the banner *"Re-run before treating
+8. ~~**Re-run `bench/fsops/`.**~~ **Done 2026-08-26** — 360 runs, six models, five repeats,
+   sampling pinned, trees outside any repo. Written up as sweep 3 in the benchmark repository
+   (`hermit-bench/fsops/SWEEP3.md`), which is where the suite and its results now live; the
+   copy under `bench/fsops/` here is legacy and kept only because the in-repo docs cite it.
+
+   What it settled, and what it broke:
+
+   - **`gemma-e4b` wins the suite**, 54/60 (90%) at a 9.4s median — better accuracy than
+     `qwen3.5:9b` at roughly a seventh of the wall clock. It had gone untested through two
+     sweeps because its base was deleted for disk space; re-pulling took 4.4 seconds. Sweep 2's
+     "no fast, accurate, small option exists in this field" is false as stated, and step 7's
+     model-selection question now has a different leading answer than the one the old tables
+     imply. Re-check it under E1's protocol before it moves any default.
+   - **The escape fix is confirmed**, and the control's 3/3 → 0/3 swing that motivated the whole
+     re-run resolves to a clean 5/5. The escape also depressed sweep 2 beyond the three tasks
+     its banner named, so those totals are lower bounds by an unknown margin.
+   - **Reasoning has never been a controlled variable**, in any sweep. `--reasoning` defaulted
+     to `None` and was passed only when truthy, so every sweep silently used the config's
+     `medium` while recording `none`; and fixing that is not sufficient, because the level does
+     not reach the wire under `--provider custom` at all — transcripts at `none` and `medium`
+     are byte-identical. Ollama honours the parameter when it is genuinely sent, so this is a
+     provider-layer gap. Worth noting the supervisor is not exposed to it: [D8](./DECISIONS.md)
+     puts Hermit on native `/api/chat`, not the endpoint where the level goes missing.
+   - **`--deterministic` works, but its repeats do not measure sampling noise.** The per-run
+     working directory embeds the repeat index and reaches the model, so each repeat is a
+     different prompt and a flip measures path sensitivity. Repeats are not independent samples:
+     the unit for any significance claim is 12 tasks, not 12×N runs. This is why the
+     "more than 3 repeats" line below could not do what it was asked to do.
+
+   The original text follows, since the bullets below are what the run was measured against.
+   Both sweep documents carry the banner *"Re-run before treating
    any per-task number as settled."* Per [NEXT-RUN.md](./bench/fsops/NEXT-RUN.md):
    - The working-tree escape is **already fixed** — runs now live in `~/.cache/hermit-fsops/runs`,
      outside any git repo. The published scores simply predate that fix.
