@@ -524,13 +524,14 @@ These are hard to reverse and benefit from being argued out before code exists:
 Settled in [D7](./DECISIONS.md): local inference only, driven both by a person and by a larger
 model calling this as a tool.
 
-- [ ] **Clear D7's gate — two conditions since 2026-08-15, and this bullet used to name one.**
+- [x] ~~**Clear D7's gate — two conditions since 2026-08-15, and this bullet used to name one.**~~
       Kernel confinement ([D10](./DECISIONS.md)) for containment, *and* `openat(O_NOFOLLOW)`
       component-walking for in-root correctness. D6 accepted the race against a "confused 3B
       model" threat model; a callable frontend changes that model, so both are a gate rather
       than cleanup. Confinement alone is not enough — an in-root redirection is invisible to
-      the kernel and is D6's own worked example. [ROUTING.md](./ROUTING.md) §12 step 5 carries
-      the implementation detail, including the grant set and the denied-write probe.
+      the kernel and is D6's own worked example. **Done 2026-08-26** — both conditions closed;
+      [ROUTING.md](./ROUTING.md) §12 step 5 and [DECISIONS.md](./DECISIONS.md) D6 carry the
+      implementation detail.
 - [x] ~~**Decide the hardlink answer**~~ — decided with D10, recorded under "Still open" in
       [DECISIONS.md](./DECISIONS.md): creation is blocked by the one-writable-root rule; a link
       planted before the sandbox starts is accepted explicitly, with the threat-model reasoning

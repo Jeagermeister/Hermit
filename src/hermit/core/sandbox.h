@@ -52,12 +52,11 @@ class Sandbox;
 /// cannot be forgotten, because there is no other way to name a file.
 class SandboxPath {
  public:
-  /// Absolute, normalised, symlinks resolved -- as of the moment resolve() ran.
-  /// Hand it to the OS through core's one open primitive (it arrives with the
-  /// first tool; ROUTING.md section 12 step 5 later swaps its body for the
-  /// openat(O_NOFOLLOW) component walk). Spelling ::open on this string
-  /// directly re-inherits D6's resolve-to-open race at every call site
-  /// instead of the one the gate will close.
+  /// Absolute, normalised, symlinks resolved -- as of the moment resolve() ran. Hand it
+  /// to the OS only through core's one open primitive (open_in_root, fsio.h), which
+  /// re-walks from sandbox_root() component by component rather than trusting this
+  /// string directly -- spelling ::open on it here would re-inherit D6's resolve-to-open
+  /// race at every call site instead of the one place the gate closes it.
   [[nodiscard]] const std::filesystem::path& path() const noexcept { return abs_; }
 
   /// Path relative to the sandbox root -- for logs and model-facing messages, so
@@ -66,15 +65,24 @@ class SandboxPath {
 
   [[nodiscard]] std::string string() const { return abs_.string(); }
 
+  /// The root this path was resolved against. core's I/O primitives (fsio.h) anchor
+  /// their openat/mkdirat/linkat/renameat2 walk here instead of taking a Sandbox&,
+  /// so every caller of open_in_root keeps working unchanged -- see tool.h's own note
+  /// that the Sandbox is deliberately not bound to a resolved path "until SandboxPath
+  /// carries its provenance". Never render this to a model-facing result, same rule as
+  /// backup paths (ROUTING.md section 4).
+  [[nodiscard]] const std::filesystem::path& sandbox_root() const noexcept { return root_; }
+
   friend bool operator==(const SandboxPath&, const SandboxPath&) = default;
 
  private:
   friend class Sandbox;
-  SandboxPath(std::filesystem::path abs, std::filesystem::path rel)
-      : abs_(std::move(abs)), rel_(std::move(rel)) {}
+  SandboxPath(std::filesystem::path abs, std::filesystem::path rel, std::filesystem::path root)
+      : abs_(std::move(abs)), rel_(std::move(rel)), root_(std::move(root)) {}
 
   std::filesystem::path abs_;
   std::filesystem::path rel_;
+  std::filesystem::path root_;
 };
 
 /// The single root every path is resolved against.

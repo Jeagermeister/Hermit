@@ -17,7 +17,9 @@
 
 namespace fs = std::filesystem;
 using hermit::Fd;
+using hermit::IoError;
 using hermit::open_in_root;
+using hermit::open_parent_in_root;
 using hermit::read_file;
 using hermit::Sandbox;
 
@@ -116,6 +118,78 @@ TEST_F(FsioTest, OpenRefusesAFinalComponentSwappedToASymlink) {
   auto fd = open_in_root(*p, O_RDONLY);
   ASSERT_FALSE(fd.has_value());
   EXPECT_EQ(fd.error().code, ELOOP) << "O_NOFOLLOW refuses, never follows";
+}
+
+TEST_F(FsioTest, OpenInRootRefusesAnInteriorComponentSwappedToASymlink) {
+  // The primitive-level proof of D6's worked example: resolve while sub2 is a real
+  // directory, then retarget sub2 itself -- not the final component -- to a symlink
+  // pointing outside the root. open_in_root re-walks from sandbox_root() and must
+  // refuse at that hop rather than follow it to a file the resolved path never named.
+  fs::create_directories(tmp_ / "root" / "sub2");
+  write_file(tmp_ / "root" / "sub2" / "target.txt", "inside");
+  auto p = box_->resolve("sub2/target.txt");
+  ASSERT_TRUE(p.has_value());
+
+  fs::remove(tmp_ / "root" / "sub2" / "target.txt");
+  fs::remove(tmp_ / "root" / "sub2");
+  fs::create_symlink(tmp_ / "outside", tmp_ / "root" / "sub2");
+
+  auto fd = open_in_root(*p, O_RDONLY);
+  ASSERT_FALSE(fd.has_value());
+  // Interior hops are walked with O_DIRECTORY|O_NOFOLLOW, not O_NOFOLLOW alone as the
+  // final-component open above uses -- verified on this kernel to report ENOTDIR for a
+  // symlinked directory component, not ELOOP. Either way it is Kind::Kernel and refused,
+  // never followed: the distinction is real but doesn't change what the primitive does.
+  EXPECT_EQ(fd.error().code, ENOTDIR) << "an interior swap is refused, never followed";
+}
+
+TEST_F(FsioTest, OpenParentInRootRefusesAnInteriorComponentSwappedToASymlink) {
+  // Same attack, through the publish-side walk: proves it gets identical protection.
+  fs::create_directories(tmp_ / "root" / "sub2");
+  write_file(tmp_ / "root" / "sub2" / "target.txt", "inside");
+  auto p = box_->resolve("sub2/target.txt");
+  ASSERT_TRUE(p.has_value());
+
+  fs::remove(tmp_ / "root" / "sub2" / "target.txt");
+  fs::remove(tmp_ / "root" / "sub2");
+  fs::create_symlink(tmp_ / "outside", tmp_ / "root" / "sub2");
+
+  auto parent = open_parent_in_root(*p, /*create_missing=*/false);
+  ASSERT_FALSE(parent.has_value());
+  EXPECT_EQ(parent.error().code, ENOTDIR);  // see the sibling open_in_root test above
+}
+
+TEST_F(FsioTest, OpenParentInRootCreatesMissingIntermediateDirectories) {
+  auto p = box_->resolve("a/b/c/file.txt");
+  ASSERT_TRUE(p.has_value());
+
+  auto parent = open_parent_in_root(*p, /*create_missing=*/true);
+  ASSERT_TRUE(parent.has_value()) << to_string(parent.error());
+  EXPECT_EQ(parent->name, "file.txt");
+  EXPECT_TRUE(fs::is_directory(tmp_ / "root" / "a" / "b" / "c"));
+
+  struct ::stat st {};
+  EXPECT_EQ(::fstatat(parent->dir.get(), "file.txt", &st, AT_SYMLINK_NOFOLLOW), -1);
+  EXPECT_EQ(errno, ENOENT) << "the parent is created, the leaf is not";
+}
+
+TEST_F(FsioTest, OpenParentInRootWithoutCreateMissingRefusesAMissingDirectory) {
+  auto p = box_->resolve("a/b/file.txt");
+  ASSERT_TRUE(p.has_value());
+
+  auto parent = open_parent_in_root(*p, /*create_missing=*/false);
+  ASSERT_FALSE(parent.has_value());
+  EXPECT_EQ(parent.error().code, ENOENT);
+  EXPECT_FALSE(fs::exists(tmp_ / "root" / "a"));
+}
+
+TEST_F(FsioTest, OpenParentInRootRefusesTheSandboxRootItselfAsATarget) {
+  auto p = box_->resolve(".");
+  ASSERT_TRUE(p.has_value());
+
+  auto parent = open_parent_in_root(*p, /*create_missing=*/false);
+  ASSERT_FALSE(parent.has_value());
+  EXPECT_EQ(parent.error().kind, IoError::Kind::Refused);
 }
 
 TEST_F(FsioTest, FdOwnershipMovesAndReleases) {

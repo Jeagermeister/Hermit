@@ -464,4 +464,12 @@ TEST_F(SandboxTest, RelativeRootIsResolvedAgainstTheWorkingDirectory) {
   EXPECT_EQ(sb->root(), root_);
 }
 
+TEST_F(SandboxTest, ResolvedPathCarriesItsOwnSandboxRoot) {
+  // fsio.h's I/O primitives anchor their openat walk on this instead of taking a
+  // Sandbox& -- see ROUTING.md section 12 step 5.
+  auto p = box_->resolve("inside.txt");
+  ASSERT_TRUE(p.has_value()) << to_string(p.error());
+  EXPECT_EQ(p->sandbox_root(), root_);
+}
+
 }  // namespace

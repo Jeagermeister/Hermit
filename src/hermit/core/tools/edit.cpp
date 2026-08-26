@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -100,17 +101,25 @@ std::expected<ToolOutput, ToolError> EditTool::run(const ToolArgs& args) {
                               "; nothing was written");
   }
 
+  // Walked from sandbox_root(), not target.path()'s string -- an interior symlink
+  // swapped in after resolve() is refused here, never followed (ROUTING.md section 12
+  // step 5). `false`: edit never creates parent directories.
+  auto parent = open_parent_in_root(target, /*create_missing=*/false);
+  if (!parent) return refuse(target, "cannot reach parent directory: " + to_string(parent.error()));
+
   std::string edited;
   edited.reserve(bytes->size() - old_bytes.size() + new_bytes.size());
   edited.append(*bytes, 0, pos);
   edited += new_bytes;
   edited.append(*bytes, pos + old_bytes.size(), std::string::npos);
 
-  auto temp = write_temp_beside(target, edited, current->meta.st_mode & 07777);
+  auto temp = write_temp_in_dir(parent->dir.get(), parent->name, edited,
+                                current->meta.st_mode & 07777);
   if (!temp) return refuse(target, to_string(temp.error()));
-  if (::rename(temp->c_str(), target.path().c_str()) != 0) {
+  if (::renameat2(parent->dir.get(), temp->c_str(), parent->dir.get(),
+                  parent->name.c_str(), 0) != 0) {
     const int e = errno;
-    ::unlink(temp->c_str());
+    ::unlinkat(parent->dir.get(), temp->c_str(), 0);
     return refuse(target, to_string(IoError{.code = e}));
   }
 

@@ -179,8 +179,23 @@ different file inside the root is permitted**, which is this decision's own work
 above: right filename, wrong directory. So `O_NOFOLLOW` is not made optional by D10; the two
 mechanisms cover disjoint failure modes.
 
-**What would overturn it.** Untrusted input, which promotes the TOCTOU race and the hardlink
-gap from documented to blocking.
+**Closed 2026-08-26.** `fsio.h`'s `open_in_root`/`open_parent_in_root` now walk from
+`SandboxPath::sandbox_root()` one `openat(O_NOFOLLOW)` component at a time, rather than
+trusting the pre-expanded absolute string `resolve()` produced — a symlink swapped into any
+component, not just the final one, is refused (`ELOOP`/`ENOTDIR`) at that hop, never followed.
+Publication (`write`/`edit`/`move`'s parent-directory creation, `link`, `rename`) is anchored
+the same way, via `mkdirat`/`linkat`/`renameat2` on the walked directory fd, closing the window
+[D7](#d7--local-inference-only-two-ways-in-human-and-machine)'s gate table named as *In-root
+correctness*. Full design in [ROUTING.md](./ROUTING.md) §12 step 5, including why no new
+mechanism was needed for the "post-open identity check" the gate's text names: the walk itself
+is the check, since every component is re-derived fresh at open time rather than trusted from a
+stale string. The residual case a walk cannot see either way — unlink-then-recreate under an
+unchanged name, no symlink involved — remains `ObservedState`'s job, unchanged by this. The
+hardlink gap this paragraph also names is untouched by this closure; it stays open, as recorded
+above.
+
+**What would overturn it.** Untrusted input, which would promote the hardlink gap from
+documented to blocking — the TOCTOU race itself no longer promotes, since it is closed above.
 
 ## D7 — Local inference only; two ways in, human and machine
 
@@ -271,6 +286,11 @@ The temptation is to read the first as satisfying the gate, because "an escape i
 possible" sounds like the whole of it. It is not: prompt-injection-influenced input that
 redirects a write from one in-root file to another is the failure this section describes, and
 kernel confinement does not see it. **Both, or the frontend does not ship.**
+
+**Both conditions done.** Containment: [D10](#d10--kernel-confinement-for-shell-landlock-vendored-one-writable-root),
+2026-08-22. In-root correctness: [D6](#d6--the-sandbox-is-a-capability-type-and-resolution-is-posix-order)'s
+"Closed 2026-08-26" paragraph. The gate this table states no longer blocks `mcp.cpp`
+(ROUTING.md §12 step 6); it blocks nothing further of its own.
 
 **HTTP client: cpp-httplib, pinned.** Under this decision the client only ever talks to a
 loopback backend (Ollama, and from [D9](#d9--two-local-backends-ollama-and-vllm) vLLM): no

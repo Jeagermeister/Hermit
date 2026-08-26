@@ -762,6 +762,103 @@ TEST_F(MutateToolsTest, WriteAndEditCarryNulBytes) {
   EXPECT_EQ(slurp(tmp_ / "root" / "bin.dat"), "aXb");
 }
 
+// --- D7's gate: an interior component swapped between resolve and use --------
+//
+// call() resolves in one step and invokes in the next; these split that in two so a
+// symlink can be planted in the gap -- the "parse-to-use window" ROUTING.md section 12
+// step 5 names. sub2/ is a real directory when parse_args resolves the path, then
+// becomes a symlink to escape/ (outside the root) before the tool ever runs. Proves
+// fsio.h's walked-root primitives refuse the swap end to end, through the actual tools,
+// not just at the fsio_test.cpp primitive level.
+
+TEST_F(MutateToolsTest, WriteCreateRefusesWhenAnInteriorComponentIsSwappedAfterResolve) {
+  fs::create_directories(tmp_ / "root" / "sub2");
+  fs::create_directories(tmp_ / "escape");
+
+  WriteTool write{state_, *store_};
+  auto parsed = parse_args(write.spec(),
+                           {{"path", std::string{"sub2/new.txt"}},
+                            {"content", std::string{"hello"}}},
+                           *box_);
+  ASSERT_TRUE(parsed.has_value()) << to_string(parsed.error());
+
+  fs::remove(tmp_ / "root" / "sub2");
+  fs::create_directory_symlink(tmp_ / "escape", tmp_ / "root" / "sub2");
+
+  auto out = write.invoke(*parsed);
+  ASSERT_FALSE(out.has_value()) << "the swap must be refused, not followed";
+  EXPECT_TRUE(fs::is_empty(tmp_ / "escape")) << "nothing landed outside the root";
+}
+
+TEST_F(MutateToolsTest, WriteReplaceRefusesWhenAnInteriorComponentIsSwappedAfterResolve) {
+  fs::create_directories(tmp_ / "root" / "sub2");
+  fs::create_directories(tmp_ / "escape");
+  write_file(tmp_ / "root" / "sub2" / "target.txt", "orig");
+  ReadTool read{state_};
+  ASSERT_TRUE(call(read, {{"paths", std::vector<std::string>{"sub2/target.txt"}}})
+                  .has_value());
+
+  WriteTool write{state_, *store_};
+  auto parsed = parse_args(write.spec(),
+                           {{"path", std::string{"sub2/target.txt"}},
+                            {"content", std::string{"replaced"}}},
+                           *box_);
+  ASSERT_TRUE(parsed.has_value()) << to_string(parsed.error());
+
+  fs::remove_all(tmp_ / "root" / "sub2");
+  fs::create_directory_symlink(tmp_ / "escape", tmp_ / "root" / "sub2");
+
+  auto out = write.invoke(*parsed);
+  ASSERT_FALSE(out.has_value()) << "the swap must be refused, not followed";
+  EXPECT_TRUE(fs::is_empty(tmp_ / "escape")) << "nothing landed outside the root";
+}
+
+TEST_F(MutateToolsTest, EditRefusesWhenAnInteriorComponentIsSwappedAfterResolve) {
+  fs::create_directories(tmp_ / "root" / "sub2");
+  fs::create_directories(tmp_ / "escape");
+  write_file(tmp_ / "root" / "sub2" / "target.txt", "one two three\n");
+  ReadTool read{state_};
+  ASSERT_TRUE(call(read, {{"paths", std::vector<std::string>{"sub2/target.txt"}}})
+                  .has_value());
+
+  EditTool edit{state_, *store_};
+  auto parsed = parse_args(edit.spec(),
+                           {{"path", std::string{"sub2/target.txt"}},
+                            {"old", std::string{"two"}},
+                            {"new", std::string{"2"}}},
+                           *box_);
+  ASSERT_TRUE(parsed.has_value()) << to_string(parsed.error());
+
+  fs::remove_all(tmp_ / "root" / "sub2");
+  fs::create_directory_symlink(tmp_ / "escape", tmp_ / "root" / "sub2");
+
+  auto out = edit.invoke(*parsed);
+  ASSERT_FALSE(out.has_value()) << "the swap must be refused, not followed";
+  EXPECT_TRUE(fs::is_empty(tmp_ / "escape")) << "nothing landed outside the root";
+}
+
+TEST_F(MutateToolsTest,
+      MoveRefusesWhenTheDestinationsInteriorComponentIsSwappedAfterResolve) {
+  fs::create_directories(tmp_ / "root" / "sub2");
+  fs::create_directories(tmp_ / "escape");
+
+  MoveTool move{state_};
+  auto parsed = parse_args(move.spec(),
+                           {{"from", std::string{"seen.txt"}},
+                            {"to", std::string{"sub2/dest.txt"}}},
+                           *box_);
+  ASSERT_TRUE(parsed.has_value()) << to_string(parsed.error());
+
+  fs::remove(tmp_ / "root" / "sub2");
+  fs::create_directory_symlink(tmp_ / "escape", tmp_ / "root" / "sub2");
+
+  auto out = move.invoke(*parsed);
+  ASSERT_FALSE(out.has_value()) << "the swap must be refused, not followed";
+  EXPECT_TRUE(fs::is_empty(tmp_ / "escape")) << "nothing landed outside the root";
+  EXPECT_EQ(slurp(tmp_ / "root" / "seen.txt"), "one two three\n")
+      << "the source must survive an aborted move";
+}
+
 // --- the full surface --------------------------------------------------------
 
 TEST_F(MutateToolsTest, AllEightToolsComposeIntoOneRegistry) {
