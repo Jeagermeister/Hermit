@@ -54,9 +54,9 @@ class SandboxPath {
  public:
   /// Absolute, normalised, symlinks resolved -- as of the moment resolve() ran. Hand it
   /// to the OS only through core's one open primitive (open_in_root, fsio.h), which
-  /// re-walks from sandbox_root() component by component rather than trusting this
-  /// string directly -- spelling ::open on it here would re-inherit D6's resolve-to-open
-  /// race at every call site instead of the one place the gate closes it.
+  /// re-walks from sandbox_root() component by component instead of trusting this string
+  /// directly. Calling ::open on it here would reintroduce D6's resolve-to-open race at
+  /// every call site, instead of leaving it closed in the one place that does it.
   [[nodiscard]] const std::filesystem::path& path() const noexcept { return abs_; }
 
   /// Path relative to the sandbox root -- for logs and model-facing messages, so
@@ -66,11 +66,11 @@ class SandboxPath {
   [[nodiscard]] std::string string() const { return abs_.string(); }
 
   /// The root this path was resolved against. core's I/O primitives (fsio.h) anchor
-  /// their openat/mkdirat/linkat/renameat2 walk here instead of taking a Sandbox&,
-  /// so every caller of open_in_root keeps working unchanged -- see tool.h's own note
-  /// that the Sandbox is deliberately not bound to a resolved path "until SandboxPath
-  /// carries its provenance". Never render this to a model-facing result, same rule as
-  /// backup paths (ROUTING.md section 4).
+  /// their openat/mkdirat/linkat/renameat2 walk here instead of taking a Sandbox&, so
+  /// every caller of open_in_root keeps working unchanged -- see tool.h's own note that
+  /// the Sandbox stays unbound from a resolved path "until SandboxPath carries its
+  /// provenance". Never render this in a model-facing result, same rule as backup paths
+  /// (ROUTING.md section 4).
   [[nodiscard]] const std::filesystem::path& sandbox_root() const noexcept { return root_; }
 
   friend bool operator==(const SandboxPath&, const SandboxPath&) = default;

@@ -16,22 +16,22 @@ namespace hermit {
 
 namespace {
 
-// Opens `root` itself as a directory fd -- the fixed anchor every walk below starts
-// from. Reopened by path on every call rather than cached on Sandbox: the only extra
-// race a cached fd would close is something replacing the root directory itself, which
-// needs mount(2)-class privilege -- outside this project's threat model everywhere else
-// (D6/D7: a confused or prompt-injection-influenced model, never local root).
+// Opens `root` as a directory fd -- the fixed anchor every walk below starts from.
+// Reopened by path on every call instead of cached on Sandbox: the only extra race a
+// cached fd would close is someone replacing the root directory itself, and that needs
+// mount(2)-class privilege. D6/D7's threat model is a confused or prompt-injection-
+// influenced model, never local root, so that race stays out of scope.
 std::expected<Fd, IoError> open_root_fd(const std::filesystem::path& root) {
   int fd = ::open(root.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
   if (fd < 0) return std::unexpected{IoError{.code = errno}};
   return Fd{fd};
 }
 
-// The shared walk behind open_in_root and open_parent_in_root: from the root fd,
-// openat() one component at a time with O_NOFOLLOW on every hop, never just the last.
-// A symlink swapped into any intermediate component after resolve() surfaces as ELOOP
-// from that hop's openat and is refused there -- the walk never follows it, so there is
-// no separate stat-then-open step for a concurrent swap to race against.
+// The shared walk behind open_in_root and open_parent_in_root: openat() one component
+// at a time from the root fd, with O_NOFOLLOW on every hop, not just the last. A
+// symlink swapped into any intermediate component after resolve() surfaces as ELOOP
+// right there and is refused, never followed -- there's no separate stat-then-open step
+// for a concurrent swap to race against.
 struct WalkResult {
   Fd dir;
   std::string final_name;  // empty iff `path` names the sandbox root itself
@@ -184,10 +184,8 @@ std::expected<void, IoError> write_all(int fd, std::string_view bytes) {
   return {};
 }
 
-std::expected<std::string, IoError> write_temp_in_dir(int parent_fd,
-                                                       std::string_view target_name,
-                                                       std::string_view bytes,
-                                                       ::mode_t mode) {
+std::expected<std::pair<Fd, std::string>, IoError> open_temp_in_dir(
+    int parent_fd, std::string_view target_name) {
   const std::string base = "." + std::string(target_name) + ".hermit-tmp.";
 
   for (int attempt = 0; attempt < 32; ++attempt) {
@@ -219,21 +217,31 @@ std::expected<std::string, IoError> write_temp_in_dir(int parent_fd,
       if (errno == EEXIST) continue;
       return std::unexpected{IoError{.code = errno}};
     }
-    Fd owned{fd};
-    if (auto written = write_all(owned.get(), bytes); !written) {
-      ::unlinkat(parent_fd, candidate.c_str(), 0);
-      return std::unexpected{written.error()};
-    }
-    // fchmod, not the open() mode: open's mode is masked by umask, and the
-    // replace path needs the original file's mode preserved exactly.
-    if (::fchmod(owned.get(), mode) != 0) {
-      const int e = errno;
-      ::unlinkat(parent_fd, candidate.c_str(), 0);
-      return std::unexpected{IoError{.code = e}};
-    }
-    return candidate;
+    return std::pair{Fd{fd}, candidate};
   }
   return std::unexpected{IoError{.code = EEXIST}};
+}
+
+std::expected<std::string, IoError> write_temp_in_dir(int parent_fd,
+                                                       std::string_view target_name,
+                                                       std::string_view bytes,
+                                                       ::mode_t mode) {
+  auto temp = open_temp_in_dir(parent_fd, target_name);
+  if (!temp) return std::unexpected{temp.error()};
+  auto& [fd, name] = *temp;
+
+  if (auto written = write_all(fd.get(), bytes); !written) {
+    ::unlinkat(parent_fd, name.c_str(), 0);
+    return std::unexpected{written.error()};
+  }
+  // fchmod, not the open() mode: open's mode is masked by umask, and the
+  // replace path needs the original file's mode preserved exactly.
+  if (::fchmod(fd.get(), mode) != 0) {
+    const int e = errno;
+    ::unlinkat(parent_fd, name.c_str(), 0);
+    return std::unexpected{IoError{.code = e}};
+  }
+  return name;
 }
 
 }  // namespace hermit

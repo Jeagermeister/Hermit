@@ -101,9 +101,9 @@ std::expected<ToolOutput, ToolError> EditTool::run(const ToolArgs& args) {
                               "; nothing was written");
   }
 
-  // Walked from sandbox_root(), not target.path()'s string -- an interior symlink
-  // swapped in after resolve() is refused here, never followed (ROUTING.md section 12
-  // step 5). `false`: edit never creates parent directories.
+  // This walks from sandbox_root(), not target.path()'s string, so an interior symlink
+  // swapped in after resolve() is refused rather than followed (ROUTING.md section 12
+  // step 5). Edit never creates parent directories.
   auto parent = open_parent_in_root(target, /*create_missing=*/false);
   if (!parent) return refuse(target, "cannot reach parent directory: " + to_string(parent.error()));
 

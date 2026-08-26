@@ -1,14 +1,13 @@
 #pragma once
 
 // The one open primitive -- ROUTING.md section 12 step 5. Tools never spell
-// ::open/::openat themselves; every open of a SandboxPath goes through
-// open_in_root (reads and publication's parent directory both), which walks
-// from SandboxPath::sandbox_root() one openat(O_NOFOLLOW) component at a time
-// instead of trusting the pre-expanded absolute path string. A symlink swapped
-// into any component -- not just the final one -- after resolve() and before
-// this call is refused (ELOOP), never followed: this is what closes D6's
-// worked example ("link -> a/b", right filename wrong directory) rather than
-// merely documenting it.
+// ::open/::openat themselves; every open of a SandboxPath goes through open_in_root
+// (both for reads and for publication's parent directory), which walks from
+// SandboxPath::sandbox_root() one openat(O_NOFOLLOW) component at a time instead of
+// trusting the pre-expanded absolute path string. A symlink swapped into any
+// component, not just the final one, is refused (ELOOP) rather than followed --
+// closing D6's worked example ("link -> a/b", right filename, wrong directory)
+// instead of just documenting it.
 
 #include <cstdint>
 #include <expected>
@@ -89,14 +88,14 @@ struct ParentHandle {
 };
 
 /// Walk to `target`'s containing directory the same way open_in_root does, without
-/// opening `target` itself -- for callers that publish into it rather than read it.
-/// `create_missing` mkdirat's any missing intermediate directory as the walk reaches
-/// it (mode 0777, matching write's/move's existing "missing parents are created"
-/// contract); with it false, a missing intermediate directory is refused (ENOENT),
-/// matching edit's "never creates parents" contract.
+/// opening `target` itself -- for callers that publish into it instead of reading it.
+/// With `create_missing` true, each missing intermediate directory is created (mode
+/// 0777) as the walk reaches it, matching write's and move's "missing parents are
+/// created" contract; with it false, a missing directory is refused (ENOENT), matching
+/// edit's "never creates parents" contract.
 ///
-/// Refused with IoError::Kind::Refused if `target` names the sandbox root itself --
-/// the root has no in-root parent to publish into.
+/// Refused with IoError::Kind::Refused if `target` is the sandbox root itself -- the
+/// root has no in-root parent to publish into.
 [[nodiscard]] std::expected<ParentHandle, IoError> open_parent_in_root(
     const SandboxPath& target, bool create_missing);
 
@@ -134,13 +133,21 @@ struct FileContent {
 /// Write every byte or say why not. EINTR is retried; a short write continues.
 [[nodiscard]] std::expected<void, IoError> write_all(int fd, std::string_view bytes);
 
-/// Create an exclusive temp file inside `parent_fd` -- same directory as
-/// `target_name` so the later linkat()/renameat2() publication is
-/// same-filesystem and atomic -- fill it with `bytes`, and set `mode` exactly
-/// (fchmod, not umask-masked). Returns the temp's bare filename, relative to
-/// `parent_fd`; the caller publishes or unlinks it there. A crash in between
-/// leaves a ".hermit-tmp." orphan beside the target, which is visible,
-/// greppable, and harmless.
+/// Create an exclusive, empty temp file inside `parent_fd` -- same directory as
+/// `target_name` so the later linkat()/renameat2() publication is same-filesystem and
+/// atomic. For callers that stream content into it afterward rather than handing it
+/// over as one buffer (undo's restore(), which has no size cap on backups it might
+/// replay); write_temp_in_dir below is the common case, built on this. Returns the open
+/// fd and the temp's bare filename, relative to `parent_fd`; the caller sets the mode,
+/// publishes or unlinks it there. A crash in between leaves a ".hermit-tmp." orphan
+/// beside the target, which is visible, greppable, and harmless.
+[[nodiscard]] std::expected<std::pair<Fd, std::string>, IoError> open_temp_in_dir(
+    int parent_fd, std::string_view target_name);
+
+/// Create an exclusive temp file inside `parent_fd`, fill it with `bytes`, and set
+/// `mode` exactly (fchmod, not umask-masked) -- see open_temp_in_dir above for the
+/// naming and crash-orphan behavior this shares. Returns the temp's bare filename,
+/// relative to `parent_fd`; the caller publishes or unlinks it there.
 ///
 /// Durability posture, deliberate: no fsync anywhere on this path. R5's
 /// read-back verifies content, R4 keeps the old bytes recoverable, and

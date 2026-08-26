@@ -136,10 +136,10 @@ TEST_F(FsioTest, OpenInRootRefusesAnInteriorComponentSwappedToASymlink) {
 
   auto fd = open_in_root(*p, O_RDONLY);
   ASSERT_FALSE(fd.has_value());
-  // Interior hops are walked with O_DIRECTORY|O_NOFOLLOW, not O_NOFOLLOW alone as the
+  // Interior hops are walked with O_DIRECTORY|O_NOFOLLOW, not the plain O_NOFOLLOW the
   // final-component open above uses -- verified on this kernel to report ENOTDIR for a
-  // symlinked directory component, not ELOOP. Either way it is Kind::Kernel and refused,
-  // never followed: the distinction is real but doesn't change what the primitive does.
+  // symlinked directory component, not ELOOP. Either way it's Kind::Kernel and refused:
+  // the distinction is real, but it doesn't change what the primitive does.
   EXPECT_EQ(fd.error().code, ENOTDIR) << "an interior swap is refused, never followed";
 }
 

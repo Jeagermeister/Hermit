@@ -764,10 +764,10 @@ TEST_F(MutateToolsTest, WriteAndEditCarryNulBytes) {
 
 // --- D7's gate: an interior component swapped between resolve and use --------
 //
-// call() resolves in one step and invokes in the next; these split that in two so a
+// call() normally resolves and invokes in one step; these tests split that in two so a
 // symlink can be planted in the gap -- the "parse-to-use window" ROUTING.md section 12
 // step 5 names. sub2/ is a real directory when parse_args resolves the path, then
-// becomes a symlink to escape/ (outside the root) before the tool ever runs. Proves
+// becomes a symlink to escape/ (outside the root) before the tool ever runs. This proves
 // fsio.h's walked-root primitives refuse the swap end to end, through the actual tools,
 // not just at the fsio_test.cpp primitive level.
 

@@ -180,19 +180,32 @@ above: right filename, wrong directory. So `O_NOFOLLOW` is not made optional by 
 mechanisms cover disjoint failure modes.
 
 **Closed 2026-08-26.** `fsio.h`'s `open_in_root`/`open_parent_in_root` now walk from
-`SandboxPath::sandbox_root()` one `openat(O_NOFOLLOW)` component at a time, rather than
-trusting the pre-expanded absolute string `resolve()` produced — a symlink swapped into any
-component, not just the final one, is refused (`ELOOP`/`ENOTDIR`) at that hop, never followed.
-Publication (`write`/`edit`/`move`'s parent-directory creation, `link`, `rename`) is anchored
-the same way, via `mkdirat`/`linkat`/`renameat2` on the walked directory fd, closing the window
-[D7](#d7--local-inference-only-two-ways-in-human-and-machine)'s gate table named as *In-root
-correctness*. Full design in [ROUTING.md](./ROUTING.md) §12 step 5, including why no new
-mechanism was needed for the "post-open identity check" the gate's text names: the walk itself
-is the check, since every component is re-derived fresh at open time rather than trusted from a
-stale string. The residual case a walk cannot see either way — unlink-then-recreate under an
-unchanged name, no symlink involved — remains `ObservedState`'s job, unchanged by this. The
-hardlink gap this paragraph also names is untouched by this closure; it stays open, as recorded
-above.
+`SandboxPath::sandbox_root()` one `openat(O_NOFOLLOW)` component at a time, instead of trusting
+the pre-expanded absolute string `resolve()` produced. A symlink swapped into any component, not
+just the final one, is refused (`ELOOP`/`ENOTDIR`) at that hop and never followed. Publication —
+`write`/`edit`/`move`'s parent-directory creation, `link`, `rename` — is anchored the same way,
+via `mkdirat`/`linkat`/`renameat2` on the walked directory fd, closing the window
+[D7](#d7--local-inference-only-two-ways-in-human-and-machine)'s gate table names as *In-root
+correctness*. Full design in [ROUTING.md](./ROUTING.md) §12 step 5, including why the "post-open
+identity check" the gate's text calls for needed no new mechanism: the walk itself is that
+check, since every component is re-derived fresh at open time instead of trusted from a stale
+string. One case the walk can't see either way — unlink-then-recreate under an unchanged name,
+no symlink involved — is still `ObservedState`'s job, unchanged by this. The hardlink gap named
+above is untouched by this closure and stays open.
+
+**A gap in that closure, found by review and fixed the same day.** The commit above listed
+`write`/`edit`/`move` as publication's call sites but missed one: `supervisor/undo.cpp`'s
+`restore()` still built its parent directory, its temp file, and its final `rename()` from
+`target->path()`'s pre-expanded string, following an interior symlink swapped in after
+`box.resolve()` exactly as the unfixed tools once did. Converted the same way — `open_parent_in_root`
+plus a new `open_temp_in_dir` (the streaming half of `write_temp_in_dir`, split out because a
+backup being restored has no size cap to buffer into one `std::string` first) — so `restore()`
+now goes through the identical walked-fd primitives. Unlike `write`/`edit`/`move`, `restore()`
+has no `parse_args`-then-`invoke` seam a test can prise open to plant the swap in the actual
+resolve-to-publish window, so this fix has no dedicated regression test of its own; it leans on
+`fsio_test.cpp`'s primitive-level proof that the primitive itself refuses the swap, and on the
+existing `UndoTest` suite passing unmodified as the regression backstop that ordinary restores
+still work.
 
 **What would overturn it.** Untrusted input, which would promote the hardlink gap from
 documented to blocking — the TOCTOU race itself no longer promotes, since it is closed above.
@@ -289,8 +302,8 @@ kernel confinement does not see it. **Both, or the frontend does not ship.**
 
 **Both conditions done.** Containment: [D10](#d10--kernel-confinement-for-shell-landlock-vendored-one-writable-root),
 2026-08-22. In-root correctness: [D6](#d6--the-sandbox-is-a-capability-type-and-resolution-is-posix-order)'s
-"Closed 2026-08-26" paragraph. The gate this table states no longer blocks `mcp.cpp`
-(ROUTING.md §12 step 6); it blocks nothing further of its own.
+"Closed 2026-08-26" paragraph. The gate this table names no longer blocks `mcp.cpp`
+(ROUTING.md §12 step 6) — nothing else is left for it to block.
 
 **HTTP client: cpp-httplib, pinned.** Under this decision the client only ever talks to a
 loopback backend (Ollama, and from [D9](#d9--two-local-backends-ollama-and-vllm) vLLM): no

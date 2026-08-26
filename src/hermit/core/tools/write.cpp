@@ -62,9 +62,9 @@ std::expected<ToolOutput, ToolError> WriteTool::run(const ToolArgs& args) {
   const std::string& content = *args.string("content");
   const auto view = observed_.lookup(target.relative());
 
-  // Walked from sandbox_root(), not target.path()'s string -- an interior symlink
-  // swapped in after resolve() is refused here, never followed (ROUTING.md section 12
-  // step 5). `true`: missing parents are created, matching the existing contract.
+  // This walks from sandbox_root(), not target.path()'s string, so an interior symlink
+  // swapped in after resolve() is refused rather than followed (ROUTING.md section 12
+  // step 5). Creates missing parents here, matching write's existing contract.
   auto parent = open_parent_in_root(target, /*create_missing=*/true);
   if (!parent) return refuse(target, "cannot reach parent directory: " + to_string(parent.error()));
 

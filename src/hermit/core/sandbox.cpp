@@ -242,14 +242,14 @@ std::expected<SandboxPath, PathError> Sandbox::resolve(std::string_view raw) con
   }
 
   // Between this check and the eventual open(), a symlink could be swapped in -- this
-  // walk is stat-based, not open-based, so it proves containment at this instant only.
-  // ROUTING.md section 12 step 5's gate closes the rest: fsio.h's open_in_root and
-  // open_parent_in_root re-walk from sandbox_root() one openat(O_NOFOLLOW) component at
-  // a time, so a swap planted after this call is refused at open time rather than
-  // silently followed. What remains open, named rather than closed: an unlink-then-
-  // recreate under the same name is not a symlink and this walk cannot see it either way
-  // -- ObservedState's identity-tuple check (observed.h) is what catches that, for the
-  // tools gated on it.
+  // walk is stat-based, not open-based, so it proves containment only at this instant.
+  // ROUTING.md section 12 step 5 closes the rest: fsio.h's open_in_root and
+  // open_parent_in_root re-walk from sandbox_root() one openat(O_NOFOLLOW) component at a
+  // time, so a swap planted after this call is refused at open time, not silently
+  // followed. One case stays open, by name rather than by accident: an unlink-then-
+  // recreate under the same name isn't a symlink, so this walk can't see it either --
+  // ObservedState's identity-tuple check (observed.h) catches that instead, for the tools
+  // gated on it.
 
   fs::path relative = resolved->lexically_relative(root_);
   if (relative.empty()) {
