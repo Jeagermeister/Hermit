@@ -10,6 +10,25 @@
 > *does this model emit absolute paths*. Working trees now run outside the repo.
 > Re-run before treating any per-task number as settled.
 
+> ### ⚠ These runs were not at `reasoning_effort=none`, despite saying so
+>
+> Found by review 2026-08-26; see [RESULTS.md](./RESULTS.md) for the mechanism. `--reasoning`
+> was never passed to hermes, so this sweep ran at `~/.hermes/config.yaml`'s `medium`.
+>
+> This does not undermine finding 2 below — it is what makes it coherent. "Thinking is what
+> makes these models work" only parses if the thinking models were in fact thinking, and at
+> `medium` they were. Read finding 2 as thinking-at-medium against models that have no
+> thinking to do, which is the comparison that actually ran. What this sweep cannot tell you,
+> and believed it could, is how qwen-9b does with its reasoning genuinely off.
+
+> ### ⚠ Finding 2 is false as stated — sweep 3, `hermit-bench/fsops/SWEEP3.md`, 2026-08-26
+>
+> "There is no fast, accurate, small, non-thinking option in this field" was measured without
+> the best model in it. `gemma-e4b` — listed under Limitations below as "still untested" —
+> scores **90% at a 9.4s median**, beating `qwen3.5:9b` on accuracy at about a seventh of the
+> wall clock. `granite4-7b` went 19% → 45% at a 3.8s median. The dichotomy was an artifact of
+> which models had been run, not a property of the field.
+
 
 `cachyos-x8664` · RTX 5080 Laptop 16 GB · `num_ctx` 65536 · 3 repeats · model-default
 sampling · transcripts off · **144 runs**
