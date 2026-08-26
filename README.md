@@ -116,6 +116,18 @@ failures recorded in `bench/fsops`, and the residue is named rather than absorbe
 containing the literal text `grep -oP '(?<=^).*' notes.txt` satisfies `exists:report.md` perfectly,
 and that is a real recorded run.
 
+**A confined shell landed 2026-08-18 through 2026-08-26.** [D10](./DECISIONS.md) built kernel
+confinement itself — Landlock via a vendored, sha256-pinned launcher, one writable root, fixed
+read grants — and the follow-up slice wired it into a real ninth tool: `shell`, R8-bounded on
+the wall clock, its stdout and stderr captured and truncation-flagged rather than silently cut
+off, killed as a whole process group (so a command that backgrounds a grandchild does not
+outlive its timeout). It is off by default, opts in with `--shell`, and refuses to start rather
+than silently run unconfined if this machine's own confinement probe cannot confirm the kernel
+is actually enforcing the ruleset ([D11](./DECISIONS.md)). Registering it also switches R6's
+per-turn tree diff to rehash unconditionally, closing a gap [D13](./DECISIONS.md) named: a
+`MAP_SHARED` write can change a file's bytes without moving the timestamp/size tuple the default
+diff reuses hashes from.
+
 So: the stories' mechanics run, and their structural guarantees now hold. The MCP frontend is
 [ROUTING.md](./ROUTING.md) §12 step 6, and §12 remains the honest odometer.
 
@@ -143,10 +155,10 @@ The evidence sits in two places, across two machines and two agent harnesses:
 | Path | What |
 |---|---|
 | `src/hermit/core/` | Library code. `sandbox` (R1), `tool` (D4's interface), `fsio` (the one open primitive), `sha256` (R3's hash), `observed` (the staleness guard), `backup` (R4's archive) |
-| `src/hermit/core/tools/` | The eight Tier 0 tools — read, list, find, grep, hash, write, edit, move — [ROUTING.md](./ROUTING.md) §4's surface, verified per call |
+| `src/hermit/core/tools/` | The eight structural Tier 0 tools — read, list, find, grep, hash, write, edit, move — [ROUTING.md](./ROUTING.md) §4's surface, verified per call, plus `shell`: the ninth, kernel-confined by [D10](./DECISIONS.md), off by default behind `--shell` |
 | `src/hermit/ollama/` | The only layer that speaks HTTP: client and R9 preflight |
-| `src/hermit/supervisor/` | The turn: `loop` (dispatch and the R8 bounds), `session` (history and the context budget), `wire` (the JSON bridge between `core`'s pure data and the model), `verify` (R6's per-turn hash diff of the tree), `judge` (what the stated post-conditions came to) — [D7](./DECISIONS.md)'s middle layer |
-| `src/hermit/app/` | `config`, `toolset` (composing the eight tools) and `expect` (post-conditions, parsed against a root), shared by the CLI and the coming MCP frontend |
+| `src/hermit/supervisor/` | The turn: `loop` (dispatch and the R8 bounds), `session` (history and the context budget), `wire` (the JSON bridge between `core`'s pure data and the model), `verify` (R6's per-turn hash diff of the tree — `force_rehash` whenever `shell` is registered, closing [D13](./DECISIONS.md)'s gap), `judge` (what the stated post-conditions came to) — [D7](./DECISIONS.md)'s middle layer |
+| `src/hermit/app/` | `config`, `toolset` (composing the tools) and `expect` (post-conditions, parsed against a root), shared by the CLI and the coming MCP frontend |
 | `src/main.cpp` | `hermit` — manual harness for the pieces that exist |
 | `tests/` | GoogleTest suite; run with `ctest` |
 | `DECISIONS.md` | The hard-to-reverse choices, and what would overturn each |
@@ -185,14 +197,25 @@ hermit agent     --root DIR --model NAME <instruction>   # the loop, end to end
 hermit config                           # every setting in force, and where it came from
 ```
 
-`agent` is the whole turn: one instruction, the eight tools offered to a local model, one line of
-trace per turn and per call, and a summary that says which bound stopped it. Three bounds, not
-two: `--max-turns`, `--budget` wall-clock (R8), and a per-turn cap on how many calls one reply may
-make — the third is a runaway guard rather than a knob, and calls past it are refused rather than
-dropped, because a dropped call reads to the model as still outstanding. It prints, in so many
-words, what it did and did not check. After every turn it takes a hash diff of the whole tree and
-prints what actually moved, owing nothing to the model's reply (R6's observation half, `--no-verify`
-to skip it).
+`agent` is the whole turn: one instruction, the eight structural tools offered to a local model,
+one line of trace per turn and per call, and a summary that says which bound stopped it. Three
+bounds, not two: `--max-turns`, `--budget` wall-clock (R8), and a per-turn cap on how many calls
+one reply may make — the third is a runaway guard rather than a knob, and calls past it are
+refused rather than dropped, because a dropped call reads to the model as still outstanding. It
+prints, in so many words, what it did and did not check. After every turn it takes a hash diff of
+the whole tree and prints what actually moved, owing nothing to the model's reply (R6's
+observation half, `--no-verify` to skip it).
+
+Add `--shell` and a ninth, kernel-confined tool joins the menu ([D10](./DECISIONS.md)): the model
+can run an opaque shell command, still writable only inside `--root`, still killed at a wall-clock
+bound (`--shell-timeout`, default 60s, R8) — as a whole process group, so nothing it backgrounds
+outlives the kill. It refuses to start rather than silently run unconfined if this machine's own
+confinement probe cannot confirm the kernel is actually enforcing the ruleset:
+
+```bash
+hermit agent --root ~/scratch --model qwen35-agent --shell --shell-timeout 30 \
+  'Count the lines in every .md file in this folder and write the totals to counts.txt.'
+```
 
 State a post-condition with `--expect` and it prints a verdict too: each expectation in the order
 written, met or unmet or undecidable, decided from the tree and never from the reply. Exit 3 means
