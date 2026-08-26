@@ -841,3 +841,8 @@ Upstream is ~870k lines of non-test Python. A wholesale port is not the goal and
   collected today for a reason easy to miss — `bench/fsops/proxy.py` records *upstream Hermes
   Agent's* tool vocabulary over `/v1/chat/completions`, not this project's eight tools over
   native `/api/chat`. The recorder works; it records the wrong system.
+- **Whether to turn on LTO.** Full build/size and runtime-hot-path review recorded in
+  [PERFORMANCE.md](./PERFORMANCE.md), 2026-08-26 — gated, not scheduled, and filed here rather
+  than as a Phase item for the same reason as the entry above: it's a real, measured win (37%
+  smaller binary, no slower build on this machine) with no forcing function behind it. Runtime
+  hot paths got the same review and came back clean — nothing else in that file is actionable.
