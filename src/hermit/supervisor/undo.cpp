@@ -171,27 +171,26 @@ std::expected<Restored, std::string> restore(const fs::path& store, Sandbox& box
     return fail(target->relative().string() + ": " + to_string(current.error()));
   }
 
-  std::error_code ec;
-  fs::create_directories(target->path().parent_path(), ec);
-  if (ec) {
-    return fail("cannot recreate parent directories for " +
-                target->relative().string() + ": " + ec.message());
+  // Walked from sandbox_root(), not target->path()'s string, so an interior symlink
+  // swapped in after resolve() is refused rather than followed (ROUTING.md section 12
+  // step 5). Recreates missing parents, matching restore's existing contract.
+  auto parent = open_parent_in_root(*target, /*create_missing=*/true);
+  if (!parent) {
+    return fail("cannot reach parent directory for " + target->relative().string() +
+                ": " + to_string(parent.error()));
   }
 
-  // Stream to a temp beside the target, then publish by rename -- the same
-  // atomic pattern as the write tool, streamed because backups are the one
+  // Stream to a temp inside the walked parent, then publish by renameat2 -- the same
+  // atomic, walked-root pattern as the write tool, streamed because backups are the one
   // content in this codebase with no size cap.
-  std::string temp =
-      (target->path().parent_path() / ".hermit-tmp.XXXXXX").string();
-  const int tfd = ::mkostemp(temp.data(), O_CLOEXEC);
-  if (tfd < 0) {
-    return fail("cannot create a temp file beside " +
-                target->relative().string() + ": " +
-                to_string(IoError{.code = errno}));
+  auto temp = open_temp_in_dir(parent->dir.get(), parent->name);
+  if (!temp) {
+    return fail("cannot create a temp file beside " + target->relative().string() +
+                ": " + to_string(temp.error()));
   }
-  Fd out{tfd};
+  auto& [out, temp_name] = *temp;
   auto abandon = [&](std::string why) {
-    ::unlink(temp.c_str());
+    ::unlinkat(parent->dir.get(), temp_name.c_str(), 0);
     return fail(std::move(why));
   };
   if (::fchmod(out.get(), mode) != 0) {
@@ -236,7 +235,8 @@ std::expected<Restored, std::string> restore(const fs::path& store, Sandbox& box
       offset += n;
     }
   }
-  if (::rename(temp.c_str(), target->path().c_str()) != 0) {
+  if (::renameat2(parent->dir.get(), temp_name.c_str(), parent->dir.get(),
+                  parent->name.c_str(), 0) != 0) {
     return abandon("publishing the restored file failed: " +
                    to_string(IoError{.code = errno}));
   }

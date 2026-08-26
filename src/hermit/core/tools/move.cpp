@@ -97,10 +97,10 @@ std::expected<ToolOutput, ToolError> MoveTool::run(const ToolArgs& args) {
     return refuse(from.relative().string() + ": " + to_string(source_hash.error()));
   }
 
-  // Walked from sandbox_root(), not from.path()/to.path()'s strings -- an interior
-  // symlink swapped in after resolve() is refused here, never followed (ROUTING.md
-  // section 12 step 5). `from` never creates parents; `to` does, matching the existing
-  // "missing destination parents are created" contract.
+  // This walks from sandbox_root(), not from/to's path() strings, so an interior symlink
+  // swapped in after resolve() is refused rather than followed (ROUTING.md section 12
+  // step 5). `from` never creates parents; `to` does, matching move's existing "missing
+  // destination parents are created" contract.
   auto from_parent = open_parent_in_root(from, /*create_missing=*/false);
   if (!from_parent) {
     return refuse(from.relative().string() +

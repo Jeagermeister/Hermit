@@ -661,24 +661,34 @@ Ordered. Steps 1–5 are Phase 2 and 2.5 as already written; only the tool list 
      `open_in_root`'s body. Until then the window is accepted *and named*, here.
 
      **Done 2026-08-26.** `fsio.h`'s `open_in_root` and new `open_parent_in_root` both walk
-     from `SandboxPath::sandbox_root()` — a copy of the root each resolved path now carries,
-     added rather than threading `Sandbox&` through every one of the eight tools plus
-     `supervisor/semantic.cpp` and `supervisor/undo.cpp` that already call these primitives.
-     Each walk opens one component at a time via `openat(O_DIRECTORY | O_NOFOLLOW)`, from a
-     freshly-opened root directory fd — not from `SandboxPath::path()`'s pre-expanded string —
-     so a symlink swapped into any component after `resolve()` is refused at that hop
-     (`ELOOP` on the final component, `ENOTDIR` on an interior one, verified against this
-     kernel rather than assumed) and never followed. Publication now goes through
-     `open_parent_in_root` plus `mkdirat`/`linkat`/`renameat2` on the walked directory fd,
-     exactly as this step named: `write.cpp`, `edit.cpp`, `move.cpp`. The "post-open identity
-     check" this step's original text names is the walk itself — every component is
-     re-derived fresh at open time, so there is no separate stat-then-open step for a
-     concurrent swap to race against; no new mechanism was added. What the walk cannot see
-     either way — unlink-then-recreate under an unchanged name — stays `ObservedState`'s job,
-     unchanged. New coverage: `fsio_test.cpp` at the primitive level, `mutate_tools_test.cpp`
-     end to end through the actual tools, each planting the swap in the real parse-to-use
-     window (`parse_args` resolves, then the filesystem changes, then `invoke` runs). Full
-     account in [DECISIONS.md](./DECISIONS.md) D6's "Closed 2026-08-26" paragraph.
+     from `SandboxPath::sandbox_root()`, a copy of the root each resolved path now carries.
+     That's simpler than threading `Sandbox&` through every one of the eight tools plus
+     `supervisor/semantic.cpp` and `supervisor/undo.cpp` that already call these primitives to
+     read.
+     Each walk opens one component at a time via `openat(O_DIRECTORY | O_NOFOLLOW)` from a
+     freshly-opened root directory fd, not from `SandboxPath::path()`'s pre-expanded string,
+     so a symlink swapped into any component after `resolve()` is refused at that hop and
+     never followed (`ELOOP` on the final component, `ENOTDIR` on an interior one — verified
+     against this kernel, not assumed). Publication now goes through `open_parent_in_root`
+     plus `mkdirat`/`linkat`/`renameat2` on the walked directory fd, exactly as this step
+     named: `write.cpp`, `edit.cpp`, `move.cpp`. The "post-open identity check" this step's
+     original text calls for turns out to be the walk itself: every component is re-derived
+     fresh at open time, so there's no separate stat-then-open step for a concurrent swap to
+     race against, and no new mechanism was needed. The one thing the walk still can't see —
+     unlink-then-recreate under an unchanged name — stays `ObservedState`'s job, unchanged.
+     New coverage: `fsio_test.cpp` at the primitive level, `mutate_tools_test.cpp` end to end
+     through the actual tools, each planting the swap in the real parse-to-use window
+     (`parse_args` resolves, the filesystem changes, then `invoke` runs). Full account in
+     [DECISIONS.md](./DECISIONS.md), D6's "Closed 2026-08-26" paragraph.
+
+     **One call site missed the first pass, caught by review the same day:**
+     `supervisor/undo.cpp`'s `restore()` already used these primitives to read the backup and
+     the file being replaced, but still published — parent directory, temp file, final rename —
+     off `target->path()`'s pre-expanded string, the exact pattern just converted everywhere
+     else. Now converted too, via `open_parent_in_root` and a new `open_temp_in_dir` (streaming,
+     since a restored backup has no size cap to buffer first). See DECISIONS.md D6's follow-up
+     paragraph for why this one has no dedicated race-window test: `restore()` has no
+     `parse_args`/`invoke` seam to plant the swap in.
 6. **`mcp.cpp`** in `app`. Callable from here on. Cheaper than it was: the tool definitions it
    must publish are already rendered by `supervisor/wire.cpp`, from the same descriptors, so
    D4's one-declaration guarantee reaches the MCP surface without a second schema.
