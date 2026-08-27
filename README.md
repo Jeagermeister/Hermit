@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo/hermit-readme-200.png" alt="Hermit" width="160">
+</p>
+
 # Hermit
 
 **H**ash-verified · **E**vidence-driven · **R**etries with concrete failure · **M**inimal
