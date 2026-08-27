@@ -12,3 +12,8 @@ compile_commands.json
 .vscode/
 .idea/
 *.swp
+
+# Scratch: generated-image sources, deliberately kept out of history.
+# These carry C2PA provenance and a SynthID marker. The shipped assets in
+# assets/logo/ are derived from them and are scrubbed; the sources are not.
+Hermit-Logo-Ideas/
