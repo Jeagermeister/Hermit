@@ -11,6 +11,7 @@ structurally-enforced authority · **I**ndependent verification · **T**iered di
 
 | document | what it answers |
 |---|---|
+| [docs/](./docs/README.md) | **the book**: how to use Hermit — building, quickstart, choosing a model, the CLI, expectations, troubleshooting |
 | [REQUIREMENTS.md](./REQUIREMENTS.md) | what this must do, each requirement traced to a measured failure |
 | [SCOPE.md](./SCOPE.md) | what gets built, read, or ignored — and why |
 | [ROADMAP.md](./ROADMAP.md) | sequencing, and what must be settled before code |
