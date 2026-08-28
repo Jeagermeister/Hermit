@@ -19,6 +19,8 @@ using hermit::ToolRegistry;
 using hermit::ToolRow;
 using hermit::ToolSpec;
 using hermit::supervisor::DecodeErrorKind;
+using hermit::supervisor::mcp_tool_definition;
+using hermit::supervisor::mcp_tool_definitions;
 using hermit::supervisor::raw_args_from;
 using hermit::supervisor::render_error;
 using hermit::supervisor::render_output;
@@ -113,6 +115,29 @@ TEST(WireDefinition, RendersRegistrationOrderStablySoThePromptBytesDoNotMove) {
   ASSERT_EQ(definitions.size(), 2u);
   EXPECT_EQ(definitions[0]["function"]["name"], "alpha");
   EXPECT_EQ(definitions[1]["function"]["name"], "beta");
+}
+
+// --- the MCP tool surface -----------------------------------------------------
+
+TEST(WireDefinition, McpToolDefinitionMatchesTheOllamaSchemaShape) {
+  // Same schema object, different envelope: MCP is flat, Ollama nests under "function".
+  const json ollama = tool_definition(kSpec)["function"]["parameters"];
+  const json mcp = mcp_tool_definition(kSpec);
+
+  EXPECT_EQ(mcp["name"], "sample");
+  EXPECT_EQ(mcp["description"], "A tool for testing.");
+  EXPECT_EQ(mcp["inputSchema"], ollama);
+}
+
+TEST(WireDefinition, McpToolDefinitionsPreserveRegistryOrder) {
+  ToolRegistry registry;
+  ASSERT_TRUE(registry.add(std::make_unique<Stub>(kFirst)).has_value());
+  ASSERT_TRUE(registry.add(std::make_unique<Stub>(kSecond)).has_value());
+
+  const auto definitions = mcp_tool_definitions(registry);
+  ASSERT_EQ(definitions.size(), 2u);
+  EXPECT_EQ(definitions[0]["name"], "alpha");
+  EXPECT_EQ(definitions[1]["name"], "beta");
 }
 
 // --- decoding the model's arguments ------------------------------------------

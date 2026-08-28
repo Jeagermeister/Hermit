@@ -22,6 +22,8 @@ add_executable(hermit_tests
   config_test.cpp
   session_test.cpp
   wire_test.cpp
+  toolset_test.cpp
+  mcp_test.cpp
   loop_test.cpp
   reinvoke_test.cpp
   semantic_test.cpp

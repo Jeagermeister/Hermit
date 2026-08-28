@@ -65,6 +65,21 @@ namespace hermit::supervisor {
 /// server's prompt cache hit, turning a reproducible run into a noisy one.
 [[nodiscard]] std::vector<nlohmann::json> tool_definitions(const ToolRegistry& registry);
 
+/// One tool, as MCP's `tools/list` wants it:
+///
+///     {"name": ..., "description": ...,
+///      "inputSchema": {"type": "object", "properties": {...}, "required": [...]}}
+///
+/// The schema object is identical to `tool_definition`'s `"parameters"` -- both are
+/// built by the same internal helper -- only the envelope around name/description
+/// differs. There is no second declaration to keep in sync (D4).
+[[nodiscard]] nlohmann::json mcp_tool_definition(const ToolSpec& spec);
+
+/// Every tool in `registry`, in registration order. See `tool_definitions` for why the
+/// order is stable; it matters less here (MCP has no prompt cache) but there is no
+/// reason for the two surfaces to disagree on it.
+[[nodiscard]] std::vector<nlohmann::json> mcp_tool_definitions(const ToolRegistry& registry);
+
 // --- 2. inbound: the model's arguments ---------------------------------------
 
 enum class DecodeErrorKind {

@@ -1,11 +1,8 @@
 # 20. MCP and Kiro
 
-**Status, honestly (2026-08-27): designed, gated, and not yet built.** The safety gate that
-blocked a programmatic frontend — two conditions, kernel confinement and per-component
-`openat(O_NOFOLLOW)` correctness — cleared on 2026-08-26, so nothing blocks `mcp.cpp` any
-more; it is the next step on the odometer ([ROUTING.md](../ROUTING.md) §12 step 6). Until it
-ships, this chapter describes a design, and says so rather than letting the future tense
-blur.
+**Status (2026-08-28): built.** `hermit mcp --root DIR` — a subcommand beside `agent`/`undo`,
+not a second binary — reads JSON-RPC on stdin and writes it to stdout ([ROUTING.md](../ROUTING.md)
+§12 step 6, done). The shape below is no longer a design; it is what shipped.
 
 ## The shape
 
@@ -46,7 +43,7 @@ Kiro's `autoApprove` list maps onto the tool surface for free: `read`, `list`, `
 mutate. That is caller policy, and Hermit will not ship a config that pre-approves a mutating
 tool.
 
-## What will differ from the CLI surface
+## What differs from the CLI surface
 
 **`shell` is off the MCP surface by default**, and enabling it there is an explicit marked
 configuration act. The surviving reason is egress: Landlock bounds what a confined shell can
@@ -67,6 +64,6 @@ question is a consequence of Kiro's platform, not generic portability anxiety.
 
 The economics experiment (E2) — the same agentic harness doing the same tasks with its native
 filesystem tools versus the Hermit MCP surface as its only hands, metered tokens per completed
-task — is frozen and waiting on this frontend as its first real workout
-([chapter 30](./30-benchmarks.md)). When this chapter's status line changes, that number is
-the first thing to collect.
+task — was frozen ahead of this frontend and named it as its one prerequisite
+([chapter 30](./30-benchmarks.md)). Now that this has shipped, running E2's collection is the
+first thing to do with it.

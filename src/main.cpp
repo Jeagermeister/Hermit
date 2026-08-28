@@ -21,6 +21,7 @@
 
 #include <hermit/app/config.h>
 #include <hermit/app/expect.h>
+#include <hermit/app/mcp.h>
 #include <hermit/app/toolset.h>
 #include <hermit/core/confine.h>
 #include <hermit/core/sandbox.h>
@@ -59,6 +60,7 @@ int usage(std::ostream& to = std::cerr) {
       "       hermit session   --model NAME   (try --max-num-ctx 2048 to force compaction)\n"
       "       hermit agent     --root DIR --model NAME <instruction>\n"
       "       hermit undo      --root DIR    (lists what can be restored; --restore/--last/--prune act)\n"
+      "       hermit mcp       --root DIR    (D7: an MCP server over stdio; no positional args)\n"
       "       hermit config\n"
       "\n"
       "settings, in increasing precedence: defaults < --config file < environment < flags\n"
@@ -344,57 +346,6 @@ int session_command(std::span<const std::string_view> args) {
   return 0;
 }
 
-// R4: outside the root, always. Defaulted beside it rather than inside it -- a store
-// under the root would be listable, readable and editable by the model, which is the
-// whole point of the rule. Shared by `agent` and `undo`, which must agree on where the
-// store is or undo would list a different history than the job wrote.
-//
-// Prints its own complaint and returns nothing on refusal; the caller exits 2.
-std::optional<std::filesystem::path> settle_store_dir(
-    const hermit::Sandbox& box, std::optional<std::filesystem::path> backup_dir) {
-  if (!backup_dir) {
-    backup_dir = box.root().parent_path() /
-                 (".hermit-backups-" + box.root().filename().string());
-  }
-
-  // Cheap containment check on the *lexical* paths, which is enough for an operator
-  // typo. It is not a security boundary and is not claimed as one: both paths are
-  // host-side operator configuration, not model input.
-  //
-  // Compared with a separator appended, not as a bare prefix. A bare prefix test
-  // makes `/tmp/sandbox-backups` look "inside" `/tmp/sandbox`, which would refuse the
-  // most natural place to put the store -- right beside the root, which is where this
-  // command's own default puts it.
-  constexpr char kSep = std::filesystem::path::preferred_separator;
-  std::string root = box.root().lexically_normal().string();
-  while (root.size() > 1 && root.back() == kSep) root.pop_back();
-  // weakly_canonical, not absolute: Sandbox::open canonicalises the root, expanding
-  // every symlink, and sandbox.cpp says outright that "the two must be expressed in the
-  // same terms or containment comparisons silently fail open". absolute() resolves no
-  // symlinks, so `--root ~/work --backups ~/work/undo` with ~/work a symlink would
-  // compare a canonical root against an unexpanded store, call the store outside, and
-  // put the undo data inside the sandbox where the model can list, read, edit and move
-  // it -- R4 defeated by the check meant to enforce it.
-  // weakly_canonical tolerates a store that does not exist yet, which is the normal
-  // case: BackupStore creates it lazily on the first mutation.
-  const std::string store =
-      std::filesystem::weakly_canonical(*backup_dir).lexically_normal().string();
-
-  // `--root /` needs its own arm, and getting it wrong is worse than it looks: the strip
-  // loop leaves root as "/", so the general test degrades to `starts_with("//")`, which
-  // no normalised path matches -- every location would have been accepted as "outside"
-  // the one root that contains everything.
-  const bool inside = (root == std::string{kSep})
-                          ? store.starts_with(kSep)
-                          : (store == root || store.starts_with(root + kSep));
-  if (inside) {
-    std::cerr << "error: --backups must be outside --root (R4): " << store << " is inside "
-              << root << '\n';
-    return std::nullopt;
-  }
-  return backup_dir;
-}
-
 // Phase 2 --- the loop, end to end: one instruction, the eight Tier 0 tools, a real
 // model. This is the first subcommand where all four layers run at once.
 int agent_command(std::span<const std::string_view> args) {
@@ -553,8 +504,12 @@ int agent_command(std::span<const std::string_view> args) {
   }
 
 
-  const auto store_dir = settle_store_dir(*box, std::move(backup_dir));
-  if (!store_dir) return 2;
+  const auto store_dir = hermit::app::resolve_backup_dir(*box, std::move(backup_dir));
+  if (!store_dir) {
+    std::cerr << "error: --backups must be outside --root (R4): "
+              << hermit::app::to_string(store_dir.error()) << '\n';
+    return 2;
+  }
 
   // A retention failure is a note, not a stop (D14): the job the operator asked for
   // must not be blocked by archive bookkeeping, and the likely cause (a pre-marker
@@ -1016,8 +971,12 @@ int undo_command(std::span<const std::string_view> args) {
               << '\n';
     return 1;
   }
-  const auto store_dir = settle_store_dir(*box, std::move(backup_dir));
-  if (!store_dir) return 2;
+  const auto store_dir = hermit::app::resolve_backup_dir(*box, std::move(backup_dir));
+  if (!store_dir) {
+    std::cerr << "error: --backups must be outside --root (R4): "
+              << hermit::app::to_string(store_dir.error()) << '\n';
+    return 2;
+  }
 
   if (prune_now) {
     const auto pruned = hermit::supervisor::prune(
@@ -1130,6 +1089,7 @@ int main(int argc, char** argv) {
   if (command == "session") return session_command(args);
   if (command == "agent") return agent_command(args);
   if (command == "undo") return undo_command(args);
+  if (command == "mcp") return hermit::app::mcp_command(args);
   if (command == "config") return config_command(args);
   if (command == "--help" || command == "-h" || command == "help") {
     usage(std::cout);
