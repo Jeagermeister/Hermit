@@ -32,11 +32,11 @@ json property_of(const ArgSpec& arg) {
 /// says "number"/"boolean"/"null"/"object"/"array", which is the vocabulary wanted.
 std::string type_name_of(const json& value) { return value.type_name(); }
 
-}  // namespace
-
-// --- 1. outbound: the tool surface -------------------------------------------
-
-json tool_definition(const ToolSpec& spec) {
+/// The JSON Schema object both `tool_definition` (as `"parameters"`) and
+/// `mcp_tool_definition` (as `"inputSchema"`) wrap. One builder, so the two envelopes
+/// can never drift on what an argument's schema actually says -- only on how the name
+/// and description are packaged around it.
+json input_schema_of(const ToolSpec& spec) {
   json properties = json::object();
   json required = json::array();
 
@@ -45,14 +45,21 @@ json tool_definition(const ToolSpec& spec) {
     if (arg.required) required.push_back(std::string{arg.name});
   }
 
-  json parameters{{"type", "object"}, {"properties", std::move(properties)}};
-  if (!required.empty()) parameters["required"] = std::move(required);
+  json schema{{"type", "object"}, {"properties", std::move(properties)}};
+  if (!required.empty()) schema["required"] = std::move(required);
+  return schema;
+}
 
+}  // namespace
+
+// --- 1. outbound: the tool surface -------------------------------------------
+
+json tool_definition(const ToolSpec& spec) {
   return json{{"type", "function"},
               {"function",
                {{"name", std::string{spec.name}},
                 {"description", std::string{spec.description}},
-                {"parameters", std::move(parameters)}}}};
+                {"parameters", input_schema_of(spec)}}}};
 }
 
 std::vector<json> tool_definitions(const ToolRegistry& registry) {
@@ -60,6 +67,20 @@ std::vector<json> tool_definitions(const ToolRegistry& registry) {
   const auto tools = registry.tools();
   definitions.reserve(tools.size());
   for (const auto& tool : tools) definitions.push_back(tool_definition(tool->spec()));
+  return definitions;
+}
+
+json mcp_tool_definition(const ToolSpec& spec) {
+  return json{{"name", std::string{spec.name}},
+              {"description", std::string{spec.description}},
+              {"inputSchema", input_schema_of(spec)}};
+}
+
+std::vector<json> mcp_tool_definitions(const ToolRegistry& registry) {
+  std::vector<json> definitions;
+  const auto tools = registry.tools();
+  definitions.reserve(tools.size());
+  for (const auto& tool : tools) definitions.push_back(mcp_tool_definition(tool->spec()));
   return definitions;
 }
 

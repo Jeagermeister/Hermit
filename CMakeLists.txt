@@ -257,9 +257,13 @@ add_library(hermit::supervisor ALIAS hermit_supervisor)
 add_library(hermit_app
   src/hermit/app/config.cpp
   src/hermit/app/expect.cpp
+  src/hermit/app/mcp.cpp
   src/hermit/app/toolset.cpp)
 
 target_include_directories(hermit_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+# mcp.cpp's `initialize` response reports this as the server version -- fed from the
+# one declared version rather than a second copy that could drift from it.
+target_compile_definitions(hermit_app PRIVATE HERMIT_VERSION="${PROJECT_VERSION}")
 target_link_libraries(hermit_app
   PRIVATE hermit_warnings
   PUBLIC  hermit_core hermit_ollama hermit_sanitizers hermit_supervisor

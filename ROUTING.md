@@ -689,9 +689,17 @@ Ordered. Steps 1–5 are Phase 2 and 2.5 as already written; only the tool list 
      since a restored backup has no size cap to buffer first). See DECISIONS.md D6's follow-up
      paragraph for why this one has no dedicated race-window test: `restore()` has no
      `parse_args`/`invoke` seam to plant the swap in.
-6. **`mcp.cpp`** in `app`. Callable from here on. Cheaper than it was: the tool definitions it
-   must publish are already rendered by `supervisor/wire.cpp`, from the same descriptors, so
-   D4's one-declaration guarantee reaches the MCP surface without a second schema.
+6. ~~**`mcp.cpp`** in `app`.~~ **Done 2026-08-28.** `hermit mcp --root DIR` — a subcommand
+   beside `agent`/`undo`, not a second executable — reads JSON-RPC on stdin and writes it to
+   stdout (D7). Its tool schema and dispatch are exactly the two things this step promised
+   would need no second implementation: `tools/list` renders through a new
+   `supervisor::mcp_tool_definitions()`, sharing `wire.cpp`'s existing schema builder with the
+   Ollama-facing `tool_definition()` rather than restating it, and `tools/call` runs through
+   the same `supervisor::dispatch_call()` the CLI's own loop already used. `shell` stays off
+   this surface by default, gated the same way `agent_command` gates it: an explicit config
+   flag plus a live `probe_confinement() == Enforced` check, hard refusal otherwise. See
+   [chapter 20](./docs/20-mcp-and-kiro.md) for the deployment shape and hermit-bench's E2
+   protocol (`delta/E2-PROTOCOL.md`), whose one named prerequisite this was.
 7. **Tier 1** (`triage`, `summarize`) in `supervisor`, once model selection is settled. Note
    [D12](./DECISIONS.md): these are the callers `format` is *for* — a structured reply with no
    tools offered, which is the one configuration it was re-measured working in.

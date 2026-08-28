@@ -34,13 +34,39 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string>
 
 #include <hermit/core/backup.h>
 #include <hermit/core/fsio.h>
 #include <hermit/core/observed.h>
+#include <hermit/core/sandbox.h>
 #include <hermit/core/tool.h>
 
 namespace hermit::app {
+
+/// `resolve_backup_dir` refused a path inside the sandbox root. `root`/`store` are the
+/// normalised forms compared, so a caller's message can quote exactly what was compared
+/// rather than what the operator typed.
+struct BackupDirError {
+  std::filesystem::path root;
+  std::filesystem::path store;
+};
+
+[[nodiscard]] std::string to_string(const BackupDirError& error);
+
+/// R4: outside the root, always. Defaulted beside it rather than inside it -- a store
+/// under the root would be listable, readable and editable by the model, which is the
+/// whole point of the rule. Shared by every frontend that composes a `ToolSet` with undo
+/// history (today: the CLI's `agent`/`undo`; `mcp.cpp` next) -- they must agree on where
+/// the store is, or one frontend's undo would list a different history than another
+/// frontend's job wrote.
+///
+/// Returns the resolved directory, or the comparison that failed. Printing the refusal
+/// is the caller's job: this layer does no I/O of its own, and its callers disagree on
+/// where a diagnostic belongs (a human's stderr vs. a frontend that reserves stdout for
+/// something else entirely).
+[[nodiscard]] std::expected<std::filesystem::path, BackupDirError> resolve_backup_dir(
+    const Sandbox& box, std::optional<std::filesystem::path> backup_dir);
 
 /// What `shell` needs beyond what the other eight tools share. `root` is
 /// confine::run_confined's writable grant -- the sandbox root itself, not a per-call
