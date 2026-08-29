@@ -52,8 +52,8 @@ inference only, and a non-loopback URL is refused at configuration time.
 over stdio; the cloud model does the thinking and calls Hermit for the hands. The pitch there
 is the ecosystem's own warning inverted: a typical stdio MCP server runs with all the launching
 user's authority, and this is the one that *reduces* authority instead of inheriting it. As of
-2026-08-27 the MCP frontend is designed and its safety gate is cleared, but the server itself
-is not yet built — [chapter 20](./20-mcp-and-kiro.md) keeps the honest status.
+2026-08-28 the MCP frontend is built and shipped — [chapter 20](./20-mcp-and-kiro.md) keeps
+the honest status.
 
 ## What Hermit is not
 

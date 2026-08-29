@@ -133,8 +133,8 @@ per-turn tree diff to rehash unconditionally, closing a gap [D13](./DECISIONS.md
 `MAP_SHARED` write can change a file's bytes without moving the timestamp/size tuple the default
 diff reuses hashes from.
 
-So: the stories' mechanics run, and their structural guarantees now hold. The MCP frontend is
-[ROUTING.md](./ROUTING.md) §12 step 6, and §12 remains the honest odometer.
+So: the stories' mechanics run, and their structural guarantees now hold. The MCP frontend
+shipped as [ROUTING.md](./ROUTING.md) §12 step 6, and §12 remains the honest odometer.
 
 ## Why native code, honestly
 
@@ -163,7 +163,7 @@ The evidence sits in two places, across two machines and two agent harnesses:
 | `src/hermit/core/tools/` | The eight structural Tier 0 tools — read, list, find, grep, hash, write, edit, move — [ROUTING.md](./ROUTING.md) §4's surface, verified per call, plus `shell`: the ninth, kernel-confined by [D10](./DECISIONS.md), off by default behind `--shell` |
 | `src/hermit/ollama/` | The only layer that speaks HTTP: client and R9 preflight |
 | `src/hermit/supervisor/` | The turn: `loop` (dispatch and the R8 bounds), `session` (history and the context budget), `wire` (the JSON bridge between `core`'s pure data and the model), `verify` (R6's per-turn hash diff of the tree — `force_rehash` whenever `shell` is registered, closing [D13](./DECISIONS.md)'s gap), `judge` (what the stated post-conditions came to) — [D7](./DECISIONS.md)'s middle layer |
-| `src/hermit/app/` | `config`, `toolset` (composing the tools) and `expect` (post-conditions, parsed against a root), shared by the CLI and the coming MCP frontend |
+| `src/hermit/app/` | `config`, `toolset` (composing the tools), `expect` (post-conditions, parsed against a root) and `mcp` (the JSON-RPC frontend), shared by the CLI and MCP surfaces |
 | `src/main.cpp` | `hermit` — manual harness for the pieces that exist |
 | `tests/` | GoogleTest suite; run with `ctest` |
 | `DECISIONS.md` | The hard-to-reverse choices, and what would overturn each |
