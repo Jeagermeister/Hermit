@@ -65,8 +65,8 @@ Five pre-registered experiments, each frozen before its first run.
   confabulation was the judge model, not the design. Four models now show the same law:
   *where the judge sees, nothing slips silently; where it is blind, everything does.*
 - **E2 — economics, frozen and waiting.** Tokens per completed task, native tools versus the
-  Hermit MCP surface as the only hands. Collection is blocked on the MCP frontend shipping
-  ([chapter 20](./20-mcp-and-kiro.md)).
+  Hermit MCP surface as the only hands. The MCP frontend it was waiting on shipped 2026-08-28
+  ([chapter 20](./20-mcp-and-kiro.md)); collection has not run yet.
 
 ## Reproducing
 

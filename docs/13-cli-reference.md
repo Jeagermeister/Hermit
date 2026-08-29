@@ -1,6 +1,6 @@
 # 13. CLI reference
 
-One binary, six subcommands. This chapter matches the binary as built 2026-08-27;
+One binary, seven subcommands. This chapter matches the binary as built 2026-08-28;
 `hermit --help` is always the tie-breaker, and `hermit config` shows every setting actually in
 force and where it came from.
 
@@ -10,6 +10,7 @@ hermit preflight --model NAME
 hermit session   --model NAME
 hermit agent     --root DIR --model NAME <instruction>
 hermit undo      --root DIR
+hermit mcp       --root DIR
 hermit config
 ```
 
@@ -26,6 +27,17 @@ per call, a hash-verified changeset after every turn, a verdict for anything sta
 
 Lists the backup store's generations by default; mutates only by explicit flag.
 [Chapter 17](./17-undo-and-backups.md).
+
+### `hermit mcp` — the programmatic front door
+
+An MCP server over stdio: reads one JSON-RPC message per line on stdin, writes one back on
+stdout, until the client closes its side. No listener, no port, no auth, no TLS ([D7](../DECISIONS.md)).
+Offers the same eight structural tools `agent` does (nine with `--shell`, gated identically —
+refused at startup unless this machine's confinement probe reports Enforced), published from the
+same descriptor list that renders `agent`'s Ollama tool definitions, so there is no second schema
+to drift. Takes no positional arguments and no `--model`/`--url` (tool-serving needs no model or
+Ollama client). `--backups DIR` works the same as below; retention is fixed at the CLI's own
+72-hour default and this surface does not expose `--keep-hours`. [Chapter 20](./20-mcp-and-kiro.md).
 
 ### `hermit preflight` — the model gates
 
@@ -86,12 +98,12 @@ Precedence, increasing: **defaults < `--config` file < environment < flags.**
 | `--judge-model NAME` | who decides `satisfies:` expectations (default: the working model, in a fresh session that never sees the transcript) |
 | `--unjudged N` | declare N stated requirements that deliberately cannot be decided from the tree (reply-marker requirements); the verdict reports them as unjudged instead of letting them vanish |
 
-## `agent` and `undo`
+## `agent`, `undo` and `mcp`
 
 | flag | meaning |
 |---|---|
 | `--backups DIR` | where undo data goes; must be outside `--root`. Defaults to `.hermit-backups-<root name>` beside the root |
-| `--keep-hours N` | retention: generations older than N hours are pruned at agent start and by `undo --prune` (default 72) |
+| `--keep-hours N` | retention: generations older than N hours are pruned at agent start and by `undo --prune` (default 72). `agent`/`undo` only — `mcp` prunes at its own fixed 72h default and does not expose this flag |
 
 ## `undo` only
 

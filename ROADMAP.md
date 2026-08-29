@@ -541,8 +541,10 @@ model calling this as a tool.
       runs natively on Windows, where a Linux binary is not spawnable. A "Power" is the wrong
       vehicle and that is settled. [ROUTING.md](./ROUTING.md) §8 carries the integration detail;
       [SCOPE.md](./SCOPE.md) § Platforms carries the Windows scope decision.
-- [ ] **MCP server over stdio.** No listener, no port, no auth. Thin: transport only, over the
-      same core the CLI drives.
+- [x] ~~**MCP server over stdio.**~~ No listener, no port, no auth. Thin: transport only, over
+      the same core the CLI drives. **Done 2026-08-28** — `hermit mcp --root DIR`;
+      [ROUTING.md](./ROUTING.md) §12 step 6 and [chapter 20](./docs/20-mcp-and-kiro.md) carry
+      the detail.
 - [ ] **`bench/delta` — the before/after measurement.** Design settled in
       [bench/delta/DESIGN.md](./bench/delta/DESIGN.md) before any run exists. Two experiments,
       separated: **economics** (delegation vs direct, needs no local model — Tier 0 is
@@ -582,11 +584,11 @@ model calling this as a tool.
         retry-conversion narrative in both results documents before first push (every table
         reproduced; the story around two of them did not). The supervisor-side work the
         series priced is **"The measured levers"** below.
-      - [ ] **E2, economics** — still blocked on `mcp.cpp` above, deliberately its first
-        real workout. The E3–E5 series raises its priority: reliability is now measured
-        across two machines and five model tiers, so cost-per-completed-task is the
-        question the evidence base is missing (hermit-bench's TODO.md names it the next
-        experiment to freeze).
+      - [ ] **E2, economics** — no longer blocked; `mcp.cpp` above shipped 2026-08-28, and
+        running E2's collection against it is deliberately its first real workout. The
+        E3–E5 series raises its priority: reliability is now measured across two machines
+        and five model tiers, so cost-per-completed-task is the question the evidence base
+        is missing (hermit-bench's TODO.md names it the next experiment to freeze).
 
 ## Phase 3 — The supervisor (the actual product)
 

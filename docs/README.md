@@ -6,7 +6,7 @@ its own words, and links down to the design documents where the binding reasonin
 chapter here and a design document ever disagree, the design document is right and the chapter
 is stale; say so in an issue rather than trusting either silently.
 
-Status statements in these chapters are dated. The book was last brought current **2026-08-27**.
+Status statements in these chapters are dated. The book was last brought current **2026-08-28**.
 
 ## Where to start
 
@@ -15,8 +15,7 @@ Status statements in these chapters are dated. The book was last brought current
 - **"Which model should I run?"** → [Choosing a model](./12-choosing-a-model.md).
 - **"What is this thing, and why would I trust it?"** → [What Hermit is](./01-what-hermit-is.md),
   then [The evidence](./02-the-evidence.md).
-- **"I want to call it from my IDE"** → [MCP and Kiro](./20-mcp-and-kiro.md) — read the status
-  line there first.
+- **"I want to call it from my IDE"** → [MCP and Kiro](./20-mcp-and-kiro.md).
 - **"Are the numbers real?"** → [The measurements](./30-benchmarks.md).
 
 ## Contents
@@ -47,7 +46,7 @@ Status statements in these chapters are dated. The book was last brought current
 
 | chapter | what it answers |
 |---|---|
-| [20. MCP and Kiro](./20-mcp-and-kiro.md) | The programmatic front door — designed, gated, not yet shipped |
+| [20. MCP and Kiro](./20-mcp-and-kiro.md) | The programmatic front door — built |
 
 ### Part IV — The measurements
 

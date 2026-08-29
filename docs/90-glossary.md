@@ -78,5 +78,4 @@ The project's working vocabulary, one line each. R-numbers are requirements
   machinery's job.
 - **Bounded session** — one instruction, capped turns, capped wall clock, capped calls per
   turn; the architecture's unit of work.
-- **Front doors** — the human CLI, and (designed, not yet shipped) MCP over stdio for a
-  programmatic caller.
+- **Front doors** — the human CLI, and MCP over stdio for a programmatic caller.

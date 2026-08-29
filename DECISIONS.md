@@ -257,7 +257,7 @@ against 1–3 s for a Python interpreter. Speed here is a product feature, not a
 |---|---|---|
 | **core** | sandbox, filesystem ops, verification (R1, R3, R4, R5) | no model, no network |
 | **supervisor** | drives the local backend; bounded sessions, retry (R6, R7) | the only layer with an HTTP client |
-| **frontends** | CLI today, MCP-over-stdio next | neither of the above, beyond a small API |
+| **frontends** | CLI, MCP-over-stdio | neither of the above, beyond a small API |
 
 **Amended 2026-08-13, when the supervisor layer got its first code.** The table has three
 rows and the tree has four directories: `src/hermit/ollama/` is the transport, and it sits
@@ -268,6 +268,11 @@ behind a pimpl. The commitment the row was making still holds, and holds more st
 written: nothing above the transport can reach HTTP even by accident. Recorded rather than
 silently re-drawn, because a layering table that is approximately true is the kind of document
 this project has already had to correct once.
+
+**Amended 2026-08-28, when `mcp.cpp` shipped.** The row read "CLI today, MCP-over-stdio next"
+from the day this decision was drafted until the frontend itself existed — true when written,
+stale for two weeks once ROUTING.md §12 step 6 closed. Corrected to present tense rather than
+left approximately true, per the paragraph just above.
 
 A consequence worth naming: the **core is useful with no model at all**. Called by Claude, this
 is a verified, reversible filesystem toolkit and R6/R7 barely matter. Driven locally, the
