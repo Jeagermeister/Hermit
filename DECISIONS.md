@@ -1217,6 +1217,63 @@ Two things this entry did not anticipate, both found while fixing it:
   in the sense ROUTING.md §9 describes — §9 itself is about per-machine settings and names
   neither — so wiring the cap to the window is a composition decision nobody has made yet.
 
+### Compaction — and whether it should summarize anything at all
+
+**Opened 2026-08-31.** The entry above fixed *what* `Session::prepare()` drops. This one asks
+whether dropping is the right verb. Today the trim loop erases whole groups from the front until
+the turn fits the window: cheap, correct, and **silently lossy** — the early turns are gone and
+nothing tells the model what it has forgotten. A supervisor whose one job is to notice when a
+model is confidently wrong currently makes it forget without saying so.
+
+**The obvious answer is the wrong one here.** Chat clients compact by asking the model to
+summarize the conversation, then replacing history with the summary. That puts the model's prose
+account of events back on the critical path — precisely what
+[D13](#d13--per-turn-verification-observes-the-filesystem-never-the-reply) removed, and for the
+same measured reason: handed a tool result whose `content` was the four characters `aaaa`,
+`llama3.2-3b` reported *"a.txt is 1 character long."* A summary is that failure with no snapshot
+behind it to catch it. The roster makes it worse rather than better — 3–9B models are the weakest
+available summarizers, and they are the entire target tier.
+
+**The shape that follows from D13 instead: reconstruct, do not summarize.** Almost everything a
+chat compactor tries to preserve, this supervisor can simply re-observe:
+
+- **the task text** — kept verbatim, never compressed; it is the ground truth of intent
+- **the world** — re-snapshotted, not recalled. `TreeVerifier` already walks it every turn, and
+  D13's carry-forward hashing means the snapshot costs the walk plus the bytes that actually
+  moved
+- **the failure history** — already structured. The retry path's one-concrete-failure record is
+  the anti-repeat signal, and it is data, not prose
+- **the model's own narration** — dropped entirely
+
+That needs no model call, is deterministic, costs nothing beyond a walk, and cannot hallucinate.
+It is D13's argument moved from the turn to the window.
+
+**What reconstruction cannot recover, stated plainly.** Intent *inside* a task. An approach the
+model tried, abandoned mid-turn, and never failed against leaves no trace in the tree and no
+entry in the failure record — so a reconstructed context can send it back down a path it had
+already reasoned its way out of. The failure record covers rejected branches; it does not cover
+abandoned ones. Whether that gap matters is an empirical question, not a design one, and it is
+the thing to measure before committing.
+
+**Two things make the trigger tractable here that are not tractable in a chat client.**
+[D8](#d8--native-apichat-and-the-num_ctx-clamp-that-has-to-come-with-it) clamps `num_ctx` to a
+stated value rather than inheriting a default no API reports, so the supervisor knows exactly how
+close to the bound it is — compaction fires on a threshold, not a guess. And the per-turn
+snapshot D13 already requires means the reconstruction inputs are computed whether or not
+compaction ever runs.
+
+**The product argument, which is larger than the efficiency one.** A ≥64K context window is
+currently a model-registration gate. Reconstruction-based compaction relaxes it: a model that
+cannot hold a long session can still finish a long task if the window is rebuilt from the tree
+each time it fills. That widens the eligible roster rather than merely making the current one
+cheaper, and it is the reason this is worth doing before the window gets bigger on its own.
+
+**What would settle it.** Whether a reconstructed context lets a model finish a task it was
+mid-way through, measured against the trim loop as the control on the same tasks — an
+experiment-side question, so it belongs in hermit-bench's docket once the reconstruction shape
+is decided here. Not before: there is nothing to benchmark until "compaction" names something
+specific.
+
 ### Tool definitions vanish from some templates after a tool result
 
 **Measured 2026-08-17**, building the agent loop, and it is a model-selection criterion
