@@ -71,15 +71,20 @@ because it is not a question that can be won by picking a side.
 | `conversation_compression.py` | 4,133 | see below |
 
 These 11.5k lines exist because upstream runs long, open-ended sessions against cloud models.
-**That problem is already solved here by a different route.** The tournaments concluded "break
-larger work into fresh sessions," and the supervisor re-invokes with *one concrete remaining
-failure*. A session that starts fresh and carries a single failure message does not accumulate
-history worth compressing.
+**Long sessions are real here too; summarisation is not the fix.** The tournaments concluded
+"break larger work into fresh sessions," and the supervisor re-invokes with *one concrete
+remaining failure* — so accumulation *across* sessions was never the problem these files solve.
+Within one session the window still fills, and
+[D17](./DECISIONS.md#d17--compaction-rebuilds-the-window-from-the-tree-it-never-summarizes)
+answers that without porting a compressor: the window is rebuilt from the filesystem — task
+kept verbatim, changed paths re-read, the model's own narration discarded, never a summary of
+what it claims happened. Built at a few hundred lines against upstream's 11.5k, and the size
+gap is the point, not an accident: a summary is exactly the unverified completion claim R6
+exists to distrust.
 
-Context management therefore reduces to a hard budget check before each request, plus a policy
-for the one case that survives: **a single file larger than the context window.** That is
-chunk-and-summarise, worth reading upstream for ideas and not worth porting — hundreds of lines,
-not eleven thousand.
+The one case D17 does not reach is **a single file larger than the context window.** That is
+chunk-and-summarise, worth reading upstream for ideas and not worth porting on its own —
+hundreds of lines, not eleven thousand.
 
 Recorded as `REFERENCE` in `parity.tsv` rather than `OUT_OF_SCOPE`, because if upstream learns
 something here it is worth knowing.
