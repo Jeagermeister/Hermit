@@ -57,7 +57,7 @@ int usage(std::ostream& to = std::cerr) {
   to <<
       "usage: hermit resolve   --root DIR <path>...\n"
       "       hermit preflight --model NAME\n"
-      "       hermit session   --model NAME   (try --max-num-ctx 2048 to force compaction)\n"
+      "       hermit session   --model NAME   (try --max-num-ctx 2048 to force a trim)\n"
       "       hermit agent     --root DIR --model NAME <instruction>\n"
       "       hermit undo      --root DIR    (lists what can be restored; --restore/--last/--prune act)\n"
       "       hermit mcp       --root DIR    (D7: an MCP server over stdio; no positional args)\n"
@@ -609,6 +609,7 @@ int agent_command(std::span<const std::string_view> args) {
     if (event.reasoning_chars > 0) std::cout << "  thinking " << event.reasoning_chars << "ch";
     if (event.truncated) std::cout << "  [hit the generation budget]";
     if (event.dropped > 0) std::cout << "  dropped " << event.dropped;
+    if (event.compactions > 0) std::cout << "  rebuilt " << event.compactions;
     std::cout << '\n';
     for (const auto& call : event.calls) {
       constexpr std::size_t kPreview = 100;
@@ -742,6 +743,12 @@ int agent_command(std::span<const std::string_view> args) {
             << "turns   : " << outcome.turns << " of " << max_turns << '\n'
             << "calls   : " << outcome.calls << " (" << outcome.refusals << " refused)\n"
             << "dropped : " << outcome.dropped << " turns of history\n"
+            // Reported on its own line rather than added to the one above. The two mean
+            // different things -- history lost in silence against history replaced by
+            // re-observed state -- and a single number would hide the distinction the
+            // feature exists to make.
+            << "rebuilt : " << outcome.compactions
+            << (outcome.compactions == 1 ? " time from the tree\n" : " times from the tree\n")
             << "elapsed : " << outcome.elapsed.count() << " ms\n";
   if (!outcome.detail.empty()) std::cout << "detail  : " << outcome.detail << '\n';
   if (!outcome.final_content.empty()) {

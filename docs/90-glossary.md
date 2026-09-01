@@ -76,6 +76,15 @@ The project's working vocabulary, one line each. R-numbers are requirements
 - **The context cliff** — Ollama's overflow behaviour: one token past the window silently
   costs nearly the whole prompt. Prevention is the only strategy; that is the session
   machinery's job.
+- **Compaction** — rebuilding the context window from the filesystem once the prompt reaches
+  80% of its budget: task kept verbatim, changed paths re-read, unmet requirements restated,
+  the model's own narration discarded. Deliberately *not* summarisation — a summary would be
+  the model's account of events, which is what verification exists not to trust. Needs a
+  verifier; without one the trim is the fallback.
+- **The trim** — the older, cheaper policy underneath compaction: drop whole call-and-result
+  groups off the front until the prompt fits. Still the backstop, and still what runs when
+  there is no tree to rebuild from. Counted separately (`dropped`) from compaction
+  (`rebuilt`), because history lost in silence is not the same as history replaced.
 - **Bounded session** — one instruction, capped turns, capped wall clock, capped calls per
   turn; the architecture's unit of work.
 - **Front doors** — the human CLI, and MCP over stdio for a programmatic caller.

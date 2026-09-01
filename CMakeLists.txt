@@ -231,6 +231,7 @@ add_library(hermit::ollama ALIAS hermit_ollama)
 # accident. The edge turns that accident into a declared dependency; an out-of-tree
 # consumer of hermit::supervisor alone is who it would actually have broken.
 add_library(hermit_supervisor
+  src/hermit/supervisor/compact.cpp
   src/hermit/supervisor/judge.cpp
   src/hermit/supervisor/loop.cpp
   src/hermit/supervisor/reinvoke.cpp

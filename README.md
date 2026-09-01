@@ -262,9 +262,10 @@ cd /tmp && "$OLDPWD/build/hermit" resolve --root ~/some/root note.txt ../../etc/
 `session` exists because the token estimate is the one thing no unit test can settle — there is
 no tokenizer in the process, so only the daemon can say whether the guess is conservative
 enough. Each turn prints what the session expected against what Ollama actually evaluated.
-Run it with a small window to watch the session compact history *deliberately*, which is the
+Run it with a small window to watch the session trim history *deliberately*, which is the
 whole point: left to itself the server discards the middle of an over-long prompt, keeps the
-system message, and says nothing.
+system message, and says nothing. (Trimming, not compaction — `session` verifies no tree, so
+there is nothing to rebuild a window from. That is `agent`'s path.)
 
 ```bash
 hermit session --model gemma31-agent --max-num-ctx 2048

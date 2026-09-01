@@ -29,6 +29,22 @@ evaluated, and drops whole call-and-result groups deliberately rather than letti
 discard the middle. Run `hermit session --model <tag> --max-num-ctx 2048` to watch the
 machinery work. If you see collapse anyway, that is a bug worth reporting with the trace.
 
+On an `agent` run there is a second layer in front of that one. At 80% of the prompt budget
+Hermit **rebuilds** the window instead of trimming it: the task is kept verbatim, the files are
+re-read from disk, unmet requirements are restated, and the model is told in plain words that
+the earlier turns are gone. Nothing is summarised — a summary would be the model's own account
+of events, which is the thing Hermit exists not to trust. The run report tells you which
+happened:
+
+```
+dropped : 0 turns of history
+rebuilt : 2 times from the tree
+```
+
+`dropped` above zero with `rebuilt` at zero means reconstruction could not run and the trim
+handled it instead. The usual cause is a run with no verification — there is no tree to rebuild
+from — so add expectations or run `agent` rather than `session` if you want the better half.
+
 ## The reply came back empty, no error
 
 Check the summary for `done_reason == length`. A thinking model that exhausts its generation

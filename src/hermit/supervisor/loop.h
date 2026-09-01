@@ -36,6 +36,25 @@
 // loop, not inside it. This class is the thing Phase 3 will drive, and it is honest
 // about being only half the product.
 //
+// --- Where the context window is rebuilt, and why it is here ----------------
+//
+// The loop is the only layer that holds all three inputs a reconstruction needs at once:
+// the task as the caller stated it, the tree (through `verifier`), and the verdict. The
+// Session holds none of them and does no I/O by design, and `compact.h` composes text and
+// touches nothing. So the trigger sits at the top of the turn, right after the previous
+// turn's snapshot, where all three are current.
+//
+// Ordering is the whole design. Compaction is checked *before* `prepare()`: a turn later
+// the prompt is over budget and the only question left is which groups to erase, whereas
+// here the tree can still be re-observed and put in their place. `compact_at` defaults to
+// the fraction the trim's hysteresis would have trimmed down to, so on a verified run
+// reconstruction is the normal path and the trim is the backstop for what it cannot serve.
+//
+// The task text is copied before `add_user` moves it, and every reconstruction is composed
+// from that copy. Composing from the previous composed instruction would nest the framing
+// one deeper on each compaction -- the same trap `reinvocation_instruction` avoids on the
+// third retry, arriving here by a different route.
+//
 // --- Why refusals go back to the model rather than ending the run -----------
 //
 // Every refusal on the dispatch path -- unknown tool, undecodable arguments, a path the
@@ -91,6 +110,7 @@
 #include <hermit/core/sandbox.h>
 #include <hermit/core/tool.h>
 #include <hermit/ollama/client.h>
+#include <hermit/supervisor/compact.h>
 #include <hermit/supervisor/judge.h>
 #include <hermit/supervisor/session.h>
 #include <hermit/supervisor/verify.h>
@@ -183,6 +203,10 @@ struct TurnEvent {
   /// History given up before this turn was sent, cumulative.
   std::size_t dropped = 0;
 
+  /// Windows rebuilt from re-observed state before this turn was sent, cumulative.
+  /// Reads against `dropped` rather than into it -- see `Session::compactions()`.
+  std::size_t compactions = 0;
+
   /// What this turn did to the tree, hash-verified and owing nothing to the model's
   /// account of it (R6). Always empty when no verifier was supplied.
   ///
@@ -228,6 +252,27 @@ struct LoopOptions {
   /// model made would leave it waiting on an answer that never comes, which is the
   /// orphaned-call failure the Session's grouped trim was written to avoid.
   std::size_t max_calls_per_turn = 8;
+
+  /// Rebuild the window from the tree once the prompt reaches this fraction of the
+  /// session's prompt budget ([compact.h](./compact.h)). 0 turns it off and leaves the
+  /// trim as the only policy.
+  ///
+  /// Checked at the top of each turn, *before* `prepare()` -- which is what makes it
+  /// compaction rather than a second trim. By the time `prepare()` runs the prompt is
+  /// already over budget and the only question left is what to erase; a turn earlier the
+  /// tree can still be re-observed and put in its place.
+  ///
+  /// **Requires a verifier, and does nothing without one.** The state a reconstruction
+  /// carries is read from the filesystem, so with `verifier == nullptr` there is nothing
+  /// to reconstruct *from* and the trim remains the policy. Not refused as
+  /// `Misconfigured`, unlike a stated expectation with no verifier: that one asks a
+  /// question nothing can answer, whereas this one has a correct and already-implemented
+  /// fallback. It stays legible in the outcome rather than being silent -- a run with
+  /// `dropped > 0` and `compactions == 0` is exactly a run that trimmed instead.
+  ///
+  /// 0.80 by default, which is deliberately where the trim's own hysteresis would have
+  /// landed the prompt; see `kDefaultCompactAt`.
+  double compact_at = kDefaultCompactAt;
 
   /// Verify the tree after every turn (R6). Optional; null means no verification, which
   /// is the right default for a caller that only wants the loop.
@@ -309,6 +354,14 @@ struct LoopOutcome {
   /// Turns the Session gave up to make room, over the whole run. Non-zero means the
   /// model was answering with holes in its history, which belongs in any report.
   std::size_t dropped = 0;
+
+  /// Times the window was rebuilt from re-observed state, over the whole run.
+  ///
+  /// Kept apart from `dropped` on purpose. That counter means the model answered with
+  /// holes it was never told about; this one means it lost the same turns and was handed
+  /// the filesystem in their place. Summing them would destroy the only distinction the
+  /// feature makes.
+  std::size_t compactions = 0;
 
   /// What the whole run did to the tree: the last snapshot against the first, so a file
   /// created and then deleted again does not appear, and one written three times appears

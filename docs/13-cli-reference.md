@@ -48,9 +48,11 @@ optional inference warmup. Fails closed — "could not determine" is a failure, 
 
 Exists because the token estimate is the one thing no unit test can settle. Each turn prints
 what the session expected against what Ollama actually evaluated. Run it with
-`--max-num-ctx 2048` to watch history being compacted *deliberately* — the alternative, left
+`--max-num-ctx 2048` to watch history being *trimmed* deliberately — the alternative, left
 to the server, is a silent discard of nearly everything
-([troubleshooting](./18-troubleshooting.md) § the context cliff).
+([troubleshooting](./18-troubleshooting.md) § the context cliff). `session` has no tree to
+verify, so it never reaches the reconstruction path `agent` uses; the trim is the whole of
+what this command demonstrates.
 
 ### `hermit resolve` — path resolution, visible
 

@@ -1153,6 +1153,156 @@ flipping the default to `ON` — nothing today reaches that bar.
 
 ---
 
+## D17 — Compaction rebuilds the window from the tree; it never summarizes
+
+**Decided 2026-09-01**, settling the question opened the day before. `Session::prepare()`'s trim
+was the whole of the answer until now: drop groups off the front until the turn fits. Correct,
+cheap, and **silently lossy** — the early turns are gone and nothing tells the model what it has
+forgotten. A supervisor whose one job is noticing when a model is confidently wrong should not
+make it forget without saying so.
+
+**What was decided.** When the prompt reaches 80% of the session's prompt budget, the window is
+rebuilt: every unpinned turn is erased and the pinned task turn is rewritten to carry the task
+verbatim followed by re-observed state — what has changed on disk since the task started, which
+stated requirements are still unmet, and a plain statement that the earlier turns are gone. No
+model call, no summary, deterministic, and it cannot hallucinate. It is
+[D13](#d13--per-turn-verification-observes-the-filesystem-never-the-reply)'s argument moved from
+the turn to the window.
+
+**Why not summarize**, restated because it is the load-bearing half: asking the model to
+summarize its own history puts its prose account of events back on the critical path, which is
+exactly what D13 removed. Handed a tool result whose `content` was the four characters `aaaa`,
+`llama3.2-3b` reported *"a.txt is 1 character long."* A summary is that failure with no snapshot
+behind it to catch it, and 3–9B models are both the weakest summarizers available and the entire
+target tier.
+
+### The five choices inside the decision
+
+- **The threshold is 0.80, and it is the trim's own figure.** `prepare()` trims down to
+  `budget - budget / 5` — 80% — so compaction now fires exactly where the trim would have
+  *landed*. That makes the ordering between the two explicit rather than incidental: on a
+  verified run reconstruction is what normally happens, and the trim is a genuine backstop.
+  `kDefaultCompactAt` and the trim's divisor are asserted against each other in the suite, so
+  moving one without the other fails a test rather than quietly changing the policy.
+
+- **It fires before `prepare()`, not inside it.** One turn later the prompt is already over
+  budget and the only question left is what to erase; a turn earlier the tree can still be
+  re-observed and put in its place. This is also why it lives in `AgentLoop` — that is the only
+  layer holding the task, the verifier and the verdict at once. `Session` holds none of them and
+  does no I/O by design, and `compact.h` composes text and touches nothing.
+
+- **The note folds into the task turn rather than being appended as its own.** The obvious shape
+  — a synthetic `user` turn carrying the state — is the one loop.h already forbids, for a reason
+  that applies here unchanged: `pin_latest_user` pins the *latest* user message, so the
+  fabrication would become the one message the trim must never drop and the real instruction
+  would become droppable. Folding keeps exactly one user turn, still pinned, still opening with
+  the caller's own words. It is also the shape R7 already uses and has run against live models,
+  and it inherits R7's other discipline — always composed from the **original** task, so a third
+  compaction does not nest three framings inside each other.
+
+- **The unanswered trailing group is kept, where the trim may drop it.** Found by building
+  it the other way first, and it is not an edge case — it is *every* compaction. The trigger
+  runs at the top of a turn, so history ends with the results of the calls the previous turn
+  asked for; those were appended after that turn's `prepare()` and have never been sent. Erase
+  them and the model gets a window in which it asked nothing and learned nothing, and the
+  reliable response to a call with no answer is to re-issue it — the repeat-call loop this
+  project exists to break, arriving out of the policy meant to help. Re-observation cannot
+  cover for it either, and that is the line worth keeping straight: five of the eight Tier 0
+  tools only look, so nothing a `read` returned is recoverable from a snapshot. Dropping the
+  model's *account* of an answer is the whole design; dropping the answer is not.
+
+- **A rebuild that would not be smaller is declined.** The note is composed from re-observed
+  state and has no fixed size, so a handful of turns against a changeset of hundreds of paths
+  could cost more than the history it replaces. Compacting anyway would grow the prompt, and a
+  caller firing on a threshold would then compact every turn without ever getting under it.
+  `Session::reconstruct()` returns false and changes nothing in that case, and in the case where
+  there is no history to fold; both hand back to the trim, which can always make progress. This
+  makes compaction non-regressive by construction rather than by tuning.
+
+- **`compactions` is counted apart from `dropped`, everywhere.** They mean different things:
+  `dropped` is history the model was never told it lost, `compactions` is history it lost and was
+  handed the filesystem in place of. Summing them would destroy the only distinction the feature
+  makes. The pairing is also what keeps the no-verifier case from being silent — reconstruction
+  reads the world, so with no verifier there is nothing to reconstruct *from* and the trim
+  remains the policy, which reads in the outcome as `dropped > 0` with `compactions == 0`.
+
+**Why the no-verifier case is not `Misconfigured`.** A stated expectation with no verifier is
+refused, because it asks a question nothing can answer. This one has a correct and
+already-implemented fallback, so refusing every unverified run would be turning a working
+configuration into an error for no gain.
+
+### What this does not decide, and what would settle it
+
+**Whether reconstruction beats the trim is still unmeasured.** Everything above is verified by
+the suite — 33 tests across the threshold, the note, the history rewrite and the trigger in
+place, taking the tree from 715 to 748 and passing under gcc, clang and ASan/UBSan — and none
+of that is evidence about model behaviour.
+
+**Two live runs, 2026-09-01, `qwen3.5:9b` on the dev laptop (`cachyos-x8664`, RTX 5080 Laptop).**
+Both used deliberately tiny windows to reach the threshold in a handful of turns, so they are
+stress tests of the mechanism and not a measurement of the policy. Both hit the turn bound
+without finishing, and neither wrote its output file.
+
+| run | window / prompt budget | tree | turns | `dropped` | `rebuilt` |
+|---|---|---|---|---|---|
+| A | 8192 / 6144 | 5 files × 2376 B | 10 | 14 | **0** |
+| B | 4096 / 3072 | 8 files × 276 B | 12 | **0** | 3 |
+
+Three things came out of them, and two were not predicted.
+
+- **The mechanism works.** In run B the prompt sawtooths the way it is supposed to — 1873
+  tokens, rebuild, 1468; 2074, rebuild, 1472 — with nothing dropped in silence for the whole
+  run.
+
+- **Compaction never fired at all in run A, and the guard was right to refuse it.** The note has
+  a fixed cost of 445 characters — about 342 tokens at the pessimistic 1.3 ratio — so a rebuild
+  only pays when the *answered* history it can fold is worth more than that. Run A's large `read`
+  result was in the protected trailing group every single time, and everything droppable behind
+  it was a `list` result and two refusals. The trim ran instead, and the amnesia is visible in
+  the trace: turns 4 and 8 open by re-issuing `list` on a tree the model had already listed.
+  **So the value of compaction scales with how much answered history a window can hold, and in a
+  window that fits only two or three exchanges there is never enough of it.** That is a real
+  limit of the design, not of the implementation.
+
+- **A rebuilt context did not stop the model repeating itself in run B.** Having read sites A–F,
+  it came back after a rebuild and read A–D again. This is the abandoned-work gap named above,
+  arriving faster and harder than expected, and the reason is worth being exact about: what the
+  model lost was everything it had *learned by looking*, and looking leaves no trace. The note
+  truthfully said nothing had changed on disk, which is accurate and useless — the knowledge was
+  in the discarded results, and no snapshot can put it back.
+
+  The obvious candidate response is to carry a re-observable record of **which paths have been
+  read**, which costs a line per path and no model call. It is deliberately not built here:
+  whether it helps is the same empirical question as the rest of this, and building it now would
+  be answering it by assertion. Docketed with the measurement, not before it.
+
+**The experiment these runs argue for.** A reconstructed context against the trim as the
+control, on the same tasks, asking whether a model finishes work it was mid-way through — and,
+after run B, on tasks that are *not* purely observational, since a read-only task is the case
+reconstruction is structurally worst at and would stack the question. That is hermit-bench's
+half, and `compact_at = 0` exists so the control arm stays reachable through configuration
+alone.
+
+**What reconstruction cannot recover, stated plainly.** Intent *inside* a task. An approach the
+model tried, abandoned mid-turn, and never failed against leaves no trace in the tree and no
+entry in the verdict, so a rebuilt context can send it back down a path it had already reasoned
+its way out of. The verdict covers rejected branches; it does not cover abandoned ones. This is
+the single most likely way the measurement comes back negative, and it is worth naming in
+advance rather than discovering as a surprise.
+
+**The product argument, which is larger than the efficiency one.** A ≥64K context window is
+currently a model-registration gate (R9). Rebuilding the window from the tree relaxes it: a model
+that cannot hold a long session can still finish a long task. That widens the eligible roster
+rather than merely making the current one cheaper, and it is the reason this was worth doing
+before the window grows on its own.
+
+**What would overturn it.** A measured result where reconstructed runs finish fewer tasks than
+trimmed ones on the same set would say the abandoned-approach gap costs more than the amnesia it
+replaces — in which case the honest fallback is the trim plus a note saying history was dropped,
+which is the cheap half of this entry and does not need the rest of it.
+
+---
+
 ## Still open
 
 ### ~~Which chat endpoint~~ — settled as D8
@@ -1217,7 +1367,11 @@ Two things this entry did not anticipate, both found while fixing it:
   in the sense ROUTING.md §9 describes — §9 itself is about per-machine settings and names
   neither — so wiring the cap to the window is a composition decision nobody has made yet.
 
-### Compaction — and whether it should summarize anything at all
+### ~~Compaction — and whether it should summarize anything at all~~ — settled as D17
+
+**The reasoning below is kept as it was written**, because D17 is the answer to it and an
+argument reads better next to the question it was answering. The half that is still open —
+whether a reconstructed context actually helps — moved to hermit-bench with D17.
 
 **Opened 2026-08-31.** The entry above fixed *what* `Session::prepare()` drops. This one asks
 whether dropping is the right verb. Today the trim loop erases whole groups from the front until
