@@ -59,6 +59,7 @@
 // compaction does not nest three framings inside each other.
 
 #include <cstddef>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -95,6 +96,11 @@ inline constexpr std::size_t kMaxListedChanges = 40;
 /// practice, so this bound is a guard rather than a policy.
 inline constexpr std::size_t kMaxListedFindings = 10;
 
+/// Most already-touched paths the note lists. Bounded for the same reason as the
+/// changeset, and more tightly: this list grows with every call a run makes, where the
+/// changeset only grows when something moves.
+inline constexpr std::size_t kMaxListedObserved = 30;
+
 /// Whether the prompt has reached `threshold` of the session's prompt budget.
 ///
 /// A fraction rather than a token count because the budget varies with the window, and a
@@ -115,8 +121,20 @@ inline constexpr std::size_t kMaxListedFindings = 10;
 ///
 /// `Undecidable` findings are omitted, matching `Verdict::first_unmet()`: telling a model
 /// that one side could not be read spends context on a sentence it cannot act on.
+///
+/// `observed` is the paths the run has already named in a tool call, in first-touch order.
+/// **Be exact about what it buys**, because it is easy to oversell: it tells the model
+/// *that* it has already opened a file, never *what was in it*. The contents lived in the
+/// discarded results and nothing re-observes them -- that is the whole reason a `read` is
+/// not recoverable. What it removes is blind repetition and the false impression of a
+/// fresh start; what it cannot remove is the need to read a file again if the task needs
+/// its bytes. Read against the changed-paths list it also says something the model
+/// otherwise cannot see: *these are files I have opened and not written anything from*,
+/// which is the position run B kept looping in. Empty by default, which is the honest
+/// representation of a caller that is not keeping the record.
 [[nodiscard]] std::string reconstruction_note(const Changeset& changes,
-                                              const Verdict& verdict);
+                                              const Verdict& verdict,
+                                              std::span<const std::string> observed = {});
 
 /// `task`, verbatim, followed by `reconstruction_note`.
 ///
@@ -124,6 +142,7 @@ inline constexpr std::size_t kMaxListedFindings = 10;
 /// the framing; see the header.
 [[nodiscard]] std::string reconstructed_instruction(std::string_view task,
                                                     const Changeset& changes,
-                                                    const Verdict& verdict);
+                                                    const Verdict& verdict,
+                                                    std::span<const std::string> observed = {});
 
 }  // namespace hermit::supervisor

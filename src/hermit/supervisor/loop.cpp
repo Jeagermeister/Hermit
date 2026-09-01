@@ -1,7 +1,9 @@
 #include <hermit/supervisor/loop.h>
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
+#include <span>
 #include <utility>
 
 #include <hermit/supervisor/wire.h>
@@ -78,13 +80,15 @@ Dispatched dispatch_call(ToolRegistry& registry, const Sandbox& sandbox,
                          const ollama::ToolCall& call) {
   Tool* tool = registry.find(call.name);
   if (tool == nullptr) {
-    return {.content = render_error(unknown_tool(call.name)), .refused = true};
+    return {.content = render_error(unknown_tool(call.name)), .refused = true, .paths = {}};
   }
 
   // The model's JSON becomes RawArgs without consulting the declaration -- shape only.
   const auto raw = raw_args_from(call.arguments);
   if (!raw) {
-    return {.content = render_error(call.name + ": " + raw.error().message()), .refused = true};
+    return {.content = render_error(call.name + ": " + raw.error().message()),
+            .refused = true,
+            .paths = {}};
   }
 
   // ...and the declaration is what checks names, presence and containment. This is the
@@ -93,15 +97,34 @@ Dispatched dispatch_call(ToolRegistry& registry, const Sandbox& sandbox,
   auto args = parse_args(tool->spec(), *raw, sandbox);
   if (!args) {
     return {.content = render_error(call.name + ": " + to_string(args.error())),
-            .refused = true};
+            .refused = true,
+            .paths = {}};
+  }
+
+  // Collected before invoke, so a tool that fails still reports what it was pointed at --
+  // "you already tried to read this and it did not work" is exactly as useful to a model
+  // as a success, and more useful than silence.
+  std::vector<std::string> touched;
+  for (const ArgSpec& arg : tool->spec().args) {
+    if (arg.type == ArgType::Path) {
+      if (const SandboxPath* one = args->path(arg.name)) {
+        touched.push_back(one->relative().string());
+      }
+    } else if (arg.type == ArgType::PathList) {
+      for (const SandboxPath& each : args->paths(arg.name)) {
+        touched.push_back(each.relative().string());
+      }
+    }
   }
 
   auto output = tool->invoke(*args);
   if (!output) {
-    return {.content = render_error(call.name + ": " + output.error().reason), .refused = true};
+    return {.content = render_error(call.name + ": " + output.error().reason),
+            .refused = true,
+            .paths = std::move(touched)};
   }
 
-  return {.content = render_output(*output), .refused = false};
+  return {.content = render_output(*output), .refused = false, .paths = std::move(touched)};
 }
 
 LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
@@ -221,6 +244,19 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
   const std::string task = instruction;
   session.add_user(std::move(instruction));
 
+  // Every path the run has named in a call, first-touch order, no repeats. A vector with a
+  // linear scan rather than a set: the order is the useful part -- it reads as the trail
+  // the model actually walked -- and the list is bounded by the turn and call caps, so the
+  // scan is over a few dozen entries at worst.
+  std::vector<std::string> observed;
+  const auto observe = [&observed](const std::vector<std::string>& paths) {
+    for (const std::string& path : paths) {
+      if (std::find(observed.begin(), observed.end(), path) == observed.end()) {
+        observed.push_back(path);
+      }
+    }
+  };
+
   while (true) {
     // R8, checked here because it cannot be checked anywhere else: a bound enforced by
     // the thread doing the work cannot fire mid-request. Checked *before* the turn so a
@@ -242,8 +278,13 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     // rebuild would not be smaller, and declining is not an error -- the trim handles
     // both cases and the counters show which path a run took.
     if (options_.verifier != nullptr && should_compact(session, options_.compact_at)) {
-      static_cast<void>(session.reconstruct(
-          reconstructed_instruction(task, diff(baseline, previous), judged(previous))));
+      // The record is the one part of a rebuilt window that is remembered rather than
+      // re-observed, which is why it is switchable independently of the rebuild itself.
+      const std::span<const std::string> carried =
+          options_.carry_observed_paths ? std::span<const std::string>{observed}
+                                        : std::span<const std::string>{};
+      static_cast<void>(session.reconstruct(reconstructed_instruction(
+          task, diff(baseline, previous), judged(previous), carried)));
     }
 
     auto request = session.prepare();
@@ -353,6 +394,7 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
                                            session.prompt_budget()));
       }
 
+      observe(dispatched.paths);
       event.calls.push_back(CallEvent{.tool = call.name,
                                       .refused = dispatched.refused,
                                       .result = dispatched.content});

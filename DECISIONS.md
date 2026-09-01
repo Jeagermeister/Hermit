@@ -1344,10 +1344,40 @@ Three things came out of them, and two were not predicted.
   no snapshot puts it back. The same gap covers an approach tried, abandoned mid-turn and never
   failed against: the verdict records rejected branches, not abandoned ones.
 
-  The obvious candidate response is to carry a re-observable record of **which paths have been
-  read**, which costs a line per path and no model call. It is deliberately not built here:
-  whether it helps is the same empirical question as the rest of this, and building it now would
-  be answering it by assertion. Docketed with the measurement, not before it.
+  The obvious candidate response is to carry a record of **which paths have been read**, which
+  costs a line per path and no model call. **Built 2026-09-01 as `carry_observed_paths` /
+  `--read-record`, and left off by default, because the paired re-run did not support it** --
+  see below.
+
+**The read record, built and measured the same day.** Same tree and task as run B, same
+window, one run per arm:
+
+| arm | flags | first rebuild | `rebuilt` | `dropped` | re-read a file it had read? |
+|---|---|---|---|---|---|
+| reconstruction | record off | turn 5 | 3 | 2 | **yes**, restarted at site A, turn 8 |
+| + read record | record on | turn 7 | 2 | 4 | **yes**, restarted at site A, turn 7 |
+
+**It did not work.** Handed an explicit list of the files it had already opened, `qwen3.5:9b`
+opened them again. The record tells a model *that* it has seen a file and can never tell it
+*what was in it* — the contents were in the discarded results, and a `read` leaves nothing on
+disk to re-observe — so it removes the excuse for repeating work without removing the reason.
+
+It also has a cost that was predicted and then observed: the longer note makes
+`Session::reconstruct()` decline more often, since it refuses a rebuild that would not be
+smaller than the history it replaces. The arm carrying the record compacted twice where the
+other compacted three times, and trimmed twice as much to make up the difference.
+
+One non-deterministic run per arm is weak evidence and is not a result. It is, however,
+evidence pointing the wrong way, and shipping the feature on by default on that basis would be
+exactly the assertion this entry declined to make. So it is available, switchable, and off:
+`--read-record` turns it on, and hermit-bench gets a third arm rather than a changed default.
+Flip it when there is a number behind it.
+
+**A gap this closed on the way past.** The claim above that the control arm is "reachable
+through configuration alone" was only true of the library — neither threshold nor record was a
+CLI flag, and hermit-bench drives the binary. `--compact-at PCT` (0 for trim-only) and
+`--read-record` now exist, so the three arms are selectable where the measurement will actually
+be taken.
 
 **The experiment these runs argue for.** A reconstructed context against the trim as the
 control, on the same tasks, asking whether a model finishes work it was mid-way through — and,

@@ -274,6 +274,38 @@ struct LoopOptions {
   /// landed the prompt; see `kDefaultCompactAt`.
   double compact_at = kDefaultCompactAt;
 
+  /// Carry the paths the run has already named in a tool call into each reconstruction.
+  ///
+  /// Answers the one thing a rebuilt window measurably failed at: told only that nothing
+  /// had changed on disk, a model re-read files it had already read, because what it lost
+  /// was knowledge gained by *looking* and looking leaves no trace to re-observe (D17's
+  /// live run B). The record costs a line per path and no model call, and it is the only
+  /// part of a reconstruction that is remembered rather than re-observed.
+  ///
+  /// **A separate switch rather than part of `compact_at`, deliberately.** D17 left this
+  /// unbuilt so that "reconstruction works" could not be made true by construction, and
+  /// folding it in silently would do exactly that -- hermit-bench would then be comparing
+  /// the trim against reconstruction-plus-a-memory and unable to say which half moved the
+  /// result. Kept independent, the three arms are `compact_at = 0`, `compact_at` alone,
+  /// and both, and each answers its own question.
+  ///
+  /// **Off by default, and the reason is a measurement rather than caution.** It was built
+  /// expecting to fix run B's loop, and on the paired re-run it did not: handed the list of
+  /// files it had already opened, `qwen3.5:9b` read them again anyway. The pairing also
+  /// showed a cost -- the longer note makes `Session::reconstruct()` decline more often,
+  /// because it declines a rebuild that would not be smaller than the history it replaces,
+  /// so the arm carrying the record compacted twice where the arm without it compacted
+  /// three times and trimmed twice as much. One non-deterministic run per arm is weak
+  /// evidence and is not a result; it is, however, evidence pointing the wrong way, and
+  /// defaulting to a feature on that basis would be the assertion D17 refused to make.
+  ///
+  /// So: available, switchable, measured by hermit-bench, and not yet the default. Flip it
+  /// when there is a number behind it.
+  ///
+  /// Ignored entirely when `compact_at` is 0 -- there is no reconstruction to carry
+  /// anything into.
+  bool carry_observed_paths = false;
+
   /// Verify the tree after every turn (R6). Optional; null means no verification, which
   /// is the right default for a caller that only wants the loop.
   ///
@@ -487,11 +519,25 @@ class AgentLoop {
   std::vector<nlohmann::json> definitions_;
 };
 
-/// What one dispatched call produced: the JSON that goes back as its result, and
-/// whether it was a refusal.
+/// What one dispatched call produced: the JSON that goes back as its result, whether it
+/// was a refusal, and which paths it touched.
 struct Dispatched {
   std::string content;
   bool refused = false;
+
+  /// Sandbox-relative paths named by this call's `Path` and `PathList` arguments, in
+  /// declaration order.
+  ///
+  /// Read off the *parsed* arguments, never the model's raw JSON, so every entry has been
+  /// through `Sandbox::resolve` and is a path the call was actually allowed to reach --
+  /// the same R1 guarantee the tool itself runs under. Empty for a call that never got as
+  /// far as parsing, which is every refusal above the tool's own.
+  ///
+  /// Derived from the declaration rather than from a list of tool names: `ArgType::Path`
+  /// and `ArgType::PathList` are what make an argument a path, so a Tier 1 tool added
+  /// later is covered without this code learning its name. ROUTING.md section 8 lets a
+  /// frontend vary its surface, which makes a hardcoded name list wrong by construction.
+  std::vector<std::string> paths;
 };
 
 /// Run one tool call: find, decode, parse, invoke, render.

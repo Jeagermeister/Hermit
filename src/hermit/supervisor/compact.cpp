@@ -48,7 +48,8 @@ bool should_compact(const Session& session, double threshold) noexcept {
   return fill >= threshold;
 }
 
-std::string reconstruction_note(const Changeset& changes, const Verdict& verdict) {
+std::string reconstruction_note(const Changeset& changes, const Verdict& verdict,
+                                std::span<const std::string> observed) {
   // The first sentence is the one the trim does not have. It says the turns are gone, and
   // it says what replaces them is not a recollection -- a model told only "here is the
   // state" would reasonably read it as its own summary and trust it the way it trusts its
@@ -73,6 +74,23 @@ std::string reconstruction_note(const Changeset& changes, const Verdict& verdict
     const std::size_t shown = std::min(changes.changes.size(), kMaxListedChanges);
     for (std::size_t i = 0; i < shown; ++i) append_change(note, changes.changes[i]);
     if (changes.changes.size() > shown) append_more(note, changes.changes.size() - shown);
+  }
+
+  if (!observed.empty()) {
+    // Placed after the changed list on purpose: the two are read against each other, and
+    // the useful comparison is "I have opened these and changed none of them".
+    note += "\nAlready opened or named in an earlier call (";
+    note += std::to_string(observed.size());
+    note += "), so you have seen these before -- though not what was in them, since the "
+            "results themselves are gone:\n";
+
+    const std::size_t shown = std::min(observed.size(), kMaxListedObserved);
+    for (std::size_t i = 0; i < shown; ++i) {
+      note += "  ";
+      note += observed[i];
+      note += '\n';
+    }
+    if (observed.size() > shown) append_more(note, observed.size() - shown);
   }
 
   std::vector<const Finding*> unmet;
@@ -112,9 +130,10 @@ std::string reconstruction_note(const Changeset& changes, const Verdict& verdict
 }
 
 std::string reconstructed_instruction(std::string_view task, const Changeset& changes,
-                                      const Verdict& verdict) {
+                                      const Verdict& verdict,
+                                      std::span<const std::string> observed) {
   std::string out{task};
-  out += reconstruction_note(changes, verdict);
+  out += reconstruction_note(changes, verdict, observed);
   return out;
 }
 

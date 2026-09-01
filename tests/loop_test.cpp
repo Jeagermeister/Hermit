@@ -112,6 +112,34 @@ TEST_F(LoopFixture, DispatchesASuccessfulCallAsRowsRatherThanAnError) {
   EXPECT_EQ(parsed[0]["content"], "alpha\nbeta\n");
 }
 
+TEST_F(LoopFixture, ReportsThePathsACallNamed) {
+  // Derived from the declaration, not from a list of tool names: `read` declares `paths`
+  // as a PathList, so the entries come back without this code knowing what `read` is.
+  const auto result = run_call(
+      "read", json{{"paths", json::array({"notes.txt", "notes.txt"})}});
+  ASSERT_FALSE(result.refused) << result.content;
+  // Sandbox-relative, and one entry per argument given -- de-duplication is the run's job,
+  // not the call's, because a call that named the same file twice really did name it twice.
+  EXPECT_EQ(result.paths, (std::vector<std::string>{"notes.txt", "notes.txt"}));
+}
+
+TEST_F(LoopFixture, ReportsThePathOfACallThatFailed) {
+  // Collected before invoke, so a tool that fails still says what it was pointed at. "You
+  // already tried this and it did not work" is as useful to a model as a success.
+  const auto result = run_call("read", json{{"paths", json::array({"missing.txt"})}});
+  ASSERT_TRUE(result.refused);
+  EXPECT_EQ(result.paths, (std::vector<std::string>{"missing.txt"}));
+}
+
+TEST_F(LoopFixture, ReportsNoPathsForACallThatNeverParsed) {
+  // Above the parse there is no SandboxPath, and the raw JSON is not a substitute: an
+  // unresolved string has not been through R1 and must never be recorded as a path the
+  // run reached.
+  EXPECT_TRUE(run_call("shell", json{{"command", "ls"}}).paths.empty());
+  EXPECT_TRUE(run_call("read", json{{"paths", json::array({"../escape.txt"})}}).paths.empty());
+  EXPECT_TRUE(run_call("read", json::object()).paths.empty());
+}
+
 TEST_F(LoopFixture, RefusesAToolThisFrontendDoesNotExpose) {
   // `shell` is the case that matters: it exists in ROUTING.md section 4 and is
   // deliberately not registered, so this is the refusal a model asking for it gets.

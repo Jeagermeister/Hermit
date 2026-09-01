@@ -45,6 +45,22 @@ rebuilt : 2 times from the tree
 handled it instead. The usual cause is a run with no verification — there is no tree to rebuild
 from — so add expectations or run `agent` rather than `session` if you want the better half.
 
+## The model keeps re-reading files it already read
+
+Expected, and not yet solved. A rebuilt window restores what is *on disk*; what a `read`
+returned lived only in the discarded results, and reading a file changes nothing for a snapshot
+to find. So a model whose progress exists only in its own context starts that part again.
+
+The reliable answer today is to have it **write intermediate results to a file**. Anything on
+disk survives a rebuild intact, which is the same property that makes reconstruction work at
+all. A task phrased as "read these and tell me the totals" is fragile in a small window; "read
+these and append each total to `totals.md` as you go" is not.
+
+`--read-record` adds the list of already-read paths to the rebuild. It is off by default because
+in the one paired run so far it did not stop the re-reading — knowing *that* you read a file is
+not knowing what was in it — and it makes rebuilds fire less often, since a longer note competes
+with the history it replaces. Try it, but do not expect much from it yet.
+
 ## The reply came back empty, no error
 
 Check the summary for `done_reason == length`. A thinking model that exhausts its generation

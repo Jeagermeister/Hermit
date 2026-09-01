@@ -50,6 +50,7 @@ using hermit::supervisor::Finding;
 using hermit::supervisor::kDefaultCompactAt;
 using hermit::supervisor::kMaxListedChanges;
 using hermit::supervisor::kMaxListedFindings;
+using hermit::supervisor::kMaxListedObserved;
 using hermit::supervisor::LoopOptions;
 using hermit::supervisor::Outcome;
 using hermit::supervisor::reconstructed_instruction;
@@ -377,6 +378,53 @@ TEST(CompactNote, TheSameStateAlwaysRendersTheSameNote) {
   EXPECT_EQ(reconstruction_note(changes, verdict), reconstruction_note(changes, verdict));
 }
 
+TEST(CompactNote, ListsTheAlreadyOpenedPathsAndSaysTheContentsAreGone) {
+  // The honesty this section lives or dies on. It says the model has *seen* these files,
+  // and it must not let that read as though it still has them -- the contents were in the
+  // discarded results and nothing re-observes a read.
+  const std::vector<std::string> observed{"site1.txt", "notes/plan.md"};
+  const std::string note = reconstruction_note(Changeset{}, Verdict{}, observed);
+
+  EXPECT_TRUE(contains(note, "site1.txt"));
+  EXPECT_TRUE(contains(note, "notes/plan.md"));
+  EXPECT_TRUE(contains(note, "(2)"));
+  EXPECT_TRUE(contains(note, "not what was in them"));
+}
+
+TEST(CompactNote, SaysNothingAboutOpenedPathsWhenTheRecordIsNotKept) {
+  // The default, and the shape of a caller running the reconstruction arm without the
+  // memory arm. An empty record must produce no section at all rather than an empty one.
+  const std::string note = reconstruction_note(Changeset{}, Verdict{});
+  EXPECT_FALSE(contains(note, "Already opened"));
+}
+
+TEST(CompactNote, CapsTheOpenedPathsListButStillStatesTheTrueTotal) {
+  // This list grows with every call a run makes, where the changeset only grows when
+  // something moves -- so it is the one most in need of a bound.
+  std::vector<std::string> many;
+  for (std::size_t i = 0; i < kMaxListedObserved + 5; ++i) {
+    many.push_back("f" + std::to_string(i) + ".txt");
+  }
+  const std::string note = reconstruction_note(Changeset{}, Verdict{}, many);
+
+  EXPECT_TRUE(contains(note, "(" + std::to_string(kMaxListedObserved + 5) + ")"));
+  EXPECT_TRUE(contains(note, "and 5 more"));
+  EXPECT_FALSE(contains(note, "f" + std::to_string(kMaxListedObserved + 4) + ".txt"));
+}
+
+TEST(CompactNote, TheOpenedListReadsAgainstTheChangedListRatherThanDuplicatingIt) {
+  // The comparison that answers run B's loop: "I have opened six files and written
+  // nothing from them." Both sections have to be present and separate for that to be
+  // readable at all.
+  const std::vector<std::string> observed{"site1.txt", "site2.txt"};
+  const std::string note = reconstruction_note(
+      changes_of({{ChangeKind::Created, "totals.md"}}), Verdict{}, observed);
+
+  EXPECT_TRUE(contains(note, "totals.md"));
+  EXPECT_TRUE(contains(note, "site1.txt"));
+  EXPECT_LT(note.find("totals.md"), note.find("site1.txt"))
+      << "the changed list comes first, so the opened list reads as a comparison to it";}
+
 // --- the composed instruction --------------------------------------------------
 
 TEST(CompactInstruction, TheTaskSurvivesVerbatimAndComesFirst) {
@@ -695,6 +743,7 @@ class CompactLoopFixture : public ::testing::Test {
     // Big enough that reading it back fills a small window in a couple of turns, which is
     // what makes compaction reachable without a hundred scripted replies.
     std::ofstream{tmp_ / "root" / "big.txt"} << std::string(3000, 'a') << '\n';
+    std::ofstream{tmp_ / "root" / "other.txt"} << std::string(3000, 'b') << '\n';
     // Smaller, so a rebuild whose kept tail is one of these clears the trim target
     // comfortably. Tests about the note's *content* should not be sized so tightly that
     // they turn into tests about the guard.
@@ -734,6 +783,10 @@ class CompactLoopFixture : public ::testing::Test {
   }
 
   json read_big() { return json{{"paths", json::array({"big.txt"})}}; }
+
+  static json read_of(const std::string& name) {
+    return json{{"paths", json::array({name})}};
+  }
   static json read_mid() { return json{{"paths", json::array({"mid.txt"})}}; }
 
   fs::path tmp_;
@@ -921,6 +974,86 @@ TEST_F(CompactLoopFixture, ARebuiltPromptLandsUnderTheTrimTarget) {
   ASSERT_GT(outcome.compactions, 0u);
   EXPECT_EQ(outcome.dropped, 0u)
       << "the trim ran behind a rebuild, which means the rebuild did not clear its target";
+}
+
+TEST_F(CompactLoopFixture, TheRebuiltPromptNamesTheFilesAlreadyRead) {
+  // A roomier window than the fixture default, and the reason is the feature's own cost:
+  // the record lengthens the note, and a rebuild has to land under `trim_target()`. In the
+  // default window the record pushes the note past that bar and no rebuild happens at all.
+  // That interaction is real and is recorded in D17 -- it is just not what this test is
+  // about, which is whether the paths reach the prompt.
+  // What D17's run B was missing. Told only that nothing had changed on disk, the model
+  // re-read files it had already read; the record is the one part of a reconstruction that
+  // is remembered rather than re-observed, and this is it arriving in the prompt.
+  Script script{.replies = {call_reply("read", read_of("big.txt")),
+                            call_reply("read", read_of("other.txt")),
+                            call_reply("read", read_of("big.txt")),
+                            text_reply("done")}};
+  auto live = session(6144);
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_,
+                 LoopOptions{.carry_observed_paths = true, .verifier = verifier_.get()}};
+  const auto outcome = loop.run(live, "read the files");
+  ASSERT_GT(outcome.compactions, 0u) << "nothing was compacted, so nothing is proven";
+
+  ASSERT_FALSE(script.seen.empty());
+  std::string user_content;
+  for (const auto& message : script.seen.back().messages) {
+    if (message.role == "user") user_content = message.content;
+  }
+  EXPECT_TRUE(contains(user_content, "Already opened"));
+  EXPECT_TRUE(contains(user_content, "big.txt"));
+  // And it must not promise more than it delivers: the contents are gone.
+  EXPECT_TRUE(contains(user_content, "not what was in them"));
+}
+
+TEST_F(CompactLoopFixture, TheRecordIsDeduplicatedAndInFirstTouchOrder) {
+  // big.txt is read twice with other.txt between. The record is the trail the model walked,
+  // so the repeat must not appear twice and the order must be the order it went in.
+  Script script{.replies = {call_reply("read", read_of("big.txt")),
+                            call_reply("read", read_of("other.txt")),
+                            call_reply("read", read_of("big.txt")),
+                            text_reply("done")}};
+  auto live = session(6144);
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_,
+                 LoopOptions{.carry_observed_paths = true, .verifier = verifier_.get()}};
+  const auto outcome = loop.run(live, "read the files");
+  ASSERT_GT(outcome.compactions, 0u);
+
+  std::string user_content;
+  for (const auto& message : script.seen.back().messages) {
+    if (message.role == "user") user_content = message.content;
+  }
+  const std::size_t first = user_content.find("big.txt");
+  ASSERT_NE(first, std::string::npos);
+  EXPECT_EQ(user_content.find("big.txt", first + 1), std::string::npos)
+      << "a path read twice was recorded twice";
+  EXPECT_LT(first, user_content.find("other.txt")) << "first-touch order was not kept";
+}
+
+TEST_F(CompactLoopFixture, TheRecordIsOffUnlessAskedFor) {
+  // The isolation D17 asked for, and the default that a paired live run argued for: the
+  // record did not stop the model re-reading, and it made rebuilds fire less often. Three
+  // arms -- trim, reconstruction, reconstruction plus the record -- and hermit-bench cannot
+  // say which half moved a result unless the middle one is what runs by default.
+  Script script{.replies = {call_reply("read", read_of("big.txt")),
+                            call_reply("read", read_of("other.txt")),
+                            call_reply("read", read_of("big.txt")),
+                            text_reply("done")}};
+  auto live = session();
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_,
+                 LoopOptions{.verifier = verifier_.get()}};
+  const auto outcome = loop.run(live, "read the files");
+
+  EXPECT_GT(outcome.compactions, 0u) << "reconstruction should still run";
+  std::string user_content;
+  for (const auto& message : script.seen.back().messages) {
+    if (message.role == "user") user_content = message.content;
+  }
+  EXPECT_TRUE(contains(user_content, "not shown")) << "the rebuild note should still be there";
+  EXPECT_FALSE(contains(user_content, "Already opened"));
 }
 
 TEST_F(CompactLoopFixture, ZeroCompactAtLeavesTheTrimAsTheWholePolicy) {
