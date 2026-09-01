@@ -588,6 +588,74 @@ TEST_F(LoopFixture, AnOversizedResultIsReplacedByARefusalNamingTheSizeBeforeItRe
   }
 }
 
+TEST_F(LoopFixture, TheTraceAndTheFooterAgreeAboutWhichCallsWereRefused) {
+  // `outcome.refusals` and `CallEvent::refused` describe the same population, and an
+  // oversized substitution used to be counted in the first and not the second. On a live
+  // run that printed four `ok` lines under a footer reading `10 calls (4 refused)` -- the
+  // four were exactly those lines, and a trace that disagrees with its own footer teaches
+  // its reader to trust neither.
+  std::ofstream{tmp_ / "root" / "huge.txt"} << std::string(200000, 'z');
+
+  std::vector<TurnEvent> events;
+  LoopOptions options;
+  options.observer = [&events](const TurnEvent& event) { events.push_back(event); };
+
+  Script script{.replies = {call_reply({{"read", json{{"paths", json::array({"huge.txt"})}}}}),
+                            text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "read huge.txt");
+
+  std::size_t flagged = 0;
+  for (const auto& event : events) {
+    for (const auto& call : event.calls) {
+      if (call.refused) ++flagged;
+      // The flag and the payload have to say the same thing too: an `{"error": ...}` body
+      // under a `refused == false` flag is the same disagreement one level down.
+      const auto parsed = json::parse(call.result);
+      const bool is_error = parsed.is_object() && parsed.contains("error");
+      EXPECT_EQ(call.refused, is_error) << call.result.substr(0, 120);
+    }
+  }
+  EXPECT_GE(outcome.refusals, 1u) << "the oversized result was not counted as a refusal";
+  EXPECT_EQ(flagged, outcome.refusals);
+}
+
+TEST_F(LoopFixture, TheTruncationPathReportsTheCallsItAnswers) {
+  // The second drift site, and the larger of the two. When record() reports a discarded
+  // prompt the loop still answers the outstanding calls -- it must, or they read as
+  // outstanding and get re-issued -- but those results used to be counted in neither
+  // `calls` nor `refusals`, carried no CallEvent, and never reached the observer. The run's
+  // last turn was simply missing from the trace while its errors reached the model.
+  //
+  // A tiny `prompt_tokens` against a much larger estimate is what `looks_truncated` reads
+  // as the server discarding history.
+  ChatReply discarded = call_reply({{"read", json{{"paths", json::array({"notes.txt"})}}}});
+  discarded.prompt_tokens = 1;
+
+  std::vector<TurnEvent> events;
+  LoopOptions options;
+  options.observer = [&events](const TurnEvent& event) { events.push_back(event); };
+
+  Script script{.replies = {discarded}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+  // Enough text that the estimate is far above 1, or the shortfall is not read as a discard.
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, std::string(4000, 'q'));
+
+  ASSERT_EQ(outcome.reason, StopReason::SessionRefused) << outcome.detail;
+  EXPECT_EQ(outcome.calls, 1u) << "the answered call was not counted";
+  EXPECT_EQ(outcome.refusals, 1u) << "the error sent to the model was not counted";
+  ASSERT_EQ(events.size(), 1u) << "the turn never reached the observer";
+  ASSERT_EQ(events[0].calls.size(), 1u);
+  EXPECT_TRUE(events[0].calls[0].refused);
+  EXPECT_NE(events[0].calls[0].result.find("stopped before this call ran"),
+            std::string::npos);
+}
+
 TEST_F(LoopFixture, TheObserverSeesOneEventPerTurnWithItsCallsAndTokenCounts) {
   std::vector<TurnEvent> events;
   LoopOptions options;

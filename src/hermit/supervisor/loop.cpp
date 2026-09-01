@@ -306,21 +306,11 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     // appended below are never orphaned -- and verifies the prompt was not discarded.
     const auto recorded = session.record(*reply);
     ++outcome.turns;
-    if (!recorded) {
-      // record() appends the assistant turn -- tool calls included -- and *then* reports
-      // failure on the truncation path. Returning here would leave those calls in history
-      // with no results: the orphaned-call shape the grouped trim exists to prevent,
-      // arriving by a route the trim never sees. Session reuse across instructions is
-      // explicitly anticipated above, and a model shown its own unanswered call re-issues
-      // it. So answer them before stopping.
-      for (const auto& call : reply->tool_calls) {
-        session.add_tool_result(
-            call.name, render_error(call.name + ": the run stopped before this call ran: " +
-                                    recorded.error().message()));
-      }
-      return finish(StopReason::SessionRefused, recorded.error().message());
-    }
 
+    // Built before the truncation check, not after it. Everything here comes from the
+    // reply and the session, both of which are already final; and the refusal path below
+    // needs somewhere to record the calls it answers, which is exactly why that path used
+    // to report nothing at all.
     TurnEvent event;
     event.turn = outcome.turns;
     event.prompt_tokens = reply->prompt_tokens;
@@ -330,6 +320,35 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     event.content = reply->content;
     event.dropped = session.dropped();
     event.compactions = session.compactions();
+
+    if (!recorded) {
+      // record() appends the assistant turn -- tool calls included -- and *then* reports
+      // failure on the truncation path. Returning here would leave those calls in history
+      // with no results: the orphaned-call shape the grouped trim exists to prevent,
+      // arriving by a route the trim never sees. Session reuse across instructions is
+      // explicitly anticipated above, and a model shown its own unanswered call re-issues
+      // it. So answer them before stopping.
+      //
+      // Counted and reported like any other refusal, which they were not until this was
+      // written. These results reach the model, so leaving them out of `calls` and
+      // `refusals` under-reports the run, and building no CallEvent for them loses the
+      // whole turn from the trace -- a strictly larger version of the disagreement this
+      // commit set out to fix, in the same function.
+      for (const auto& call : reply->tool_calls) {
+        std::string refusal =
+            render_error(call.name + ": the run stopped before this call ran: " +
+                         recorded.error().message());
+        ++outcome.calls;
+        ++outcome.refusals;
+        event.calls.push_back(
+            CallEvent{.tool = call.name, .refused = true, .result = refusal});
+        session.add_tool_result(call.name, std::move(refusal));
+      }
+      // The turn happened and its calls were answered, so an observer that is building a
+      // trace has to see it. Without this the run's last turn is simply missing.
+      if (options_.observer) options_.observer(event);
+      return finish(StopReason::SessionRefused, recorded.error().message());
+    }
 
     // R6, and the ordering is the point: the tree is read *after* the turn's calls have
     // run, and nothing about it comes from the reply. A model that answered in prose still
@@ -398,6 +417,11 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
         dispatched.content =
             render_error(oversized_refusal(call.name, dispatched.content.size(),
                                            session.prompt_budget()));
+        // The flag moves with the content. Counting this in `refusals` while leaving the
+        // event saying otherwise made the summary and the trace disagree about the same
+        // call -- measured on a live run, where four lines printed `ok` above a footer
+        // reading `10 calls (4 refused)`, and the four were these.
+        dispatched.refused = true;
       }
 
       observe(dispatched.paths);
