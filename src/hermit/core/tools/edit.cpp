@@ -113,8 +113,14 @@ std::expected<ToolOutput, ToolError> EditTool::run(const ToolArgs& args) {
   edited += new_bytes;
   edited.append(*bytes, pos + old_bytes.size(), std::string::npos);
 
+  // Permission bits only, the same mask and the same reason as `write`'s replace path
+  // (ROUTING.md section 4: a replace "deliberately drops setuid/setgid/sticky").
+  // Carrying privilege onto model-chosen content is nobody's intent, and an edit
+  // rewrites content exactly as a replace does. This read 07777 until 2026-09-01 --
+  // preserving the special bits, which is the wider mask and looks like the more
+  // faithful one, so it survived review by resembling care.
   auto temp = write_temp_in_dir(parent->dir.get(), parent->name, edited,
-                                current->meta.st_mode & 07777);
+                                current->meta.st_mode & 0777);
   if (!temp) return refuse(target, to_string(temp.error()));
   if (::renameat2(parent->dir.get(), temp->c_str(), parent->dir.get(),
                   parent->name.c_str(), 0) != 0) {

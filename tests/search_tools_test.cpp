@@ -3,14 +3,22 @@
 
 #include <gtest/gtest.h>
 
+#include <cerrno>
 #include <cstdlib>  // mkdtemp
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
+
+#include <fcntl.h>
+#include <pthread.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <hermit/core/observed.h>
 #include <hermit/core/tool.h>
@@ -284,6 +292,91 @@ TEST_F(SearchToolsTest, FindRefusesAFileStart) {
                          {"path", std::string{"notes.txt"}}});
   ASSERT_FALSE(out.has_value());
   EXPECT_NE(out.error().reason.find("notes.txt"), std::string::npos);
+}
+
+// Depth is a property of the tree, not of anything this process chooses: a nested
+// checkout, an extracted archive, or whatever a `shell` step left behind can reach
+// thousands of levels. `find` walked such a tree by recursing once per level until
+// 2026-09-01, and the stack ran out -- measured on a stock 8 MiB stack, clean at 12,000
+// levels and SIGSEGV at 20,000, taking the whole process with it (the supervisor
+// mid-run, or the MCP server). The walk now carries its own stack on the heap.
+//
+// **The walk runs on a thread with a deliberately small stack, and that is the whole
+// design of this test.** The obvious version -- build a very deep tree on the main
+// thread and see whether it survives -- was written first and does not work, in two ways
+// that were both measured rather than reasoned about:
+//
+//   * where recursion dies depends on RLIMIT_STACK, so `ulimit -s 65536` is enough for
+//     the old recursive walk to *pass* a 20,000-level version of this test; and
+//   * a depth-first walk holds one descriptor per level, so at the near-universal
+//     `ulimit -n 1024` the tree cannot even be built and the test skips itself.
+//
+// Between them the test was inert on a stock host and green on the bug it existed to
+// catch. Pinning the stack here instead removes both ambient limits from the answer: a
+// few hundred levels is far past what 128 KiB of stack can recurse through, and far
+// under any descriptor limit worth worrying about. The thread is a property of the test
+// harness, not of the tool -- D1's single-threaded rule is about how Hermit runs, and
+// this is how the stack gets bounded to a known number.
+TEST_F(SearchToolsTest, FindWalksADeepTreeWithoutRecursingOntoTheStack) {
+  // 128 KiB of stack against 600 levels. The old recursive frame carried a `struct stat`,
+  // two paths and a name vector -- comfortably over 200 bytes even before a sanitizer's
+  // redzones -- so 600 levels needs upwards of 120 KiB and overflows. The iterative walk
+  // uses one frame regardless of depth.
+  constexpr std::size_t kThreadStack = 128u * 1024;
+  constexpr std::size_t kDepth = 600;
+
+  // Built descriptor-relative rather than by path: the walk opens one level at a time,
+  // and this mirrors it. (It also keeps working past PATH_MAX, which a deeper version
+  // of this test would need.)
+  const fs::path chain = tmp_ / "root" / "chain";
+  ASSERT_TRUE(fs::create_directory(chain));
+  int fd = ::open(chain.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  ASSERT_GE(fd, 0) << std::strerror(errno);
+  for (std::size_t level = 0; level < kDepth; ++level) {
+    ASSERT_EQ(::mkdirat(fd, "d", 0777), 0) << "level " << level << ": " << std::strerror(errno);
+    const int next = ::openat(fd, "d", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    ASSERT_GE(next, 0) << "level " << level << ": " << std::strerror(errno);
+    ::close(fd);
+    fd = next;
+  }
+  ::close(fd);
+
+  // Assertions are made on the main thread: gtest's ASSERT_* return from the function
+  // they sit in, which on a thread entry point would abandon the thread rather than fail
+  // the test. The thread only carries the result back.
+  // The work is bound here, in the test body, because `call` is a protected member of
+  // the fixture and the thread entry point below is a plain function pointer rather than
+  // a member of anything.
+  struct Carried {
+    std::function<std::expected<ToolOutput, hermit::ToolError>()> run;
+    std::expected<ToolOutput, hermit::ToolError> result =
+        std::unexpected{hermit::ToolError{"the walk never ran"}};
+  } carried;
+  carried.run = [this] {
+    FindTool find;
+    // The pattern matches only the chain's own top directory, so the walk descends every
+    // level while the result stays one row -- depth is what is exercised, not width.
+    return call(find, {{"pattern", std::string{"chain"}}, {"path", std::string{"."}}});
+  };
+
+  ::pthread_attr_t attr;
+  ASSERT_EQ(::pthread_attr_init(&attr), 0);
+  ASSERT_EQ(::pthread_attr_setstacksize(&attr, kThreadStack), 0)
+      << "128 KiB is above PTHREAD_STACK_MIN on every platform this builds for";
+
+  ::pthread_t walker{};
+  const auto entry = [](void* raw) -> void* {
+    auto* ctx = static_cast<Carried*>(raw);
+    ctx->result = ctx->run();
+    return nullptr;
+  };
+  ASSERT_EQ(::pthread_create(&walker, &attr, entry, &carried), 0);
+  ASSERT_EQ(::pthread_join(walker, nullptr), 0);
+  ::pthread_attr_destroy(&attr);
+
+  ASSERT_TRUE(carried.result.has_value()) << carried.result.error().reason;
+  ASSERT_EQ(carried.result->rows.size(), 1u);
+  EXPECT_EQ(*text(carried.result->rows[0], "path"), "chain");
 }
 
 // --- the full observe surface composes ---------------------------------------

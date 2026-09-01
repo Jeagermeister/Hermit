@@ -559,6 +559,28 @@ TEST_F(MutateToolsTest, WriteReplaceDropsSetuidAndFriends) {
   EXPECT_EQ(st.st_mode & 07777, 0755u) << "permission bits kept, setuid dropped";
 }
 
+// The same rule, on the other tool that replaces a file's content. `edit` publishes
+// through the identical temp-file path `write` does -- a fresh inode this process
+// creates and then fchmods -- so a mask that keeps the setuid bit does not preserve an
+// existing one, it mints a new setuid file over content the model chose. It masked with
+// 07777 until 2026-09-01 and so did exactly that, which the write-side test above could
+// never have caught: nothing asserted anything about edit's resulting mode.
+TEST_F(MutateToolsTest, EditDropsSetuidAndFriendsExactlyAsWriteDoes) {
+  ASSERT_EQ(::chmod((tmp_ / "root" / "seen.txt").c_str(), 04755), 0);
+  observe_seen();
+  EditTool edit{state_, *store_};
+  auto out = call(edit, {{"path", std::string{"seen.txt"}},
+                         {"old", std::string{"two"}},
+                         {"new", std::string{"deux"}}});
+  ASSERT_TRUE(out.has_value()) << out.error().reason;
+
+  struct ::stat st {};
+  ASSERT_EQ(::stat((tmp_ / "root" / "seen.txt").c_str(), &st), 0);
+  EXPECT_EQ(st.st_mode & 07777, 0755u)
+      << "permission bits kept, setuid dropped -- ROUTING.md puts edit on the same "
+         "replace path as write, and write's own test pins the identical mask";
+}
+
 TEST_F(MutateToolsTest, EditTreatsOverlappingOccurrencesAsAmbiguous) {
   write_file(tmp_ / "root" / "tri.txt", "aaa\n");
   ReadTool read{state_};
