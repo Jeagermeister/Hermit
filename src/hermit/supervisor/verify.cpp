@@ -105,12 +105,22 @@ std::size_t Changeset::substantive() const noexcept {
       }));
 }
 
+std::string one_line(std::string_view text) {
+  std::string out{text};
+  for (char& c : out) {
+    if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) c = ' ';
+  }
+  return out;
+}
+
 std::string Changeset::render() const {
   std::string text;
   for (const Change& change : changes) {
     text += to_string(change.kind);
     text += "  ";
-    text += change.path;
+    // Scrubbed: this is the report a reader is told to trust, so a name carrying a newline
+    // must not be able to add a line to it. See one_line in verify.h.
+    text += one_line(change.path);
     // Hashes are abbreviated for a report, never for a comparison -- 12 hex characters is
     // enough for a human to match two lines by eye and not enough to be mistaken for the
     // identity R3 actually compares, which is the full digest in `before`/`after`.

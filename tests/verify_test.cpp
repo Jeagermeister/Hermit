@@ -7,6 +7,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -584,4 +586,21 @@ TEST_F(VerifyFixture, AnUnchangedTreeStillReportsNoPermissionChange) {
   const auto after = verifier_->snapshot(&*before);
   ASSERT_TRUE(after.has_value());
   EXPECT_TRUE(diff(*before, *after).empty()) << "recording mode must not invent changes";
+}
+
+TEST(ChangesetRender, ACraftedFilenameCannotForgeAReportLine) {
+  // `render()` feeds the "what actually changed (hash-verified, R6)" block, which is the
+  // artifact this whole supervisor exists to make trustworthy. A filename carrying a
+  // newline would add a line to it that a reader cannot tell from a real one -- and it is
+  // the *more* trusted of the two fields on that line, since nothing in it comes from the
+  // model's reply. Sandbox::resolve closes this for model-supplied paths; a name already
+  // on disk never passed that gate.
+  hermit::supervisor::Changeset set;
+  set.changes.push_back(hermit::supervisor::Change{
+      .path = "a.txt\n        ~ Deleted  important.db", .kind = hermit::supervisor::ChangeKind::Created});
+
+  const std::string text = set.render();
+  EXPECT_EQ(std::count(text.begin(), text.end(), '\n'), 1)
+      << "one change rendered as more than one line: " << text;
+  EXPECT_NE(text.find("important.db"), std::string::npos) << "the name itself must still show";
 }

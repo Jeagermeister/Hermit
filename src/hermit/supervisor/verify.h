@@ -270,6 +270,26 @@ class TreeVerifier {
 
 /// What changed between two snapshots, in path order.
 ///
+/// Collapse control characters to spaces, so one value cannot forge a second line.
+///
+/// **A filename is attacker-controlled data.** Linux permits any byte but `/` and NUL in a
+/// name, newlines included, and `TreeVerifier` builds its keys straight from `readdir`. Any
+/// reader that renders a path into a line-oriented format -- a report, a trace, a model
+/// prompt -- is one crafted name away from being handed a forged row it cannot distinguish
+/// from a real one.
+///
+/// `Sandbox::resolve` already closes this for *model-supplied* paths, and its error text
+/// says so: "path contains a control character (a newline in a name forges report lines)".
+/// It cannot close it for names that were **already on disk** -- a cloned repository, an
+/// extracted tarball, a tree the operator pointed `--root` at, or anything `shell` created
+/// under D10 confinement, none of which passed through that gate.
+///
+/// So this is the second half of that defence, and it belongs to every renderer rather than
+/// to one. Shared rather than copied precisely because the copy is what went wrong: this
+/// logic existed in `semantic.cpp` for exactly this reason while `compact.cpp` -- feeding a
+/// strictly more privileged position in the prompt -- rendered paths raw.
+[[nodiscard]] std::string one_line(std::string_view text);
+
 /// Pure over its inputs -- no filesystem access at all -- so the whole classification
 /// table is testable without a tree.
 [[nodiscard]] Changeset diff(const TreeSnapshot& before, const TreeSnapshot& after);
