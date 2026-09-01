@@ -93,7 +93,13 @@ std::string reconstruction_note(const Changeset& changes, const Verdict& verdict
     const std::size_t shown = std::min(observed.size(), kMaxListedObserved);
     for (std::size_t i = 0; i < shown; ++i) {
       note += "  ";
-      note += observed[i];
+      // Scrubbed like the changed paths above, though these cannot currently carry a
+      // newline: every entry comes from a SandboxPath, so it has been through
+      // Sandbox::resolve, which rejects control characters. That is a property of a check
+      // in another module made for another reason, and this list is one refactor away from
+      // being seeded off a Changeset -- which is exactly where the same hole was found.
+      // One call is cheaper than depending on that staying true.
+      note += one_line(observed[i]);
       note += '\n';
     }
     if (observed.size() > shown) append_more(note, observed.size() - shown);
