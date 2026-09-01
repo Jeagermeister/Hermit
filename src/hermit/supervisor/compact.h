@@ -59,6 +59,7 @@
 // compaction does not nest three framings inside each other.
 
 #include <cstddef>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -95,6 +96,11 @@ inline constexpr std::size_t kMaxListedChanges = 40;
 /// practice, so this bound is a guard rather than a policy.
 inline constexpr std::size_t kMaxListedFindings = 10;
 
+/// Most already-touched paths the note lists. Bounded for the same reason as the
+/// changeset, and more tightly: this list grows with every call a run makes, where the
+/// changeset only grows when something moves.
+inline constexpr std::size_t kMaxListedObserved = 30;
+
 /// Whether the prompt has reached `threshold` of the session's prompt budget.
 ///
 /// A fraction rather than a token count because the budget varies with the window, and a
@@ -115,8 +121,32 @@ inline constexpr std::size_t kMaxListedFindings = 10;
 ///
 /// `Undecidable` findings are omitted, matching `Verdict::first_unmet()`: telling a model
 /// that one side could not be read spends context on a sentence it cannot act on.
+///
+/// `observed` is the paths the run has already **named in a call**, in first-touch order.
+///
+/// **Be exact about what that is**, because the obvious readings are all slightly wrong.
+/// It is not "files the model has read": the list is collected from every `Path` argument
+/// on every tool, so a `write` target, an `edit` target and both ends of a `move` are in
+/// it, and it is collected before the tool runs, so a call that failed is in it too. It is
+/// also not complete -- `shell` takes a bare string, so nothing a shell command touches
+/// ever appears.
+///
+/// And it tells the model *that* a path was named, never *what was in it*. The contents
+/// lived in the discarded results and nothing re-observes them, which is the whole reason
+/// a `read` is not recoverable. What it can remove is blind repetition; what it cannot
+/// remove is the need to read a file again when the task needs its bytes.
+///
+/// An earlier version of this comment claimed the list could be read against the changed
+/// paths to mean "files I opened and wrote nothing from". That inference is invalid for
+/// exactly the reason above -- a written file appears in both lists -- and it is the kind
+/// of claim this project exists not to make. Filtering the record to read-shaped tools
+/// would need an intent bit on `ArgSpec`, which is a core-layer change this feature has
+/// not earned while it is off by default and unsupported by measurement.
+///
+/// Empty by default, which is the honest representation of a caller not keeping a record.
 [[nodiscard]] std::string reconstruction_note(const Changeset& changes,
-                                              const Verdict& verdict);
+                                              const Verdict& verdict,
+                                              std::span<const std::string> observed = {});
 
 /// `task`, verbatim, followed by `reconstruction_note`.
 ///
@@ -124,6 +154,7 @@ inline constexpr std::size_t kMaxListedFindings = 10;
 /// the framing; see the header.
 [[nodiscard]] std::string reconstructed_instruction(std::string_view task,
                                                     const Changeset& changes,
-                                                    const Verdict& verdict);
+                                                    const Verdict& verdict,
+                                                    std::span<const std::string> observed = {});
 
 }  // namespace hermit::supervisor

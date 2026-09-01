@@ -29,21 +29,39 @@ evaluated, and drops whole call-and-result groups deliberately rather than letti
 discard the middle. Run `hermit session --model <tag> --max-num-ctx 2048` to watch the
 machinery work. If you see collapse anyway, that is a bug worth reporting with the trace.
 
-On an `agent` run there is a second layer in front of that one. At 80% of the prompt budget
-Hermit **rebuilds** the window instead of trimming it: the task is kept verbatim, the files are
-re-read from disk, unmet requirements are restated, and the model is told in plain words that
-the earlier turns are gone. Nothing is summarised — a summary would be the model's own account
-of events, which is the thing Hermit exists not to trust. The run report tells you which
-happened:
+An `agent` run has a second layer in front of that. At 80% of the prompt budget Hermit
+**rebuilds** the window instead of trimming it: the task is kept word for word, the files are
+re-read from disk, unmet requirements are restated, and the model is told plainly that the
+earlier turns are gone. Nothing is summarised — a summary would be the model's own account of
+events, which is the one thing Hermit is built not to trust.
+
+The run report says which happened:
 
 ```
 dropped : 0 turns of history
 rebuilt : 2 times from the tree
 ```
 
-`dropped` above zero with `rebuilt` at zero means reconstruction could not run and the trim
-handled it instead. The usual cause is a run with no verification — there is no tree to rebuild
-from — so add expectations or run `agent` rather than `session` if you want the better half.
+`dropped` above zero with `rebuilt` at zero means it trimmed instead. Usually that is a run with
+no verification, so there is no tree to rebuild from — use `agent` rather than `session`, and
+state expectations.
+
+## The model keeps re-reading files it already read
+
+Expected, and not solved. A rebuilt window restores what is **on disk**. What a `read` returned
+was only ever in the conversation, and reading a file changes nothing a snapshot can find — so a
+model whose progress lives only in its own context starts that part over.
+
+**The fix that works today: have it write as it goes.** Anything on disk survives a rebuild
+intact. "Read these and tell me the totals" is fragile in a small window; "read these and append
+each total to `totals.md` as you go" is not.
+
+`--read-record` lists the paths already named in a call. It is off by default: in the one paired
+run so far it did not stop the re-reading, and it makes rebuilds fire less often. Knowing *that*
+you opened a file is not knowing what was in it. Try it, but expect little.
+
+That list is every path named in a call, so a file the model *wrote* is in it, and so is a call
+that failed. Nothing a `shell` command touches appears at all.
 
 ## The reply came back empty, no error
 

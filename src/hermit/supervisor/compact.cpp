@@ -48,7 +48,8 @@ bool should_compact(const Session& session, double threshold) noexcept {
   return fill >= threshold;
 }
 
-std::string reconstruction_note(const Changeset& changes, const Verdict& verdict) {
+std::string reconstruction_note(const Changeset& changes, const Verdict& verdict,
+                                std::span<const std::string> observed) {
   // The first sentence is the one the trim does not have. It says the turns are gone, and
   // it says what replaces them is not a recollection -- a model told only "here is the
   // state" would reasonably read it as its own summary and trust it the way it trusts its
@@ -73,6 +74,35 @@ std::string reconstruction_note(const Changeset& changes, const Verdict& verdict
     const std::size_t shown = std::min(changes.changes.size(), kMaxListedChanges);
     for (std::size_t i = 0; i < shown; ++i) append_change(note, changes.changes[i]);
     if (changes.changes.size() > shown) append_more(note, changes.changes.size() - shown);
+  }
+
+  if (!observed.empty()) {
+    // Placed after the changed list on purpose: the two are read against each other, and
+    // the useful comparison is "I have opened these and changed none of them".
+    // "Named", not "opened", and the distinction is not pedantry. The list is collected
+    // from every Path argument on every tool, so a `write` target, an `edit` target and
+    // both ends of a `move` are all in it -- and it is collected before the tool runs, so
+    // a call that failed is in it too. Saying "you have seen these" would be a supervisor
+    // asserting something it did not observe, in the pinned turn, in a project whose whole
+    // thesis is that the model's account is never on the critical path.
+    note += "\nPaths this session has already named in a call (";
+    note += std::to_string(observed.size());
+    note += "), whether or not the call succeeded. Not what was in them -- those results "
+            "are gone:\n";
+
+    const std::size_t shown = std::min(observed.size(), kMaxListedObserved);
+    for (std::size_t i = 0; i < shown; ++i) {
+      note += "  ";
+      // Scrubbed like the changed paths above, though these cannot currently carry a
+      // newline: every entry comes from a SandboxPath, so it has been through
+      // Sandbox::resolve, which rejects control characters. That is a property of a check
+      // in another module made for another reason, and this list is one refactor away from
+      // being seeded off a Changeset -- which is exactly where the same hole was found.
+      // One call is cheaper than depending on that staying true.
+      note += one_line(observed[i]);
+      note += '\n';
+    }
+    if (observed.size() > shown) append_more(note, observed.size() - shown);
   }
 
   std::vector<const Finding*> unmet;
@@ -112,9 +142,10 @@ std::string reconstruction_note(const Changeset& changes, const Verdict& verdict
 }
 
 std::string reconstructed_instruction(std::string_view task, const Changeset& changes,
-                                      const Verdict& verdict) {
+                                      const Verdict& verdict,
+                                      std::span<const std::string> observed) {
   std::string out{task};
-  out += reconstruction_note(changes, verdict);
+  out += reconstruction_note(changes, verdict, observed);
   return out;
 }
 

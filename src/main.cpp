@@ -90,6 +90,13 @@ int usage(std::ostream& to = std::cerr) {
       "                         --expect there is nothing to retry and one attempt runs)\n"
       "  --no-verify            skip the per-turn hash diff of the tree (R6); verification\n"
       "                         is on by default\n"
+      "  --compact-at PCT       rebuild the window from the tree at this percentage of the\n"
+      "                         prompt budget (default 80; 0 falls back to trimming, which\n"
+      "                         drops history without telling the model)\n"
+      "  --read-record          list the paths already named in a call in a rebuilt window.\n"
+      "                         Off by default: it did not stop a model re-reading them in\n"
+      "                         the one paired run so far, and it makes rebuilds fire less\n"
+      "                         often\n"
       "  --judge-model NAME     who decides satisfies: expectations (default: the working\n"
       "                         model, in a fresh session that never sees the transcript)\n"
       "\n"
@@ -126,12 +133,20 @@ int usage(std::ostream& to = std::cerr) {
 /// `from_chars` has none of those properties: the unsigned grammar has no sign, so `-1` is
 /// `invalid_argument`; overflow is `result_out_of_range`; and requiring `ptr == end` is
 /// what rejects `5abc`, which `strtoull` would have read as 5.
-std::optional<std::uint64_t> whole_number(std::string_view text, std::uint64_t max) {
+/// A whole number in [1, max], or [0, max] when `allow_zero`.
+///
+/// Zero is refused by default because every bound this parses -- turns, seconds, attempts,
+/// retention -- reads as "no bound at all" or "never run" at zero, and neither is a request
+/// anyone makes on purpose. `--compact-at` is the exception: zero there names the trim-only
+/// arm, which is a policy rather than the absence of one.
+std::optional<std::uint64_t> whole_number(std::string_view text, std::uint64_t max,
+                                          bool allow_zero = false) {
   std::uint64_t value = 0;
   const auto* const end = text.data() + text.size();
   const auto [stopped, ec] = std::from_chars(text.data(), end, value);
   if (ec != std::errc{} || stopped != end) return std::nullopt;
-  if (value == 0 || value > max) return std::nullopt;
+  if (value == 0 && !allow_zero) return std::nullopt;
+  if (value > max) return std::nullopt;
   return value;
 }
 
@@ -360,6 +375,11 @@ int agent_command(std::span<const std::string_view> args) {
   std::optional<std::filesystem::path> backup_dir;
   std::optional<std::string> judge_model;
   bool verify = true;
+  // Percent rather than a fraction, so the flag takes a whole number like every other one
+  // here and there is no "0.8 or 80?" ambiguity at the command line. 0 turns compaction
+  // off, which is the trim-only control arm D17's measurement needs.
+  std::uint64_t compact_at_percent = 80;
+  bool carry_read_paths = false;
 
   // A flag whose value is missing is reported as such. Letting it fall through to
   // `load` would report it as an unknown flag instead, which sends the operator looking
@@ -438,6 +458,23 @@ int agent_command(std::span<const std::string_view> args) {
     }
     if (args[i] == "--no-verify") {
       verify = false;
+      continue;
+    }
+    if (takes_value("--compact-at", value)) {
+      // 100 is the ceiling because past it the trim has already run: compaction is checked
+      // before prepare(), so a threshold above the budget describes a moment that only
+      // exists on the way into a trim.
+      const auto parsed = whole_number(value, 100, /*allow_zero=*/true);
+      if (!parsed) {
+        std::cerr << "error: --compact-at needs a percentage from 0 to 100, got: " << value
+                  << '\n';
+        return 2;
+      }
+      compact_at_percent = *parsed;
+      continue;
+    }
+    if (args[i] == "--read-record") {
+      carry_read_paths = true;
       continue;
     }
     passthrough.push_back(args[i]);
@@ -596,6 +633,8 @@ int agent_command(std::span<const std::string_view> args) {
 
   hermit::supervisor::LoopOptions loop_options;
   loop_options.max_turns = max_turns;
+  loop_options.compact_at = static_cast<double>(compact_at_percent) / 100.0;
+  loop_options.carry_observed_paths = carry_read_paths;
   loop_options.expected = expectations.set;
   loop_options.unjudged_requirements = expectations.unjudged;
   loop_options.budget = std::chrono::seconds{static_cast<long>(budget_seconds)};
