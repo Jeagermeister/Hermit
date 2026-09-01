@@ -375,15 +375,24 @@ class Session {
   /// tools only look, so nothing a `read` returned is recoverable from a snapshot. Dropping
   /// the model's *account* of an answer is the design; dropping the answer is not.
   ///
-  /// **Returns false, having changed nothing, in the two cases where rebuilding is not an
-  /// improvement:**
+  /// **Returns false, having changed nothing, in the two cases where rebuilding does not
+  /// help:**
   ///
   ///   - nothing outside the pinned turns and that trailing group is droppable, so there
   ///     is no history to fold and the rewrite would only restate the task, and
-  ///   - the rebuilt prompt would not be *smaller* than the present one. A long note over
-  ///     a short history is a compaction step that makes the prompt bigger, and so is a
-  ///     kept trailing group that is most of the budget on its own; a caller that compacts
-  ///     on a threshold would then do it again every turn without getting under it.
+  ///   - the rebuilt prompt would not land under `trim_target()`. Merely *smaller* is not
+  ///     enough, and review found two ways it fails: a rebuild that is smaller but still
+  ///     over the threshold recompacts next turn and every turn after, and one that is
+  ///     smaller but still over budget is followed straight into the trim, which drops the
+  ///     unanswered tail this function just went out of its way to keep. Clearing the
+  ///     target avoids both, because below it the trim does not run.
+  ///
+  /// The kept tail therefore survives into the request whenever this returns true -- which
+  /// is the guarantee, and it is worth stating that it is conditional. When the rebuild
+  /// cannot clear the target this declines, the trim runs instead, and the trim makes no
+  /// promise about the tail: if the outstanding results alone exceed the budget it will
+  /// drop them like any other group. That case is a window too small for the work, and the
+  /// honest answer to it is a bigger window, not a cleverer policy.
   ///
   /// Both are the caller's cue to fall through to the trim, which is why this is a bool
   /// rather than a refusal: neither is an error, and whether the *result* fits the window
@@ -406,6 +415,24 @@ class Session {
 
   /// Prompt tokens available once the reply reserve is held back.
   [[nodiscard]] std::uint64_t prompt_budget() const noexcept { return window_ - options_.reply_reserve; }
+
+  /// What the trim aims for once it fires, and the level a rebuild has to reach to be
+  /// worth doing. One function because three things must agree on it.
+  ///
+  /// `prepare()` trims with hysteresis -- once over budget it drops to a margin below,
+  /// never to an exact fit, or it would re-trim every turn and defeat the server's prefix
+  /// cache. `reconstruct()` then declines any rebuild that would not land under this,
+  /// which is what keeps the two policies from fighting: a rebuild that clears this level
+  /// is a rebuild the trim will not touch afterwards.
+  ///
+  /// It is also the figure `kDefaultCompactAt` is defined to equal. That coupling used to
+  /// live in a comment and a test that re-derived the arithmetic independently -- which
+  /// meant the trim's divisor could be changed with the whole suite still green. Now there
+  /// is one expression and both readers call it.
+  [[nodiscard]] std::uint64_t trim_target() const noexcept {
+    const std::uint64_t budget = prompt_budget();
+    return budget - budget / 5;
+  }
 
   /// How many turns have been dropped to make room, over the session's whole life.
   /// Non-zero means the model has been answering with holes in its history, which is
