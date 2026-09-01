@@ -1,5 +1,7 @@
 #include <hermit/supervisor/semantic.h>
 
+#include <hermit/supervisor/verify.h>
+
 #include <algorithm>
 #include <limits>
 #include <cerrno>
@@ -21,18 +23,6 @@ using nlohmann::json;
 /// rather than silently applied -- a judge told "500 of 12000 files" knows what it does
 /// not know.
 constexpr std::size_t kListingCap = 500;
-
-/// Control characters become spaces: a filename (or a judge reason, below) carrying a
-/// newline could forge a listing row or a verdict line, which is the report-forgery
-/// channel PathError::ControlCharacter closes for model-supplied paths -- pre-existing
-/// operator files never went through that gate.
-std::string one_line(std::string_view text) {
-  std::string out{text};
-  for (char& c : out) {
-    if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) c = ' ';
-  }
-  return out;
-}
 
 std::string render_listing(const Sandbox& box) {
   std::vector<std::string> paths;

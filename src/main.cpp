@@ -629,8 +629,13 @@ int agent_command(std::span<const std::string_view> args) {
     // R6: what the filesystem shows, printed beside what the model did. Nothing here is
     // derived from the reply.
     for (const auto& change : event.changes.changes) {
+      // Scrubbed like the result preview above it, and for a sharper reason: this is the
+      // R6 line the operator is told to trust *because* nothing in it comes from the
+      // reply. A filename carrying a newline forges a second line under that heading,
+      // indistinguishable from a real one. The preview was already scrubbed; the path,
+      // which is the more trusted of the two, was not.
       std::cout << "        ~ " << hermit::supervisor::to_string(change.kind) << "  "
-                << change.path << '\n';
+                << hermit::supervisor::one_line(change.path) << '\n';
     }
   };
 

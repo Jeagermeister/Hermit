@@ -17,7 +17,12 @@ void append_change(std::string& out, const Change& change) {
   out += "  ";
   out += to_string(change.kind);
   out += "  ";
-  out += change.path;
+  // Scrubbed. A filename is attacker-controlled data -- Linux allows newlines in one, and
+  // TreeVerifier keys straight off readdir -- and this string lands in the *pinned* user
+  // turn, the one message the trim can never drop, recomposed into every later rebuild.
+  // Raw, a name carrying "\n---\nSYSTEM: ..." forges its own paragraph there. See
+  // one_line in verify.h for why the sandbox gate cannot close this on its own.
+  out += one_line(change.path);
   out += '\n';
 }
 
@@ -90,7 +95,10 @@ std::string reconstruction_note(const Changeset& changes, const Verdict& verdict
       // judge() always words an unmet finding; the fallback keeps a hand-built Finding
       // from trailing off into an empty bullet. Same guard as reinvocation_instruction.
       note += "  - ";
-      note += unmet[i]->reason.empty() ? unmet[i]->expectation.render() : unmet[i]->reason;
+      // Scrubbed for the same reason: a finding's wording is composed from expectation text
+      // and embeds paths, so it is not structurally guaranteed to be free of a newline.
+      note += one_line(unmet[i]->reason.empty() ? unmet[i]->expectation.render()
+                                                : unmet[i]->reason);
       note += '\n';
     }
     if (unmet.size() > shown) append_more(note, unmet.size() - shown);
