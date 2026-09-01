@@ -1362,10 +1362,17 @@ opened them again. The record tells a model *that* it has seen a file and can ne
 *what was in it* — the contents were in the discarded results, and a `read` leaves nothing on
 disk to re-observe — so it removes the excuse for repeating work without removing the reason.
 
-It also has a cost that was predicted and then observed: the longer note makes
-`Session::reconstruct()` decline more often, since it refuses a rebuild that would not be
-smaller than the history it replaces. The arm carrying the record compacted twice where the
-other compacted three times, and trimmed twice as much to make up the difference.
+It also has a cost that was predicted, then observed, and then got worse. The longer note
+competes with the history it replaces, so `reconstruct()` declines more often: the arm carrying
+the record compacted twice where the other compacted three times, and trimmed twice as much to
+make up the difference.
+
+Then the guard moved. Once a rebuild had to clear `trim_target()` rather than merely shrink the
+prompt, the record's extra lines stopped being a frequency penalty and became a threshold one --
+in the 4K fixture window no rebuild survives the guard at all with the record on, and the tests
+covering it had to be given 6K. So on a tight window this feature does not make compaction rarer,
+it turns it off. That is the second independent argument for leaving it off by default, and it
+was not visible until the two changes met.
 
 One non-deterministic run per arm is weak evidence and is not a result. It is, however,
 evidence pointing the wrong way, and shipping the feature on by default on that basis would be

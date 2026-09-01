@@ -304,6 +304,13 @@ struct LoopOptions {
   ///
   /// Ignored entirely when `compact_at` is 0 -- there is no reconstruction to carry
   /// anything into.
+  ///
+  /// ⚠ **It can stop rebuilds happening at all in a small window**, which is sharper than
+  /// the "fires less often" this once said. A rebuild has to land under
+  /// `Session::trim_target()`, and the record lengthens the note that competes against it;
+  /// in a 4K window the fixture tests had to be given 6K before any rebuild survived the
+  /// guard with the record on. So the feature's cost is not a slight reduction in
+  /// frequency -- it is a threshold, and on a tight window it can turn compaction off.
   bool carry_observed_paths = false;
 
   /// Verify the tree after every turn (R6). Optional; null means no verification, which
