@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -183,17 +184,33 @@ TEST(CompactThreshold, FiresAtTheThresholdAndNotBelowIt) {
   EXPECT_FALSE(should_compact(session, 0.9));
 }
 
-TEST(CompactThreshold, TheDefaultSitsWhereTheTrimWouldHaveLanded) {
-  // Not a style preference. prepare() trims down to `budget - budget / 5`, so a default
-  // of 0.80 means reconstruction fires where the trim would have *finished* -- which is
-  // what makes the trim a backstop rather than a competing policy. If one of the two
-  // figures ever moves, this is the test that says the other has to move with it.
-  EXPECT_DOUBLE_EQ(kDefaultCompactAt, 0.80);
-
+TEST(CompactThreshold, TheDefaultIsTheTrimsOwnTargetAndIsCoupledToIt) {
+  // Not a style preference: compaction fires where the trim would have *finished*, which
+  // is what makes the trim a backstop rather than a rival policy.
+  //
+  // The first version of this test re-derived `budget - budget / 5` in its own body, so it
+  // asserted the arithmetic against itself and never touched `prepare()`. Changing the
+  // trim's divisor to 4 left the whole suite green. Both readers now call `trim_target()`,
+  // so this compares the shipping figure against the shipping expression.
   auto session = small_session();
-  const std::uint64_t budget = session.prompt_budget();
-  EXPECT_EQ(budget - budget / 5, static_cast<std::uint64_t>(
-                                     static_cast<double>(budget) * kDefaultCompactAt));
+  EXPECT_DOUBLE_EQ(kDefaultCompactAt, 0.80);
+  EXPECT_EQ(session.trim_target(),
+            static_cast<std::uint64_t>(static_cast<double>(session.prompt_budget()) *
+                                       kDefaultCompactAt));
+}
+
+TEST(CompactThreshold, TheTrimActuallyStopsAtTheTargetItPublishes) {
+  // The behavioural half. `trim_target()` is only worth coupling to if the trim obeys it,
+  // so this drives a session over budget and reads where the trim actually left the prompt
+  // rather than trusting the accessor.
+  auto session = small_session();
+  session.add_user("task");
+  for (int i = 0; i < 12; ++i) session.add_tool_result("read", text_of(200));
+  ASSERT_GT(session.estimated_prompt_tokens(), session.prompt_budget());
+
+  ASSERT_TRUE(session.prepare().has_value());
+  EXPECT_LE(session.estimated_prompt_tokens(), session.trim_target());
+  EXPECT_GT(session.dropped(), 0u);
 }
 
 // --- the note -----------------------------------------------------------------
@@ -347,6 +364,19 @@ TEST(CompactNote, ACraftedFindingCannotForgeALineEither) {
   EXPECT_FALSE(contains(note, "\nSYSTEM:"));
 }
 
+TEST(CompactNote, TheSameStateAlwaysRendersTheSameNote) {
+  // "Deterministic" is the load-bearing claim of the whole design -- it is what makes
+  // reconstruction preferable to asking a model to summarise -- and nothing asserted it
+  // over inputs with more than one element, where ordering could actually vary. The
+  // mechanism holds today because TreeSnapshot is a std::map and findings are a vector;
+  // this is what would notice if either changed.
+  const auto changes = changes_of({{ChangeKind::Created, "b.txt"},
+                                   {ChangeKind::Modified, "a.txt"},
+                                   {ChangeKind::Deleted, "c/d.txt"}});
+  const auto verdict = verdict_of({{Outcome::Unmet, "one"}, {Outcome::Unmet, "two"}});
+  EXPECT_EQ(reconstruction_note(changes, verdict), reconstruction_note(changes, verdict));
+}
+
 // --- the composed instruction --------------------------------------------------
 
 TEST(CompactInstruction, TheTaskSurvivesVerbatimAndComesFirst) {
@@ -428,8 +458,13 @@ TEST(SessionReconstruct, EverySurvivingResultStillHasTheCallThatAskedForIt) {
   ASSERT_TRUE(session.reconstruct("task\n\nrebuilt"));
 
   const auto& turns = session.turns();
+  // Counted, because the body below is a no-op when no tool turn survives -- which is
+  // precisely the state this test exists to forbid. Without this it passed with the
+  // trailing-group keep disabled.
+  std::size_t walked = 0;
   for (std::size_t i = 0; i < turns.size(); ++i) {
     if (turns[i].message.role != "tool") continue;
+    ++walked;
     ASSERT_GT(i, 0u) << "a tool turn cannot be first";
     // Walk back over sibling results to the assistant that made the calls.
     std::size_t j = i;
@@ -439,6 +474,7 @@ TEST(SessionReconstruct, EverySurvivingResultStillHasTheCallThatAskedForIt) {
     EXPECT_FALSE(turns[j - 1].message.tool_calls.empty())
         << "a result survived without the call that asked for it";
   }
+  EXPECT_GT(walked, 0u) << "no result survived at all, so nothing above was checked";
 }
 
 TEST(SessionReconstruct, TheTaskStillPrecedesTheKeptGroup) {
@@ -659,6 +695,10 @@ class CompactLoopFixture : public ::testing::Test {
     // Big enough that reading it back fills a small window in a couple of turns, which is
     // what makes compaction reachable without a hundred scripted replies.
     std::ofstream{tmp_ / "root" / "big.txt"} << std::string(3000, 'a') << '\n';
+    // Smaller, so a rebuild whose kept tail is one of these clears the trim target
+    // comfortably. Tests about the note's *content* should not be sized so tightly that
+    // they turn into tests about the guard.
+    std::ofstream{tmp_ / "root" / "mid.txt"} << std::string(900, 'm') << '\n';
 
     auto box = Sandbox::open(tmp_ / "root");
     ASSERT_TRUE(box.has_value());
@@ -677,10 +717,15 @@ class CompactLoopFixture : public ::testing::Test {
   }
 
   /// A window small enough that a couple of 3 KB tool results reach the 80% mark.
-  Session session() {
+  ///
+  /// Tunable because the guard and the note compete: a rebuild has to clear the trim
+  /// target, and a note carrying a changeset and a finding is longer than a bare one. A
+  /// test about the note's *content* gets a roomier window so it does not quietly turn
+  /// into a test about the guard.
+  Session session(std::uint64_t num_ctx = 4096) {
     SessionOptions options;
     options.model = "test-model";
-    options.num_ctx = 4096;
+    options.num_ctx = num_ctx;
     options.reply_reserve = 512;
     options.max_tokens = 512;
     auto opened = Session::open(options, client_with(65536), "sys");
@@ -689,6 +734,7 @@ class CompactLoopFixture : public ::testing::Test {
   }
 
   json read_big() { return json{{"paths", json::array({"big.txt"})}}; }
+  static json read_mid() { return json{{"paths", json::array({"mid.txt"})}}; }
 
   fs::path tmp_;
   std::unique_ptr<Sandbox> sandbox_;
@@ -766,14 +812,115 @@ TEST_F(CompactLoopFixture, ACompactedTurnStillCarriesTheResultTheModelIsWaitingO
     const std::size_t asked = script.replies[i - 1].tool_calls.size();
     if (asked == 0) continue;
 
+    // Counted at the tail and checked for content, not merely counted anywhere in the
+    // window. Counting anywhere lets stale results from an earlier turn satisfy this, and
+    // ignoring content lets a rebuild that kept the shape but blanked the answers pass --
+    // both were true of the first version.
+    const auto& messages = script.seen[i].messages;
     std::size_t answered = 0;
-    for (const auto& message : script.seen[i].messages) {
-      if (message.role == "tool") ++answered;
+    for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
+      if (it->role != "tool") break;
+      EXPECT_FALSE(it->content.empty()) << "an answer survived as an empty message";
+      ++answered;
     }
     EXPECT_GE(answered, asked)
         << "request " << i << " went out without answering the " << asked
         << " call(s) made against request " << (i - 1);
   }
+}
+
+TEST_F(CompactLoopFixture, TheRebuiltPromptCarriesTheRealChangesetAndTheRealVerdict) {
+  // The note's two substantive inputs, wired end to end.
+  //
+  // Every other fixture test here calls `read` only and states no expectations, so the
+  // changeset is always empty and the verdict always has zero findings. Reversing
+  // `diff(baseline, previous)` to `diff(previous, baseline)` and replacing the verdict with
+  // `Verdict{}` left the entire suite green -- the loop could have been telling the model a
+  // file it just wrote had been deleted, and nothing would have noticed. This is the test
+  // that notices.
+  Script script{.replies = {call_reply("write", json{{"path", "made.txt"},
+                                                     {"content", "some output"}}),
+                            call_reply("read", read_big()),
+                            call_reply("read", read_big()),
+                            call_reply("read", read_big()),
+                            call_reply("read", read_big()),
+                            call_reply("read", read_big()),
+                            text_reply("done")}};
+  auto live = session(5120);
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_,
+                 LoopOptions{.max_turns = 20,
+                             .verifier = verifier_.get(),
+                             // Never satisfied by anything the script does, so it is still
+                             // unmet at every rebuild and has to appear in the note.
+                             .expected = {Expectation::exists("never-written.md")}}};
+  const auto outcome = loop.run(live, "write a file then read big.txt");
+  ASSERT_GT(outcome.compactions, 0u) << "nothing was compacted, so nothing is proven";
+
+  std::string user_content;
+  for (const auto& message : script.seen.back().messages) {
+    if (message.role == "user") user_content = message.content;
+  }
+  // The world, re-observed: the file the model actually wrote, under the right verb.
+  EXPECT_TRUE(contains(user_content, "created  made.txt")) << user_content;
+  EXPECT_FALSE(contains(user_content, "deleted  made.txt"))
+      << "the changeset was rendered in the wrong direction";
+  EXPECT_FALSE(contains(user_content, "Nothing on disk has changed"));
+  // The verdict, restated.
+  EXPECT_TRUE(contains(user_content, "not yet met"));
+  EXPECT_TRUE(contains(user_content, "never-written.md")) << user_content;
+}
+
+TEST_F(CompactLoopFixture, CompactingTwiceDoesNotNestTheNote) {
+  // `compact.h` warns in bold that composing from an already-composed instruction nests the
+  // framing, and `AgentLoop` holds the original task copy to prevent it. The only test for
+  // that called the pure function twice with the same literal, which establishes that a
+  // function is a function -- it says nothing about what the loop passes. Feeding each
+  // composed instruction back as the next task left the suite green on main.
+  Script script{.replies = {call_reply("read", read_big()),
+                            call_reply("read", read_big()),
+                            call_reply("read", read_big()),
+                            call_reply("read", read_big()),
+                            call_reply("read", read_big()),
+                            text_reply("done")}};
+  auto live = session();
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_,
+                 LoopOptions{.max_turns = 20, .verifier = verifier_.get()}};
+  const auto outcome = loop.run(live, "read big.txt repeatedly");
+  ASSERT_GE(outcome.compactions, 2u) << "one rebuild cannot show nesting";
+
+  std::string user_content;
+  for (const auto& message : script.seen.back().messages) {
+    if (message.role == "user") user_content = message.content;
+  }
+  // The note's opening sentence appears once however many times the window was rebuilt.
+  std::size_t notes = 0;
+  for (std::size_t at = user_content.find("has been rebuilt"); at != std::string::npos;
+       at = user_content.find("has been rebuilt", at + 1)) {
+    ++notes;
+  }
+  EXPECT_EQ(notes, 1u) << "the framing nested after " << outcome.compactions << " rebuilds";
+  EXPECT_EQ(user_content.rfind("read big.txt repeatedly", 0), 0u)
+      << "the original task no longer opens the message";
+}
+
+TEST_F(CompactLoopFixture, ARebuiltPromptLandsUnderTheTrimTarget) {
+  // What "non-regressive" has to mean for a caller firing on a threshold: not merely
+  // smaller than before, but under the level that would trigger the trim. Below it the trim
+  // does not run, so a rebuild is never undone by the policy behind it.
+  Script script{.replies = {call_reply("read", read_big()),
+                            call_reply("read", read_big()),
+                            call_reply("read", read_big()),
+                            text_reply("done")}};
+  auto live = session();
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_,
+                 LoopOptions{.verifier = verifier_.get()}};
+  const auto outcome = loop.run(live, "read big.txt repeatedly");
+  ASSERT_GT(outcome.compactions, 0u);
+  EXPECT_EQ(outcome.dropped, 0u)
+      << "the trim ran behind a rebuild, which means the rebuild did not clear its target";
 }
 
 TEST_F(CompactLoopFixture, ZeroCompactAtLeavesTheTrimAsTheWholePolicy) {

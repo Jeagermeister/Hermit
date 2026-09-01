@@ -1231,6 +1231,44 @@ refused, because it asks a question nothing can answer. This one has a correct a
 already-implemented fallback, so refusing every unverified run would be turning a working
 configuration into an error for no gain.
 
+### The rebuild has to clear the trim's target, not merely shrink the prompt
+
+**Found 2026-09-01 by adversarial review, after the feature had merged.** The first guard on
+`Session::reconstruct()` declined any rebuild that would not be *smaller* than the prompt it
+replaced. That is the wrong bar, and it failed in two ways that a probe reproduced.
+
+**It thrashed.** Smaller is not the same as under the threshold that fired the rebuild. Given
+tool results large enough that the kept tail stays above 80% on its own, compaction fires again
+the next turn, and the next — thirteen rebuilds over fifteen turns in the probe, each one
+rewriting the pinned turn and so missing the server's prefix cache. That is precisely the cost
+the trim's hysteresis was written to avoid, arriving from the policy layered on top of it.
+
+**And it let the trim undo the rebuild's whole point.** A rebuild that is smaller but still over
+budget is followed immediately by `prepare()`, which trims — and the unanswered trailing group
+that `reconstruct()` had gone out of its way to keep is an ordinary unpinned group to the trim.
+Measured: `reconstruct()` returned true having preserved two outstanding results, and the
+request that went out carried *none*. The model was handed a window in which it had asked
+nothing and learned nothing, which is the repeat-call loop this feature exists to break,
+produced by the feature itself.
+
+**One change settles both.** The bar is now `trim_target()` rather than the current size. Below
+that level the trim does not run at all — it fires only above budget, and the target sits below
+budget — so a rebuild that gets there is one nothing else will undo, and one that is already
+under the threshold cannot immediately re-trigger. When the target cannot be reached,
+reconstruction is simply not the tool for that prompt: declining hands it to the trim, which
+drops from the front and can always make progress.
+
+**What this makes conditional, stated plainly.** "The unanswered tail is kept" is true whenever
+a rebuild happens, and it is not a promise the system makes unconditionally. If the outstanding
+results alone exceed the budget, no rebuild can clear the target, the trim runs, and it drops
+them like any other group. That is a window too small for the work, and the honest answer is a
+bigger window rather than a cleverer policy.
+
+The target is now one function, `Session::trim_target()`, that the trim, the rebuild guard and
+the test all call. It used to be an expression in `prepare()`, a sentence in `compact.h`, and a
+test that re-derived the arithmetic in its own body — so the trim's divisor could be changed
+from a fifth to a quarter with all 758 tests still passing. It cannot now.
+
 ### The note is a prompt surface, and filenames are attacker-controlled
 
 **Found 2026-09-01 by adversarial review, after the feature had merged.** The reconstruction

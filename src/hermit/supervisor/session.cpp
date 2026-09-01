@@ -305,7 +305,7 @@ SessionResult<ollama::ChatRequest> Session::prepare() {
     // re-evaluate the whole prompt on every turn for the rest of the session. The
     // margin gives up a little history a few turns early to keep the prompt
     // byte-stable between trims.
-    const std::uint64_t target = budget - budget / 5;
+    const std::uint64_t target = trim_target();
     while (estimated_prompt_tokens() > target) {
       const auto victim = std::find_if(turns_.begin(), turns_.end(),
                                        [](const Turn& t) { return !t.pinned; });
@@ -472,15 +472,25 @@ bool Session::reconstruct(std::string instruction) {
     kept += turns_[i].cost();
   }
 
-  // The note is composed from re-observed state and has no fixed size, so a rebuild can
-  // cost more than the history it replaces -- a handful of turns against a changeset of
-  // hundreds of paths, or a kept trailing group that is most of the budget on its own.
-  // Compacting anyway would grow the prompt, and a caller firing on a threshold would then
-  // compact every turn without ever getting under it. Refusing here makes compaction
-  // non-regressive by construction and hands the case back to the trim, which drops from
-  // the front and can always make progress.
+  // The rebuild has to land under the trim's target, not merely under the current prompt.
+  //
+  // "Smaller than now" was the first version of this test and it was not enough, in two
+  // ways that both showed up in review. A rebuild can be smaller and still be over the
+  // threshold that triggered it, so the next turn compacts again, and the next -- every
+  // one rewriting the pinned turn and missing the server's prefix cache, which is the
+  // exact cost the trim's hysteresis exists to avoid. And a rebuild that is smaller but
+  // still over *budget* is followed immediately by the trim, which drops the unanswered
+  // tail this function went out of its way to keep: the model is then sent a window in
+  // which it asked nothing and learned nothing, which is the repeat-call loop compaction
+  // was written to break, arriving out of compaction itself.
+  //
+  // Clearing the target settles both. Below it the trim does not run at all -- it fires
+  // only above budget, and the target is below that -- so a rebuild that gets here is a
+  // rebuild nothing else will undo. When it cannot be reached, reconstruction is not the
+  // tool for this prompt: declining hands it to the trim, which drops from the front and
+  // can always make progress.
   const std::uint64_t rebuilt = kept + estimate(instruction) + kPerMessageOverhead;
-  if (rebuilt >= estimated_prompt_tokens()) return false;
+  if (rebuilt >= trim_target()) return false;
 
   std::vector<Turn> rebuilt_turns;
   rebuilt_turns.reserve(turns_.size() - droppable);

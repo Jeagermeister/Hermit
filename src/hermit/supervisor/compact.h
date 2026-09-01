@@ -70,12 +70,17 @@ namespace hermit::supervisor {
 
 /// Fraction of the prompt budget at which the window is rebuilt.
 ///
-/// 0.80 is deliberately the same figure as the trim's hysteresis target
-/// (`budget - budget / 5`), which makes the ordering between the two policies explicit
-/// rather than incidental: compaction fires where the trim would have *landed*, so on a
-/// verified run reconstruction is what normally happens and the trim is a genuine
-/// backstop for the cases reconstruction cannot serve -- no verifier, or a rebuild that
-/// would not be smaller than the history it replaces.
+/// 0.80 is deliberately the same figure as the trim's target, `Session::trim_target()`,
+/// which makes the ordering between the two policies explicit rather than incidental:
+/// compaction fires where the trim would have *landed*, so on a verified run
+/// reconstruction is what normally happens and the trim is a genuine backstop for the
+/// cases reconstruction cannot serve -- no verifier, or a rebuild that cannot get under
+/// that target.
+///
+/// Both readers call `trim_target()` rather than each spelling the arithmetic out. They
+/// did not always: the coupling lived in prose and in a test that re-derived the formula
+/// independently, which meant the trim's divisor could be changed with the suite still
+/// green.
 inline constexpr double kDefaultCompactAt = 0.80;
 
 /// Most changed paths the note lists before it stops and gives a count instead.
