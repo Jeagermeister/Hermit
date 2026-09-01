@@ -1,6 +1,6 @@
 # 13. CLI reference
 
-One binary, seven subcommands. This chapter matches the binary as built 2026-08-28;
+One binary, seven subcommands. This chapter matches the binary as built 2026-09-01;
 `hermit --help` is always the tie-breaker, and `hermit config` shows every setting actually in
 force and where it came from.
 
@@ -97,7 +97,7 @@ Precedence, increasing: **defaults < `--config` file < environment < flags.**
 | `--budget N` | wall-clock seconds for one run, checked between turns (R8; default 300, bounded 1–86400) |
 | `--no-verify` | skip the per-turn hash diff of the tree (on by default) |
 | `--compact-at PCT` | rebuild the window from the tree at this percentage of the prompt budget (default 80). `0` falls back to trimming, which drops history without telling the model |
-| `--read-record` | list the paths already named in a call in a rebuilt window. Off by default — it did not stop a model re-reading them in the one paired run so far, and it makes rebuilds fire less often |
+| `--read-record` | list the paths already named in a call in a rebuilt window. Off by default — it did not stop a model re-reading them in the one paired run so far, and on a tight window it can stop rebuilds firing at all |
 | `--attempts N` | total attempts at the stated post-conditions, each a fresh session re-invoked with the one concrete remaining failure (default 3; `1` disables re-invocation; without `--expect` there is nothing to retry and one attempt runs) |
 | `--judge-model NAME` | who decides `satisfies:` expectations (default: the working model, in a fresh session that never sees the transcript) |
 | `--unjudged N` | declare N stated requirements that deliberately cannot be decided from the tree (reply-marker requirements); the verdict reports them as unjudged instead of letting them vanish |

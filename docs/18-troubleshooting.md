@@ -57,8 +57,8 @@ intact. "Read these and tell me the totals" is fragile in a small window; "read 
 each total to `totals.md` as you go" is not.
 
 `--read-record` lists the paths already named in a call. It is off by default: in the one paired
-run so far it did not stop the re-reading, and it makes rebuilds fire less often. Knowing *that*
-you opened a file is not knowing what was in it. Try it, but expect little.
+run so far it did not stop the re-reading, and on a tight window it can stop rebuilds firing at
+all. Knowing *that* you opened a file is not knowing what was in it. Try it, but expect little.
 
 That list is every path named in a call, so a file the model *wrote* is in it, and so is a call
 that failed. Nothing a `shell` command touches appears at all.

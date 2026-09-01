@@ -73,7 +73,7 @@ people can maintain it. Three things make this case different.
 **Conceded, and it is the stronger version of this question: why not Rust?** It would serve
 the structural-guarantee argument as well or better, and add memory safety this language
 does not. The compensating discipline here is explicit — every build runs under
-AddressSanitizer and UndefinedBehaviorSanitizer, the suite is currently 363 tests at zero
+AddressSanitizer and UndefinedBehaviorSanitizer, the suite is currently 771 tests at zero
 warnings, and the adversarial review on 2026-08-16 caught a real use-after-free before it
 shipped. That is a mitigation, not a refutation.
 

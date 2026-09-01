@@ -353,10 +353,11 @@ don't reach for it.
         arriving from the other end. `open()` refuses the combination rather than leaving a
         setting that looks protective and is not.
 
-      Dropping, not summarising, is the interim policy: **Context strategy** below is still
-      an open question and quietly answering it here would be the wrong place. What the
-      class does guarantee is that the choice is *this code's* and that it is counted —
-      `dropped()` is a fact about the run, not an implementation detail.
+      Dropping, not summarising, was the interim policy: **Context strategy** below now settles
+      the supervisor half as D17 — reconstruction first, dropping demoted to the fallback for
+      when a rebuild cannot clear the trim's own target — while the measurement half stays
+      open. What the class does guarantee is that the choice is *this code's* and that it is
+      counted — `dropped()` is a fact about the run, not an implementation detail.
 
       **Two review rounds found five more defects, and one of them was a measurement the
       reviews asked for rather than a bug either of them found.**
