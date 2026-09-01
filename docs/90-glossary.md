@@ -38,6 +38,7 @@ The project's working vocabulary, one line each. R-numbers are requirements
 | **D14** | Undo is list-first and never destructive; retention is 72 h and automatic |
 | **D15** | Meaning is judged by a model, after structure, and labelled as judgment everywhere |
 | **D16** | LTO is measured, real, and opt-in (`HERMIT_LTO`) |
+| **D17** | Compaction rebuilds the context window from the tree once it fills; it never summarizes |
 
 ## Terms
 
