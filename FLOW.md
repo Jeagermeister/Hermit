@@ -8,12 +8,14 @@ disagree, the source is right and the diagram is a bug. That constraint is delib
 place stating the architecture is a second place for it to drift, which is the failure
 [tool.h](./src/hermit/core/tool.h) exists to make unrepresentable elsewhere.
 
-**Dashed = not built yet.** Status as of 2026-08-25 — the sandbox, all eight Tier 0 tools with
+**Dashed = not built yet.** Status as of 2026-09-01 — the sandbox, all eight Tier 0 tools with
 per-call verification, the staleness guard, the backup store, the agent loop that drives the
-local model, **and `shell`** (registered ninth, gated by an explicit config flag and a live
-confinement probe; see [ROUTING.md](./ROUTING.md) §12 step 3) are merged and tested. What is
-left dashed is the MCP server ([ROUTING.md](./ROUTING.md) §12 step 6) and Tier 1, and — in
-diagram 3 — the verify-and-re-invoke ring that makes the loop a supervisor.
+local model, `shell` (registered ninth, gated by an explicit config flag and a live confinement
+probe; see [ROUTING.md](./ROUTING.md) §12 step 3), the MCP frontend
+([ROUTING.md](./ROUTING.md) §12 step 6), and — in diagram 3 — the full verify/judge/re-invoke
+ring that makes the loop a supervisor ([ROUTING.md](./ROUTING.md) §12 steps 4b–4c) are all
+merged and tested. What is left dashed is Tier 1 (`triage`, `summarize`; §12 step 7), deferred
+until model selection is settled.
 
 ---
 
@@ -53,7 +55,7 @@ flowchart TB
     T -->|"one correct answer,<br/>when shell is enabled"| SH
 
     classDef pending stroke-dasharray:6
-    class MCP,T1 pending
+    class T1 pending
 ```
 
 Tier 2 is a first-class path, not a failure. A decline that returns *"I could not answer this,
@@ -105,22 +107,25 @@ load-bearing.
 
 ## 3. The supervisor turn
 
-This is the product, and **it is now half built rather than not built.** The left side of the ring
-runs: `AgentLoop` in `src/hermit/supervisor/loop.cpp` starts a bounded session, drives the model,
-dispatches its calls and feeds the results back, all of it bounded by turn count and wall clock
-(R8). Verified end to end against a live local model on 2026-08-17.
+This is the product, and **the whole ring is now built.** The left side runs: `AgentLoop` in
+`src/hermit/supervisor/loop.cpp` starts a bounded session, drives the model, dispatches its
+calls and feeds the results back, all of it bounded by turn count and wall clock (R8). Verified
+end to end against a live local model on 2026-08-17.
 
-**`POLL` now runs too, as of 2026-08-17.** The tree is snapshotted before the run and after
-every turn, and the hash-verified changeset owes nothing to the reply ([D13](./DECISIONS.md)).
-So a model announcing success over an untouched tree is contradicted by evidence rather than
-merely doubted.
+**`POLL` runs too, as of 2026-08-17.** The tree is snapshotted before the run and after every
+turn, and the hash-verified changeset owes nothing to the reply ([D13](./DECISIONS.md)). So a
+model announcing success over an untouched tree is contradicted by evidence rather than merely
+doubted.
 
-**What is still dashed is the decision and everything after it.** Answering *"does state match
-what was asked"* needs a post-condition, and a free-text instruction does not carry one — so
-nothing yet compares the changeset to an intent, and nothing re-invokes with one concrete
-remaining failure. `Q`, `RE` and `DONE` stay dashed, `DONE` included, because a *verified*
-completion is precisely what does not exist: `StopReason::Answered` still means "the model
-stopped asking" and not "the work is done".
+**`Q`, `RE` and `DONE` shipped 2026-08-18** ([ROUTING.md](./ROUTING.md) §12 steps 4b–4c). A
+free-text instruction still carries no post-condition on its own, so one is stated alongside it
+— `--expect kind:path`, repeatable, judged by `app/expect.cpp` against the baseline after every
+turn ([chapter 14](./docs/14-expectations.md) has the grammar). `Q`'s answer feeds `RE`:
+`supervisor/reinvoke.cpp` runs up to `--attempts` fresh sessions (default 3), each handed the
+original task plus the *one* concrete remaining failure from `Verdict::first_unmet()`, never
+the failed history. `DONE` is a verified completion now, not the model's own say-so —
+`StopReason::Answered` stopped being the last word the day `agent` started exiting 3 on
+whatever it stated was measurably still undone.
 
 The arithmetic it rests on — a task succeeding ~67% per attempt approaching ~96% under verified
 retries — is a claim computed from measured instability, not a measured outcome, and
@@ -144,8 +149,6 @@ flowchart LR
     Q -->|"no, and turns remain"| RE
     RE --> M
 
-    classDef pending stroke-dasharray:6
-    class Q,DONE,RE pending
 ```
 
 The reason R6 polls rather than reads the model's answer: across the recorded runs, a model
