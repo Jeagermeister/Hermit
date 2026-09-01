@@ -121,11 +121,17 @@ One `hermit agent` job runs like this:
    model as still outstanding.
 3. **Verify per turn.** Snapshot, diff, judge the structural expectations against the
    baseline.
-4. **Judge meaning once per attempt**, only after every structural expectation is met: a
+4. **Rebuild the window when it fills.** At 80% of the prompt budget the conversation is
+   reconstructed rather than trimmed: the task verbatim, the changed paths as the snapshot in
+   step 3 found them, the requirements still unmet, and a plain statement that the earlier
+   turns are gone. The model's own narration is dropped. Nothing is summarised — a summary is
+   the model's account of events, and step 3 exists precisely because that account is not
+   evidence ([D17](../DECISIONS.md)).
+5. **Judge meaning once per attempt**, only after every structural expectation is met: a
    `satisfies:` criterion goes to a model in a fresh session that reads the file's bytes and
    the tree's path list — never the transcript — and its verdict is labelled as judgment, not
    measurement ([D15](../DECISIONS.md)).
-5. **Retry on an unmet verdict.** Up to `--attempts` total (default 3), each a fresh session
+6. **Retry on an unmet verdict.** Up to `--attempts` total (default 3), each a fresh session
    handed the original task plus the one concrete remaining failure. Every attempt is judged
    against the *one* baseline taken before the first, so a wrong first attempt cannot change
    what your expectations mean mid-job. Infrastructure failures and undecidable-only verdicts

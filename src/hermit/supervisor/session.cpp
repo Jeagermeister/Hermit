@@ -420,4 +420,110 @@ SessionResult<void> Session::record(const ollama::ChatReply& reply) {
   return {};
 }
 
+bool Session::reconstruct(std::string instruction) {
+  // Establish the pins first: everything else here is expressed in terms of them, and
+  // `prepare()` would recompute them on the next call anyway. After this the pinned set
+  // is exactly the system prompt and the most recent user turn.
+  pin_latest_user();
+
+  // The trailing group is kept, and this is not a refinement -- without it compaction is
+  // broken in the ordinary case rather than an unusual one.
+  //
+  // A caller compacts at the top of a turn, and history then ends with the results of the
+  // calls the *previous* turn asked for. Those were appended after that turn's prepare(),
+  // so the model has never seen them: it is still waiting on them. Erasing them sends it a
+  // window in which it asked nothing and learned nothing, and the reliable response to a
+  // call with no answer is to re-issue it -- the repeat-call loop this project exists to
+  // break, arriving from the policy meant to help.
+  //
+  // Re-observation cannot stand in for them either, which is what separates this from the
+  // history compaction *does* drop. Five of the eight Tier 0 tools only look; a `read` or a
+  // `grep` moves nothing, so no snapshot recovers what it returned. Dropping the model's
+  // account of an answer is the whole design. Dropping the answer is not.
+  //
+  // The group is identified the way prepare()'s trim identifies one -- a run of `tool`
+  // turns and the assistant turn whose calls they answer -- so the two policies cannot
+  // disagree about where a group starts.
+  std::size_t keep_from = turns_.size();
+  if (!turns_.empty() && turns_.back().message.role == "tool") {
+    keep_from = turns_.size() - 1;
+    while (keep_from > 0 && turns_[keep_from - 1].message.role == "tool") --keep_from;
+    if (keep_from > 0 && !turns_[keep_from - 1].message.tool_calls.empty()) --keep_from;
+  }
+
+  const auto erasable = [&](std::size_t i) { return !turns_[i].pinned && i < keep_from; };
+
+  std::size_t droppable = 0;
+  for (std::size_t i = 0; i < turns_.size(); ++i) {
+    if (erasable(i)) ++droppable;
+  }
+  if (droppable == 0) return false;  // nothing to fold; the rewrite would only restate
+
+  // What survives, and whether the rebuild is actually an improvement. The task turn is
+  // excluded from `kept` because it is about to be replaced rather than carried.
+  std::uint64_t kept = 0;
+  bool has_task = false;
+  for (std::size_t i = 0; i < turns_.size(); ++i) {
+    if (erasable(i)) continue;
+    if (turns_[i].pinned && turns_[i].message.role == "user") {
+      has_task = true;
+      continue;
+    }
+    kept += turns_[i].cost();
+  }
+
+  // The note is composed from re-observed state and has no fixed size, so a rebuild can
+  // cost more than the history it replaces -- a handful of turns against a changeset of
+  // hundreds of paths, or a kept trailing group that is most of the budget on its own.
+  // Compacting anyway would grow the prompt, and a caller firing on a threshold would then
+  // compact every turn without ever getting under it. Refusing here makes compaction
+  // non-regressive by construction and hands the case back to the trim, which drops from
+  // the front and can always make progress.
+  const std::uint64_t rebuilt = kept + estimate(instruction) + kPerMessageOverhead;
+  if (rebuilt >= estimated_prompt_tokens()) return false;
+
+  std::vector<Turn> rebuilt_turns;
+  rebuilt_turns.reserve(turns_.size() - droppable);
+  for (std::size_t i = 0; i < turns_.size(); ++i) {
+    if (erasable(i)) continue;
+    rebuilt_turns.push_back(std::move(turns_[i]));
+  }
+  turns_ = std::move(rebuilt_turns);
+
+  if (has_task) {
+    // Exactly one user turn survives the erase, so the first one found is the task. It
+    // keeps its position, which is what preserves the ordering the chat template needs:
+    // the task still precedes the assistant turn whose results follow it.
+    for (Turn& turn : turns_) {
+      if (turn.message.role != "user") continue;
+      turn.message.content = std::move(instruction);
+      turn.estimated_tokens = estimate(turn.message.content);
+      // The content is not what was priced. Carrying the old figure would let a much
+      // larger message be admitted against the budget on a measurement of a smaller one,
+      // which is the under-count direction that ends in a silent discard.
+      turn.measured_tokens.reset();
+      break;
+    }
+  } else {
+    // Only reachable through the bare Session API -- AgentLoop::run always adds the
+    // instruction before any turn is taken. Appending is still the right answer: the
+    // caller asked for a window rebuilt around this text, and refusing would leave a
+    // session with no task in it at all.
+    const std::uint64_t tokens = estimate(instruction);
+    turns_.push_back(Turn{.message = {.role = "user", .content = std::move(instruction)},
+                          .estimated_tokens = tokens,
+                          .measured_tokens = std::nullopt,
+                          .pinned = true});
+  }
+
+  reconstructed_ += droppable;
+  ++compactions_;
+
+  // Same reasoning as add_user and add_tool_result, and more sharply: history did not
+  // merely gain a message, it was rewritten. A reply recorded against the prepare() that
+  // preceded this would be checked against a prompt that no longer exists.
+  outstanding_.reset();
+  return true;
+}
+
 }  // namespace hermit::supervisor

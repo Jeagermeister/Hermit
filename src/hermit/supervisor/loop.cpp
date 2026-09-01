@@ -192,6 +192,7 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     outcome.reason = reason;
     outcome.detail = std::move(detail);
     outcome.dropped = session.dropped();
+    outcome.compactions = session.compactions();
     // The net effect of the run: last against first, so a file created and deleted again
     // does not appear and one written three times appears once. Taken on every exit path,
     // including the bounds -- a run that ran out of turns still changed whatever it
@@ -213,6 +214,11 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     return outcome;
   };
 
+  // Copied before `add_user` takes it. Every reconstruction is composed from this, never
+  // from an already-composed instruction, so a third compaction does not nest three
+  // framings inside each other -- the discipline reinvocation_instruction states for the
+  // third retry, reached here by a different route.
+  const std::string task = instruction;
   session.add_user(std::move(instruction));
 
   while (true) {
@@ -227,6 +233,17 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     if (outcome.turns >= options_.max_turns) {
       return finish(StopReason::TurnBudget,
                     "reached the " + std::to_string(options_.max_turns) + "-turn bound");
+    }
+
+    // Rebuild the window before asking prepare() to trim it. `previous` is the snapshot
+    // taken after the last turn's calls, so the changeset and the verdict describe the
+    // tree as it stands right now; with no verifier there is neither, and the trim below
+    // stays the policy. reconstruct() declines when there is nothing to fold or the
+    // rebuild would not be smaller, and declining is not an error -- the trim handles
+    // both cases and the counters show which path a run took.
+    if (options_.verifier != nullptr && should_compact(session, options_.compact_at)) {
+      static_cast<void>(session.reconstruct(
+          reconstructed_instruction(task, diff(baseline, previous), judged(previous))));
     }
 
     auto request = session.prepare();
@@ -265,6 +282,7 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
     event.reasoning_chars = reply->reasoning.size();
     event.content = reply->content;
     event.dropped = session.dropped();
+    event.compactions = session.compactions();
 
     // R6, and the ordering is the point: the tree is read *after* the turn's calls have
     // run, and nothing about it comes from the reply. A model that answered in prose still

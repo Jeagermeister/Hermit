@@ -24,6 +24,7 @@ add_executable(hermit_tests
   wire_test.cpp
   toolset_test.cpp
   mcp_test.cpp
+  compact_test.cpp
   loop_test.cpp
   reinvoke_test.cpp
   semantic_test.cpp

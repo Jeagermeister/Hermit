@@ -812,9 +812,22 @@ Upstream is ~870k lines of non-test Python. A wholesale port is not the goal and
 
 - **Test oracle.** Upstream ships 2,889 test files. Are any worth adapting as a behavioural
   spec, given this is not a port and the behaviour is only selectively shared?
-- **Context strategy.** Local models have far less context than cloud models. Agentic file work
-  consumes it quickly, so what gets sent, and what gets summarised, is a first-class design
-  problem rather than an optimisation.
+- **~~Context strategy~~ — the supervisor half is settled as D17; the measurement half is open.**
+  Local models have far less context than cloud models, and agentic file work consumes it
+  quickly. What gets sent is now decided: at 80% of the prompt budget the window is rebuilt from
+  the tree — task verbatim, changed paths re-observed, unmet requirements restated, the model's
+  own narration dropped. Nothing is summarised, because summarising puts the model's prose
+  account of events back on the critical path that D13 took it off.
+
+  What is *not* settled is whether that helps. The experiment is a reconstructed context against
+  the trim as the control, on the same tasks, asking whether a model finishes work it was
+  mid-way through; `LoopOptions::compact_at = 0` exists to keep the control arm reachable. It
+  belongs in hermit-bench's docket rather than here.
+
+  One constraint on how to set it up came out of the first live runs and is recorded with D17:
+  a purely read-only task is the case reconstruction is structurally worst at, because what the
+  model loses is knowledge gained by looking and looking leaves nothing on disk to re-observe.
+  Measuring there alone would answer a harder question than the one being asked.
 - **Which models, on which machines.** A full list exists; the tournament harnesses already
   encode part of it. **72 GB changes this question** — the tournaments used 9B–12B because that
   is what fit in 48 GB. A 70B-class model at Q4 becomes viable, including upstream's own

@@ -354,6 +354,51 @@ class Session {
   /// it would leave the caller unable to see what the model was actually answering.
   [[nodiscard]] SessionResult<void> record(const ollama::ChatReply& reply);
 
+  /// Replace the droppable history with `instruction`, keeping only what is pinned.
+  ///
+  /// The reconstruction half of compaction ([compact.h](./compact.h)). Where the trim in
+  /// `prepare()` erases the oldest groups and says nothing, this erases **all** of them
+  /// and rewrites the pinned task turn to carry what the caller has re-observed in their
+  /// place. This class does not compose that text and could not: the world it describes
+  /// is read from the filesystem, and nothing here does I/O.
+  ///
+  /// `instruction` becomes the content of the pinned `user` turn, so it must be the
+  /// original task with the note beneath it rather than the note alone -- dropping the
+  /// task would erase the one thing compaction is supposed to keep verbatim. A session
+  /// with no user turn at all gets one appended, which is the only way this adds a turn.
+  ///
+  /// **The trailing group is kept**, where the trim would have been free to drop it. A
+  /// caller compacts at the top of a turn, so history ends with the results of the calls
+  /// the *previous* turn asked for -- appended after that turn's `prepare()`, and so never
+  /// seen by the model, which is still waiting on them. Erasing them guarantees it
+  /// re-issues the same calls, and re-observation cannot stand in: five of the eight Tier 0
+  /// tools only look, so nothing a `read` returned is recoverable from a snapshot. Dropping
+  /// the model's *account* of an answer is the design; dropping the answer is not.
+  ///
+  /// **Returns false, having changed nothing, in the two cases where rebuilding is not an
+  /// improvement:**
+  ///
+  ///   - nothing outside the pinned turns and that trailing group is droppable, so there
+  ///     is no history to fold and the rewrite would only restate the task, and
+  ///   - the rebuilt prompt would not be *smaller* than the present one. A long note over
+  ///     a short history is a compaction step that makes the prompt bigger, and so is a
+  ///     kept trailing group that is most of the budget on its own; a caller that compacts
+  ///     on a threshold would then do it again every turn without getting under it.
+  ///
+  /// Both are the caller's cue to fall through to the trim, which is why this is a bool
+  /// rather than a refusal: neither is an error, and whether the *result* fits the window
+  /// remains `prepare()`'s question, asked the same way it always was.
+  ///
+  /// Two consequences worth stating rather than discovering. The prompt bytes change
+  /// right after the system message, so the server's prefix cache misses the whole prompt
+  /// on the next turn -- the same cost the trim's hysteresis note describes, paid rarely
+  /// and on purpose. And the surviving turns keep measurements that were apportioned
+  /// across a prompt they are no longer alone in; that is the bounded, self-correcting
+  /// error `Turn::measured_tokens` already documents for the trim, re-anchored by the next
+  /// reply. The rewritten task turn is exempt -- its content changed, so its measurement
+  /// is discarded rather than carried.
+  bool reconstruct(std::string instruction);
+
   [[nodiscard]] const std::vector<Turn>& turns() const noexcept { return turns_; }
 
   /// The window actually being planned against, after D8's clamp.
@@ -366,6 +411,20 @@ class Session {
   /// Non-zero means the model has been answering with holes in its history, which is
   /// a fact about the run and belongs in whatever reports it.
   [[nodiscard]] std::size_t dropped() const noexcept { return dropped_; }
+
+  /// How many times the window has been rebuilt from re-observed state.
+  ///
+  /// Deliberately *not* folded into `dropped()`. That counter means "the model has been
+  /// answering with holes in its history it was never told about", which is the condition
+  /// compaction exists to remove; a reconstructed session has lost the same turns and has
+  /// been told so. Reporting them as one number would erase the distinction that is the
+  /// entire point of the feature. A run carrying `dropped > 0` with `compactions == 0` is
+  /// one where reconstruction never ran -- no verifier, or it would not have helped.
+  [[nodiscard]] std::size_t compactions() const noexcept { return compactions_; }
+
+  /// Turns folded into a reconstruction, over the session's whole life. Counts turns
+  /// rather than rebuilds, so it reads against `dropped()` on the same scale.
+  [[nodiscard]] std::size_t reconstructed() const noexcept { return reconstructed_; }
 
   /// Current characters-per-token assumption. Starts at `kInitialCharsPerToken` and
   /// only ever decreases.
@@ -402,6 +461,8 @@ class Session {
 
   double chars_per_token_ = kInitialCharsPerToken;
   std::size_t dropped_ = 0;
+  std::size_t compactions_ = 0;
+  std::size_t reconstructed_ = 0;
   std::size_t completed_turns_ = 0;
   std::uint64_t generated_tokens_ = 0;
 
