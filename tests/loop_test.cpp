@@ -560,6 +560,41 @@ TEST_F(LoopFixture, AnOversizedResultIsReplacedByARefusalNamingTheSizeBeforeItRe
   }
 }
 
+TEST_F(LoopFixture, TheTraceAndTheFooterAgreeAboutWhichCallsWereRefused) {
+  // `outcome.refusals` and `CallEvent::refused` describe the same population, and an
+  // oversized substitution used to be counted in the first and not the second. On a live
+  // run that printed four `ok` lines under a footer reading `10 calls (4 refused)` -- the
+  // four were exactly those lines, and a trace that disagrees with its own footer teaches
+  // its reader to trust neither.
+  std::ofstream{tmp_ / "root" / "huge.txt"} << std::string(200000, 'z');
+
+  std::vector<TurnEvent> events;
+  LoopOptions options;
+  options.observer = [&events](const TurnEvent& event) { events.push_back(event); };
+
+  Script script{.replies = {call_reply({{"read", json{{"paths", json::array({"huge.txt"})}}}}),
+                            text_reply("done")}};
+  auto session = Session::open(session_options(), dead_client(), "sys");
+  ASSERT_TRUE(session.has_value());
+
+  AgentLoop loop{script.fn(), tools_->registry(), *sandbox_, std::move(options)};
+  const auto outcome = loop.run(*session, "read huge.txt");
+
+  std::size_t flagged = 0;
+  for (const auto& event : events) {
+    for (const auto& call : event.calls) {
+      if (call.refused) ++flagged;
+      // The flag and the payload have to say the same thing too: an `{"error": ...}` body
+      // under a `refused == false` flag is the same disagreement one level down.
+      const auto parsed = json::parse(call.result);
+      const bool is_error = parsed.is_object() && parsed.contains("error");
+      EXPECT_EQ(call.refused, is_error) << call.result.substr(0, 120);
+    }
+  }
+  EXPECT_GE(outcome.refusals, 1u) << "the oversized result was not counted as a refusal";
+  EXPECT_EQ(flagged, outcome.refusals);
+}
+
 TEST_F(LoopFixture, TheObserverSeesOneEventPerTurnWithItsCallsAndTokenCounts) {
   std::vector<TurnEvent> events;
   LoopOptions options;

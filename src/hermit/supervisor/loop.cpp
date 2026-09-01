@@ -351,6 +351,11 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
         dispatched.content =
             render_error(oversized_refusal(call.name, dispatched.content.size(),
                                            session.prompt_budget()));
+        // The flag moves with the content. Counting this in `refusals` while leaving the
+        // event saying otherwise made the summary and the trace disagree about the same
+        // call -- measured on a live run, where four lines printed `ok` above a footer
+        // reading `10 calls (4 refused)`, and the four were these.
+        dispatched.refused = true;
       }
 
       event.calls.push_back(CallEvent{.tool = call.name,

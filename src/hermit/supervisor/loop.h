@@ -168,7 +168,16 @@ std::string_view to_string(StopReason r) noexcept;
 /// to the model, verbatim -- truncated for display by whoever is printing, not here.
 struct CallEvent {
   std::string tool;
+
+  /// The model got an `{"error": ...}` object rather than rows.
+  ///
+  /// True for every refusal on the dispatch path *and* for a result substituted because it
+  /// was too large to plan around -- the two are one thing from here, since what the model
+  /// received is an error either way. This is the same population `LoopOutcome::refusals`
+  /// counts, and the two must not be allowed to drift: a trace that disagrees with its own
+  /// footer teaches its reader to trust neither.
   bool refused = false;
+
   std::string result;
 };
 
