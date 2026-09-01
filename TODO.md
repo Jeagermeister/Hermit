@@ -8,22 +8,14 @@ there, so nothing below duplicates it.
 
 This file should be deletable once the repository is public.
 
-Audited 2026-08-29 on the dev laptop. Two things were checked and came back clean, so they
-are recorded rather than docketed: **no AI attribution anywhere in 127 commits** (no
-`Co-Authored-By`, no generator watermark, in any message or body), and a `LICENSE` at the
-root.
+Audited 2026-08-29, re-checked 2026-09-01 on the dev laptop. Two things were checked and
+came back clean, so they are recorded rather than docketed: **no AI attribution anywhere in
+152 commits** (no `Co-Authored-By`, no generator watermark, in any message or body), and a
+`LICENSE` at the root.
 
 ---
 
 ## Before the first public push
-
-- [ ] **Commit the MCP documentation sync.** Eight files have been modified since
-  `mcp.cpp` shipped 2026-08-28 and never committed: `DECISIONS.md`, `README.md`,
-  `ROADMAP.md`, and `docs/{01-what-hermit-is,13-cli-reference,30-benchmarks,90-glossary,README}.md`
-  — 41 insertions, 24 deletions. The change is coherent and finished: it moves the
-  frontend row from *"CLI today, MCP-over-stdio next"* to present tense, annotates
-  ROUTING.md §12 step 6 done, and unblocks E2 in every place that called it blocked.
-  It needs a read-through and a commit, not more work.
 
 - [ ] **Scrub `~` from four bench result files.** Fourteen occurrences
   across `bench/fsops/results/fsops-20260813T12{2555,2605,3010,3040}Z.{json,jsonl}`.
