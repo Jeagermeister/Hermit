@@ -1169,21 +1169,17 @@ model call, no summary, deterministic, and it cannot hallucinate. It is
 [D13](#d13--per-turn-verification-observes-the-filesystem-never-the-reply)'s argument moved from
 the turn to the window.
 
-**Why not summarize**, restated because it is the load-bearing half: asking the model to
-summarize its own history puts its prose account of events back on the critical path, which is
-exactly what D13 removed. Handed a tool result whose `content` was the four characters `aaaa`,
-`llama3.2-3b` reported *"a.txt is 1 character long."* A summary is that failure with no snapshot
-behind it to catch it, and 3–9B models are both the weakest summarizers available and the entire
-target tier.
+**Why not summarize** is the load-bearing half, and the argument is kept in full in the
+struck-through entry below rather than repeated here. In one line: a summary puts the model's
+prose account of events back on the critical path, which is what D13 removed and for a measured
+reason.
 
 ### The five choices inside the decision
 
-- **The threshold is 0.80, and it is the trim's own figure.** `prepare()` trims down to
-  `budget - budget / 5` — 80% — so compaction now fires exactly where the trim would have
-  *landed*. That makes the ordering between the two explicit rather than incidental: on a
-  verified run reconstruction is what normally happens, and the trim is a genuine backstop.
-  `kDefaultCompactAt` and the trim's divisor are asserted against each other in the suite, so
-  moving one without the other fails a test rather than quietly changing the policy.
+- **The threshold is 0.80, which is the trim's own target.** Compaction fires exactly where the
+  trim would have *landed*, so reconstruction is what normally happens on a verified run and the
+  trim is a real backstop rather than a rival. Both read `Session::trim_target()`, so the two
+  cannot drift apart.
 
 - **It fires before `prepare()`, not inside it.** One turn later the prompt is already over
   budget and the only question left is what to erase; a turn earlier the tree can still be
@@ -1194,11 +1190,10 @@ target tier.
 - **The note folds into the task turn rather than being appended as its own.** The obvious shape
   — a synthetic `user` turn carrying the state — is the one loop.h already forbids, for a reason
   that applies here unchanged: `pin_latest_user` pins the *latest* user message, so the
-  fabrication would become the one message the trim must never drop and the real instruction
+  fabrication would become the one message the trim must never drop, and the real instruction
   would become droppable. Folding keeps exactly one user turn, still pinned, still opening with
-  the caller's own words. It is also the shape R7 already uses and has run against live models,
-  and it inherits R7's other discipline — always composed from the **original** task, so a third
-  compaction does not nest three framings inside each other.
+  the caller's own words — the shape R7 already uses. It inherits R7's other rule too: always
+  composed from the **original** task, so repeated compaction does not nest the framing.
 
 - **The unanswered trailing group is kept, where the trim may drop it.** Found by building
   it the other way first, and it is not an edge case — it is *every* compaction. The trigger
@@ -1342,11 +1337,12 @@ Three things came out of them, and two were not predicted.
   limit of the design, not of the implementation.
 
 - **A rebuilt context did not stop the model repeating itself in run B.** Having read sites A–F,
-  it came back after a rebuild and read A–D again. This is the abandoned-work gap named above,
-  arriving faster and harder than expected, and the reason is worth being exact about: what the
-  model lost was everything it had *learned by looking*, and looking leaves no trace. The note
-  truthfully said nothing had changed on disk, which is accurate and useless — the knowledge was
-  in the discarded results, and no snapshot can put it back.
+  it came back after a rebuild and read A–D again. This is what reconstruction structurally
+  cannot recover, arriving faster and harder than expected: what the model lost was everything
+  it had *learned by looking*, and looking leaves no trace. The note truthfully said nothing had
+  changed on disk — accurate and useless, because the knowledge was in the discarded results and
+  no snapshot puts it back. The same gap covers an approach tried, abandoned mid-turn and never
+  failed against: the verdict records rejected branches, not abandoned ones.
 
   The obvious candidate response is to carry a re-observable record of **which paths have been
   read**, which costs a line per path and no model call. It is deliberately not built here:
@@ -1359,13 +1355,6 @@ after run B, on tasks that are *not* purely observational, since a read-only tas
 reconstruction is structurally worst at and would stack the question. That is hermit-bench's
 half, and `compact_at = 0` exists so the control arm stays reachable through configuration
 alone.
-
-**What reconstruction cannot recover, stated plainly.** Intent *inside* a task. An approach the
-model tried, abandoned mid-turn, and never failed against leaves no trace in the tree and no
-entry in the verdict, so a rebuilt context can send it back down a path it had already reasoned
-its way out of. The verdict covers rejected branches; it does not cover abandoned ones. This is
-the single most likely way the measurement comes back negative, and it is worth naming in
-advance rather than discovering as a surprise.
 
 **The product argument, which is larger than the efficiency one.** A ≥64K context window is
 currently a model-registration gate (R9). Rebuilding the window from the tree relaxes it: a model
