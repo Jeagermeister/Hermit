@@ -1373,6 +1373,17 @@ exactly the assertion this entry declined to make. So it is available, switchabl
 `--read-record` turns it on, and hermit-bench gets a third arm rather than a changed default.
 Flip it when there is a number behind it.
 
+**And be exact about what the list is**, which review caught the first wording getting wrong. It
+is every path named in a call — collected from every `Path` argument on every tool, and gathered
+before the tool runs. So a file the model *wrote* is in it, and so is a call that failed. It is
+also incomplete: `shell` takes a bare string, so nothing a shell command touches ever appears.
+The note therefore says "named in a call", not "opened". An earlier draft invited reading the
+list against the changed paths to mean *files I opened and wrote nothing from* — an inference a
+written file breaks, and precisely the kind of unobserved claim R6 exists to keep out of the
+supervisor's mouth. Filtering to read-shaped tools would need an intent bit on `ArgSpec`, a
+core-layer change this feature has not earned while it is off by default and unsupported by
+measurement.
+
 **A gap this closed on the way past.** The claim above that the control arm is "reachable
 through configuration alone" was only true of the library — neither threshold nor record was a
 CLI flag, and hermit-bench drives the binary. `--compact-at PCT` (0 for trim-only) and

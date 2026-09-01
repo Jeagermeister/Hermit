@@ -56,10 +56,14 @@ disk survives a rebuild intact, which is the same property that makes reconstruc
 all. A task phrased as "read these and tell me the totals" is fragile in a small window; "read
 these and append each total to `totals.md` as you go" is not.
 
-`--read-record` adds the list of already-read paths to the rebuild. It is off by default because
-in the one paired run so far it did not stop the re-reading — knowing *that* you read a file is
-not knowing what was in it — and it makes rebuilds fire less often, since a longer note competes
-with the history it replaces. Try it, but do not expect much from it yet.
+`--read-record` adds the list of paths already named in a call to the rebuild. It is off by
+default because in the one paired run so far it did not stop the re-reading — knowing *that* you
+named a file is not knowing what was in it — and it makes rebuilds fire less often, since a
+longer note competes with the history it replaces. Try it, but do not expect much from it yet.
+
+Note what that list is and is not. It covers every path argument on every tool, so a file the
+model *wrote* is in it too, and it is collected before the tool runs, so a call that failed is
+in it. Nothing a `shell` command touches ever appears, because `shell` takes a bare string.
 
 ## The reply came back empty, no error
 

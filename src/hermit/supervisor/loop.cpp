@@ -245,9 +245,15 @@ LoopOutcome AgentLoop::run(Session& session, std::string instruction) {
   session.add_user(std::move(instruction));
 
   // Every path the run has named in a call, first-touch order, no repeats. A vector with a
-  // linear scan rather than a set: the order is the useful part -- it reads as the trail
-  // the model actually walked -- and the list is bounded by the turn and call caps, so the
-  // scan is over a few dozen entries at worst.
+  // linear scan rather than a set, because the order is the useful part -- it reads as the
+  // trail the model actually walked.
+  //
+  // The scan is not bounded by the turn and call caps, which an earlier version of this
+  // comment claimed: `read`, `grep` and `hash` all take a `PathList` and `parse_args` puts
+  // no cap on its length, so one call can contribute any number of entries. Resolving those
+  // paths costs a component-by-component walk each and dominates this scan by a wide
+  // margin, so the shape is still right -- but the bound is the model's appetite, not a
+  // constant in this file.
   std::vector<std::string> observed;
   const auto observe = [&observed](const std::vector<std::string>& paths) {
     for (const std::string& path : paths) {

@@ -79,10 +79,16 @@ std::string reconstruction_note(const Changeset& changes, const Verdict& verdict
   if (!observed.empty()) {
     // Placed after the changed list on purpose: the two are read against each other, and
     // the useful comparison is "I have opened these and changed none of them".
-    note += "\nAlready opened or named in an earlier call (";
+    // "Named", not "opened", and the distinction is not pedantry. The list is collected
+    // from every Path argument on every tool, so a `write` target, an `edit` target and
+    // both ends of a `move` are all in it -- and it is collected before the tool runs, so
+    // a call that failed is in it too. Saying "you have seen these" would be a supervisor
+    // asserting something it did not observe, in the pinned turn, in a project whose whole
+    // thesis is that the model's account is never on the critical path.
+    note += "\nPaths this session has already named in a call (";
     note += std::to_string(observed.size());
-    note += "), so you have seen these before -- though not what was in them, since the "
-            "results themselves are gone:\n";
+    note += "), whether or not the call succeeded. Not what was in them -- those results "
+            "are gone:\n";
 
     const std::size_t shown = std::min(observed.size(), kMaxListedObserved);
     for (std::size_t i = 0; i < shown; ++i) {

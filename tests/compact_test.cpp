@@ -388,14 +388,14 @@ TEST(CompactNote, ListsTheAlreadyOpenedPathsAndSaysTheContentsAreGone) {
   EXPECT_TRUE(contains(note, "site1.txt"));
   EXPECT_TRUE(contains(note, "notes/plan.md"));
   EXPECT_TRUE(contains(note, "(2)"));
-  EXPECT_TRUE(contains(note, "not what was in them"));
+  EXPECT_TRUE(contains(note, "Not what was in them"));
 }
 
 TEST(CompactNote, SaysNothingAboutOpenedPathsWhenTheRecordIsNotKept) {
   // The default, and the shape of a caller running the reconstruction arm without the
   // memory arm. An empty record must produce no section at all rather than an empty one.
   const std::string note = reconstruction_note(Changeset{}, Verdict{});
-  EXPECT_FALSE(contains(note, "Already opened"));
+  EXPECT_FALSE(contains(note, "already named in a call"));
 }
 
 TEST(CompactNote, CapsTheOpenedPathsListButStillStatesTheTrueTotal) {
@@ -1001,10 +1001,10 @@ TEST_F(CompactLoopFixture, TheRebuiltPromptNamesTheFilesAlreadyRead) {
   for (const auto& message : script.seen.back().messages) {
     if (message.role == "user") user_content = message.content;
   }
-  EXPECT_TRUE(contains(user_content, "Already opened"));
+  EXPECT_TRUE(contains(user_content, "already named in a call"));
   EXPECT_TRUE(contains(user_content, "big.txt"));
   // And it must not promise more than it delivers: the contents are gone.
-  EXPECT_TRUE(contains(user_content, "not what was in them"));
+  EXPECT_TRUE(contains(user_content, "Not what was in them"));
 }
 
 TEST_F(CompactLoopFixture, TheRecordIsDeduplicatedAndInFirstTouchOrder) {
@@ -1025,11 +1025,18 @@ TEST_F(CompactLoopFixture, TheRecordIsDeduplicatedAndInFirstTouchOrder) {
   for (const auto& message : script.seen.back().messages) {
     if (message.role == "user") user_content = message.content;
   }
+  // Both paths asserted present before they are compared. The first version compared
+  // against `find("other.txt")` directly, and `npos` is larger than any real position -- so
+  // a record holding only `big.txt` passed the ordering check and the "was not kept"
+  // message could never fire. Verified: dropping every path after the first left it green.
+  EXPECT_TRUE(contains(user_content, "(2)")) << "the record did not hold both paths";
   const std::size_t first = user_content.find("big.txt");
+  const std::size_t second = user_content.find("other.txt");
   ASSERT_NE(first, std::string::npos);
+  ASSERT_NE(second, std::string::npos) << "the second path never reached the record";
   EXPECT_EQ(user_content.find("big.txt", first + 1), std::string::npos)
       << "a path read twice was recorded twice";
-  EXPECT_LT(first, user_content.find("other.txt")) << "first-touch order was not kept";
+  EXPECT_LT(first, second) << "first-touch order was not kept";
 }
 
 TEST_F(CompactLoopFixture, TheRecordIsOffUnlessAskedFor) {
@@ -1053,7 +1060,7 @@ TEST_F(CompactLoopFixture, TheRecordIsOffUnlessAskedFor) {
     if (message.role == "user") user_content = message.content;
   }
   EXPECT_TRUE(contains(user_content, "not shown")) << "the rebuild note should still be there";
-  EXPECT_FALSE(contains(user_content, "Already opened"));
+  EXPECT_FALSE(contains(user_content, "already named in a call"));
 }
 
 TEST_F(CompactLoopFixture, ZeroCompactAtLeavesTheTrimAsTheWholePolicy) {
