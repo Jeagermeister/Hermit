@@ -63,10 +63,14 @@ about 38k of it is even in scope as a behavioural reference, and the part of Her
 matters most — verification, backup, retry — has no upstream equivalent that the recorded runs
 revealed ([SCOPE.md](../SCOPE.md), [REQUIREMENTS.md](../REQUIREMENTS.md)).
 
-**Not a cloud client.** No cloud inference provider, ever, unless [D7](../DECISIONS.md) is
-explicitly overturned. That keeps credentials, TLS, and egress policy out of the codebase
-entirely, and bounds the blast radius: a confused local model with filesystem access is a
-contained problem.
+**Not a general cloud client.** No cloud inference provider, ever, with one narrow, opt-in
+exception: Ollama Cloud, behind an explicit `--allow-cloud` flag
+([D18](../DECISIONS.md#d18--ollama-cloud-admitted-narrowly-the-local-daemon-is-the-only-new-egress-point)).
+Every other provider — Claude, ChatGPT, anything else — stays exactly as barred as
+[D7](../DECISIONS.md) always had it. The exception costs nothing in the codebase itself:
+credentials, TLS, and egress policy stay out of it either way, handled by the already-signed-in
+local `ollama` daemon, not by Hermit. It bounds the blast radius the same way regardless: a
+confused model, local or Cloud-routed, has exactly the same contained filesystem access.
 
 **Not cross-platform.** Linux is the product ([SCOPE.md](../SCOPE.md) § Platforms). The
 guarantees were designed against POSIX semantics and Landlock — with a decided-but-unbuilt

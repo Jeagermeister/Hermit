@@ -17,7 +17,7 @@ namespace {
 // Every key this understands, in one place. The unknown-key check reads these, so a
 // setting that is added here and nowhere else fails loudly rather than being accepted
 // and ignored -- which is the direction of failure worth having.
-constexpr std::string_view kTopLevelKeys[] = {"sandbox_root", "model",        "ollama",
+constexpr std::string_view kTopLevelKeys[] = {"sandbox_root", "model",   "allow_cloud", "ollama",
                                               "preflight",    "expectations", "unjudged", "shell"};
 constexpr std::string_view kOllamaKeys[] = {"base_url", "connect_timeout_s", "metadata_timeout_s",
                                             "chat_timeout_s", "max_num_ctx"};
@@ -252,6 +252,12 @@ ConfigResult<void> overlay_json(Config& config, const nlohmann::json& doc,
     return std::unexpected(present.error());
   } else if (*present) {
     config.set_origin(Field::Model, ConfigSource::File);
+  }
+
+  if (auto p = read_bool(doc, "allow_cloud", "allow_cloud", config.allow_cloud); !p) {
+    return std::unexpected(p.error());
+  } else if (*p) {
+    config.set_origin(Field::AllowCloud, ConfigSource::File);
   }
 
   if (const auto it = doc.find("ollama"); it != doc.end()) {
@@ -583,6 +589,12 @@ ConfigResult<void> overlay_flags(Config& config, std::span<const std::string_vie
       }
       config.model = std::string{*value};
       config.set_origin(Field::Model, ConfigSource::Flag);
+    } else if (flag == "--allow-cloud") {
+      config.allow_cloud = true;
+      config.set_origin(Field::AllowCloud, ConfigSource::Flag);
+    } else if (flag == "--no-allow-cloud") {
+      config.allow_cloud = false;
+      config.set_origin(Field::AllowCloud, ConfigSource::Flag);
     } else if (flag == "--url") {
       const auto value = take();
       if (!value) return std::unexpected(value.error());
@@ -702,6 +714,19 @@ ConfigResult<void> validate(const Config& config, const Requirements& required) 
     if (const auto ok = ollama::validate_base_url(config.client.base_url); !ok) {
       return std::unexpected(ConfigProblem{ConfigError::BadValue, ok.error().detail});
     }
+
+    // D18: `base_url` stays loopback either way, which is all validate_base_url above can
+    // see -- the model tag is the only place a Cloud request is visible before it leaves
+    // the local daemon, so it gets its own check rather than being folded into the one
+    // above.
+    if (ollama::is_cloud_tag(config.model) && !config.allow_cloud) {
+      return std::unexpected(ConfigProblem{
+          ConfigError::BadValue,
+          "model \"" + config.model +
+              "\" is a Cloud-tagged model, which the local daemon proxies to Ollama Cloud. D18 "
+              "permits this only with allow_cloud set explicitly: pass --allow-cloud, or "
+              "put \"allow_cloud\": true in a config file."});
+    }
   }
 
   if (config.client.max_num_ctx == 0) {
@@ -760,6 +785,7 @@ std::string Config::render() const {
   line("sandbox_root", sandbox_root.empty() ? std::string{"(unset)"} : sandbox_root.string(),
        Field::SandboxRoot);
   line("model", model.empty() ? std::string{"(unset)"} : model, Field::Model);
+  line("allow_cloud", allow_cloud ? "true" : "false", Field::AllowCloud);
   line("ollama.base_url", client.base_url, Field::BaseUrl);
   line("ollama.connect_timeout_s", std::to_string(client.connect_timeout.count()),
        Field::ConnectTimeout);
@@ -816,6 +842,13 @@ std::string Config::render() const {
     out << "\n  note: models are gated at " << preflight.minimum_context
         << " context but requests are clamped to " << client.max_num_ctx
         << ".\n    Legal -- big model, small window, to fit the card -- but rarely intended.\n";
+  }
+  if (allow_cloud) {
+    out << "\n  ⚠ allow_cloud is on: a Cloud-tagged model is permitted, and its sandbox file/\n"
+           "    task content will leave this machine through the local ollama daemon's own\n"
+           "    Cloud proxying, which Hermit neither performs nor can see once the request\n"
+           "    leaves the daemon (DECISIONS.md, D18). D7's general cloud prohibition still\n"
+           "    applies to every other provider.\n";
   }
   if (shell.enabled) {
     out << "\n  ⚠ shell is enabled: the model can run arbitrary commands, confined by the\n"

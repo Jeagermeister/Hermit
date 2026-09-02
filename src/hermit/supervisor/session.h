@@ -472,6 +472,12 @@ class Session {
   /// thinking tokens, which is what makes it the right number to bound.
   [[nodiscard]] std::uint64_t generated_tokens() const noexcept { return generated_tokens_; }
 
+  /// Tokens the daemon reports it actually processed as input across the session, from
+  /// `prompt_eval_count`. D18: the raw wire value, not `estimated_prompt_tokens()`'s
+  /// window-clamped calibration -- usage tracking needs what was billed, not what the
+  /// current window is reckoned to cost.
+  [[nodiscard]] std::uint64_t prompt_tokens_seen() const noexcept { return prompt_tokens_seen_; }
+
   [[nodiscard]] std::size_t completed_turns() const noexcept { return completed_turns_; }
 
  private:
@@ -492,6 +498,7 @@ class Session {
   std::size_t reconstructed_ = 0;
   std::size_t completed_turns_ = 0;
   std::uint64_t generated_tokens_ = 0;
+  std::uint64_t prompt_tokens_seen_ = 0;
 
   /// Set by `prepare()`, cleared by `record()`. Carries what was sent so the reply can
   /// be checked against it.

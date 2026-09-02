@@ -515,6 +515,13 @@ std::expected<void, Failure> validate_base_url(std::string_view url) {
   return {};
 }
 
+bool is_cloud_tag(std::string_view model) noexcept {
+  constexpr std::string_view kColonSuffix = ":cloud";
+  constexpr std::string_view kHyphenSuffix = "-cloud";
+  if (model.size() > kColonSuffix.size() && model.ends_with(kColonSuffix)) return true;
+  return model.size() > kHyphenSuffix.size() && model.ends_with(kHyphenSuffix);
+}
+
 Client::Client(ClientOptions options)
     : impl_(std::make_unique<Impl>(options)), options_(std::move(options)) {}
 

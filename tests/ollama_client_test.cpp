@@ -6,6 +6,7 @@
 #include <string>
 
 using hermit::ollama::ChatReply;
+using hermit::ollama::is_cloud_tag;
 using hermit::ollama::ModelCard;
 using hermit::ollama::parse_chat_reply;
 using hermit::ollama::parse_model_card;
@@ -95,6 +96,53 @@ TEST(StripLatest, ADegenerateNameIsLeftAlone) {
   // ":latest" with nothing before it is a name, not a suffix; stripping it would
   // produce an empty model name that matches nothing.
   EXPECT_EQ(strip_latest(":latest"), ":latest");
+}
+
+// --- is_cloud_tag --------------------------------------------------------------
+
+TEST(IsCloudTag, RecognisesTheColonSuffix) {
+  // A tag with no size component: Ollama's cloud marker is the whole tag, `:cloud`.
+  EXPECT_TRUE(is_cloud_tag("deepseek-v4-flash:cloud"));
+  EXPECT_TRUE(is_cloud_tag("kimi-k3:cloud"));
+}
+
+TEST(IsCloudTag, RecognisesTheHyphenSuffix) {
+  // Observed on a live daemon, 2026-09-02 (`ollama list`): when the colon is already
+  // spoken for by a size component, the cloud marker is `-cloud` appended after it
+  // instead -- a tag has exactly one colon, so a second `:cloud` is not representable.
+  EXPECT_TRUE(is_cloud_tag("qwen3.5:397b-cloud"));
+  EXPECT_TRUE(is_cloud_tag("mistral-large-3:675b-cloud"));
+  EXPECT_TRUE(is_cloud_tag("gemma4:31b-cloud"));
+}
+
+TEST(IsCloudTag, LocalTagsAreNotCloud) {
+  EXPECT_FALSE(is_cloud_tag("qwen3.5:9b"));
+  EXPECT_FALSE(is_cloud_tag("qwen35-agent:latest"));
+  EXPECT_FALSE(is_cloud_tag("qwen35-agent"));
+  EXPECT_FALSE(is_cloud_tag(""));
+}
+
+TEST(IsCloudTag, ADegenerateNameIsNotCloud) {
+  // Same reasoning as StripLatest.ADegenerateNameIsLeftAlone -- the suffix alone, with
+  // nothing in front of it, is a name rather than a tagged model.
+  EXPECT_FALSE(is_cloud_tag(":cloud"));
+  EXPECT_FALSE(is_cloud_tag("-cloud"));
+}
+
+TEST(IsCloudTag, DoesNotMatchAsASubstringElsewhere) {
+  // A name that merely contains "cloud" without the tag boundary is not the proxy.
+  EXPECT_FALSE(is_cloud_tag("cloudy-model:latest"));
+  EXPECT_FALSE(is_cloud_tag("model:cloudier"));
+  EXPECT_FALSE(is_cloud_tag("cloud-model:latest"));
+}
+
+TEST(IsCloudTag, AcceptedFalsePositiveOnAPurelyLocalNameEndingInTheSuffix) {
+  // Documented in client.h: a local model literally named to end in "-cloud" would be
+  // misread as Cloud-tagged. Found by review, not fixed -- this is the safe failure
+  // direction (an unneeded --allow-cloud prompt, not a missed real Cloud tag), and no
+  // installed model triggers it. Recorded as a test so the risk stays visible rather
+  // than silently forgotten if it ever does matter.
+  EXPECT_TRUE(is_cloud_tag("sync-to-cloud"));
 }
 
 // --- validate_base_url -------------------------------------------------------

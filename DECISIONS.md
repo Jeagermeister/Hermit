@@ -223,6 +223,15 @@ decision is explicitly overturned.
 > below still holds verbatim: no credential pool, no egress proxy, no TLS, nothing reachable
 > from off the machine.
 
+<!-- -->
+
+> **Amended 2026-09-02 by [D18](#d18--ollama-cloud-admitted-narrowly-the-local-daemon-is-the-only-new-egress-point):
+> Ollama Cloud admitted, narrowly, behind `--allow-cloud`.** Every other provider stays barred
+> — this names one, Ollama Cloud specifically, and stops. **"Nothing reachable from off the
+> machine" no longer holds without qualification**: content does leave the machine once
+> `--allow-cloud` is set, through the local `ollama` daemon's own proxying, not through
+> anything Hermit links. D18 names that cost rather than silently narrowing this sentence.
+
 **Frontends: both a human CLI and a programmatic caller.** The same core is driven by a person
 at a terminal and by a larger model invoking it as a tool.
 
@@ -1414,6 +1423,170 @@ before the window grows on its own.
 trimmed ones on the same set would say the abandoned-approach gap costs more than the amnesia it
 replaces — in which case the honest fallback is the trim plus a note saying history was dropped,
 which is the cheap half of this entry and does not need the rest of it.
+
+---
+
+## D18 — Ollama Cloud admitted, narrowly; the local daemon is the only new egress point
+
+**Decided 2026-09-02.** Hermit may drive Cloud-tagged Ollama models — traffic Ollama's own
+local daemon transparently proxies to Ollama Cloud — gated behind an explicit `--allow-cloud`
+flag. This amends [D7](#d7--local-inference-only-two-ways-in-human-and-machine)'s backend
+clause a second time, narrower than [D9](#d9--two-local-backends-ollama-and-vllm)'s widening.
+**It does not touch D7's prohibition on any other cloud provider** — Claude, ChatGPT, and every
+provider besides Ollama Cloud stay exactly as barred as before. This is not a general cloud
+carve-out; it names one provider and stops.
+
+**What forced it.** The owner bought Ollama's Max plan (\$100/mo, \$300/mo usage credit) to move
+agentic coding work off Claude API costs onto open-weight models, with Hermit as the intended
+vehicle rather than a second client. Verified directly against a live daemon, 2026-09-02:
+`curl localhost:11434/api/chat -d '{"model":"deepseek-v4-flash:cloud",...}'` returns a real
+completion, and `ollama show deepseek-v4-flash:cloud` reports full capability info — context
+1048576, `tools` present — through the identical `/api/show` shape a local model returns.
+
+**What survives, and is sufficient — this is not a third backend.** Unlike D9, which added a
+genuinely new HTTP target (`hermit_ollama` linked by four CMake targets, per D9's "shape of the
+work"), a Cloud-tagged model reaches Hermit through the *same* backend, the *same* `base_url`
+(`http://localhost:11434`), the *same* `hermit::ollama::Client`, and the *same*
+`ChatReply::prompt_tokens`/`completion_tokens` parsing that already exists
+(`client.cpp:403-407`). `validate_base_url` (`client.cpp:471-516`) passes it unchanged, because
+it checks the transport target and the transport target has not moved — the proxying happens
+inside the already-running, already-authenticated `ollama serve` process, not inside anything
+Hermit links. There is nothing to abstract, nothing to re-plumb, no second client to write.
+That is a materially smaller claim than D9 had to make, and it is why this amendment is a
+policy gate rather than an engineering project.
+
+**Why D7's reasoning survives intact.** Every named fear in D7 is about *Hermit* growing new
+machinery: "Staying local keeps credentials, TLS and egress policy out of the codebase
+entirely," specifically to avoid re-importing `credential_pool.py` (3,178 lines) and
+`iron_proxy.py` (2,494 lines, SCOPE.md:110-112). None of that is reintroduced —
+`hermit::ollama::Client` gains zero new lines for this: no auth header, no TLS, no proxy
+config. The credential lives in the `ollama` daemon's own signed-in session
+(`ollama signin`, a decision the owner makes and manages entirely outside this repo), and the
+egress happens in a process Hermit does not link, does not launch, and does not control. D7's
+blast-radius argument — "a confused local model with filesystem access is a contained
+problem" — also survives unchanged: a Cloud-routed model has exactly the same sandboxed
+filesystem reach as a local one. Nothing about *what the model can do to the tree* changes;
+only *where the model's own reasoning is computed* changes.
+
+**What this costs, accepted rather than elided.** D9 could truthfully say vLLM "reintroduces
+none of" D7's concerns. This decision cannot say that in full: D7's amendment blockquote from
+D9 promised "nothing reachable from off the machine," and once a Cloud-tagged model is used,
+that stops being true — not through Hermit's own transport, but as a fact about where the sandbox's
+file contents and task text end up. Real content leaves the machine, is processed by Ollama's
+cloud infrastructure, and Hermit has no visibility into or control over that once the request
+leaves the local daemon. This is a genuine, different cost from local-only, independent of
+Hermit's own code complexity — which is why the gate defaults off and requires
+`--allow-cloud` be set deliberately, by flag or by a config file's own `allow_cloud` key — the
+same two sources every other setting here already has. What was considered and rejected is
+narrower: an environment variable (below), which is the one source that can sit forgotten in a
+shell profile and silently authorize cloud egress on every future run without appearing in the
+invocation or the file the operator is looking at.
+
+**Relationship to D8.** D8's `max_num_ctx` clamp (`client.h:295-306`) is applied client-side,
+per request, in `build_chat_options` — it does not inspect or care which backend the request
+ultimately reaches. It applies identically to a Cloud-tagged request, for the same reason
+`validate_base_url` does: nothing about the request shape changed, only the daemon's internal
+routing of it. D8 is untouched by this decision.
+
+**The shape of the work.**
+
+> **Correction, made during implementation the same day.** The first pass of
+> `is_cloud_tag` checked only `model.ends_with(":cloud")`, and a manual end-to-end run
+> against `hermit preflight --model qwen3.5:397b-cloud --allow-cloud` printed no cloud
+> notice at all — the gate had silently passed a real Cloud model through as if it were
+> local. `ollama list` on the live daemon showed why: a tag with no size component gets
+> `:cloud` (`kimi-k3:cloud`), but a tag whose colon is already spoken for by a size gets
+> `-cloud` appended instead (`qwen3.5:397b-cloud`, `mistral-large-3:675b-cloud`,
+> `gemma4:31b-cloud`) — a model tag has exactly one colon, so a second `:cloud` is not
+> representable. Missing this was the dangerous direction: not an over-broad gate that
+> occasionally asks for an unneeded flag, but a hole real Cloud traffic passed through
+> with neither the opt-in nor the visibility notice, which is silently the opposite of
+> what this decision is for. `is_cloud_tag` now checks both suffixes; see
+> `IsCloudTag.RecognisesTheHyphenSuffix` in `ollama_client_test.cpp`.
+
+- `ollama::is_cloud_tag(std::string_view model)` (`client.h`/`.cpp`, beside
+  `validate_base_url`) — `model.ends_with(":cloud")` or `model.ends_with("-cloud")`, both
+  confirmed against a live daemon's `ollama list` (correction above).
+- `Config::allow_cloud` (`config.h`, beside `model`), wired via a `--allow-cloud` flag and a
+  config-file `allow_cloud` key, the same two sources `model` itself has —
+  **no `HERMIT_ALLOW_CLOUD` env var**, decided explicitly rather than defaulted into: the
+  closest existing precedent for a boolean safety gate, `shell.enabled`, also has no env var,
+  and a flag has to be typed (or scripted deliberately) every time, where an env var can sit
+  forgotten in a shell profile and silently authorize cloud egress on every future run.
+- Enforced in `hermit::app::validate()` (config.cpp, beside the existing
+  `ollama::validate_base_url` call, gated the same way on `required.ollama`): reject with
+  `is_cloud_tag(config.model) && !config.allow_cloud`, in the same voice as
+  `validate_base_url`'s existing rejection (`client.cpp:510-513`). This runs at
+  config-finalization time, before any `Client` exists.
+- A visible one-line notice in `agent_command`'s and `session_command`'s run banners
+  (`main.cpp`) whenever `is_cloud_tag(config->model)` is true, so a Cloud-routed run is never
+  silently indistinguishable from a local one mid-session — and the same in `preflight`'s
+  `Report::render()` for `hermit preflight` callers.
+- `Session::prompt_tokens_seen_` (`session.h`/`.cpp`, beside the existing `generated_tokens_`,
+  same accumulation pattern in `record()`) — a general per-session counter, not itself the D18
+  billing path: `session_command`'s single-session demo reports it directly, but `agent_command`
+  cannot, since R7 gives each retry attempt a fresh `Session` and no one `Session`'s counters
+  cover a whole job.
+- Usage visibility for `agent_command` specifically: two `std::uint64_t` locals captured by the
+  existing `loop_options.observer` closure (`main.cpp`), summing `TurnEvent::prompt_tokens`/
+  `generated_tokens` across every turn of every attempt — this is the number a whole job is
+  billed against, and it is independent of `Session::prompt_tokens_seen_` above. Written — only
+  for Cloud-tagged jobs — to `.hermit-usage-<root name>/usage.jsonl`, one JSON line per job,
+  outside the sandbox root on the same grounds `.hermit-backups-<root name>` already is
+  (docs/17). No cost is computed at write time; that is a reader's job against the rate table
+  already gathered in `docs/31-ollama-cloud-economics.md`.
+- The reader: `hermit usage --root DIR` (`usage.h`/`.cpp`, `main.cpp`'s `usage_command`).
+  Grouped by model rather than listed per job, priced against a `kRateCard` table that is a
+  second, hand-kept copy of `docs/31-ollama-cloud-economics.md`'s — the two have no shared
+  source and will drift unless both are updated together when Ollama's pricing changes. A
+  model with no rate-card entry is reported as `n/a` and excluded from the total by name,
+  never silently folded in as zero.
+
+> **Correction, found by an adversarial review pass the same day, before this decision had
+> shipped anywhere.** The review's brief was to falsify specific claims about this feature,
+> not merely "look for problems" — and one target was "the `--allow-cloud` gate cannot be
+> bypassed." It found a real bypass, not a hypothetical one: `--judge-model` is parsed by
+> `agent_command`'s own flag loop (`main.cpp`, then ~line 451), entirely outside
+> `hermit::app::load()`/`validate()`, so **`validate()`'s D18 check never sees it at all** —
+> only the working `--model` was ever checked. `judge_one()` (`semantic.cpp:105-171`) reads
+> real sandbox file bytes (`content->bytes`, line 123) into the prompt it sends
+> (`semantic.cpp:156-157`) via `judge.chat(request)` (`semantic.cpp:171`), which is wired at
+> `main.cpp` to the same real `client->chat()` the working model uses. So
+> `hermit agent --model <local> --judge-model kimi-k3:cloud --expect 'satisfies:...' <task>`,
+> **with no `--allow-cloud` at all**, ran clean and sent real file content to Ollama Cloud —
+> exactly the unconsented egress D18 exists to prevent, through the one caller-supplied model
+> name this decision's own gate had never been asked to check. Verified directly: the exact
+> command above was rejected before the fix and, unchanged but for adding `--allow-cloud`, ran
+> to completion after it. Fixed the same day by repeating the `is_cloud_tag`/`allow_cloud`
+> check inline in `agent_command`, at the one place `judge_model` is first used
+> (`main.cpp`, beside the existing "refused up front instead, the same reason R9 exists"
+> typo-check), plus the same run-banner visibility notice the working model already gets.
+> Recorded in full because the shape is the same as the `is_cloud_tag` suffix bug above:
+> tested, confident-reading code with a real, silent hole in exactly the property this
+> decision is supposed to guarantee — found only by testing the actual claim against the
+> actual system, not by re-reading the code that was supposed to enforce it.
+
+**Accepted v1 gap, narrower after the correction above, named rather than silently dropped.**
+The consent gate above is now closed for the judge the same as for the working model. What
+remains open is visibility only: the semantic judge's own `chat()` call (`semantic.cpp:171`,
+reached from `judge_one`, `semantic.cpp:105`) does not go through `agent_command`'s observer
+closure, so judge-model token usage — even now that it is properly gated — will not appear in
+`.hermit-usage-<root name>/usage.jsonl` or `hermit usage`'s report. A Cloud-tagged judge is
+consented-to and visible in the run banner, but not billed-and-logged. Not solved here —
+flagged so it is not mistaken for complete coverage.
+
+**Sequencing.** The opt-in gate and the run-banner notice are cheap and mechanical and can land
+first. Usage-log persistence should follow once a real `--allow-cloud` session exists to
+validate the JSONL format against, rather than shaping a report before there is real data to
+shape it against.
+
+**What would overturn it.** Ollama Cloud's proxying ever requiring Hermit itself to hold an API
+key or open a non-loopback connection — at that point the "the local daemon is the only new
+egress point" claim this decision rests on is false, and the case collapses back into exactly
+what D7 originally forecloses, needing re-litigation from scratch rather than a further
+amendment. Also: any evidence that `--allow-cloud` is being set once and forgotten rather than
+decided per invocation — which would say the no-env-var choice above failed at the one thing
+it was for.
 
 ---
 

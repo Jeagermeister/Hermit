@@ -100,6 +100,7 @@ enum class Field {
   ConfigFile,
   SandboxRoot,
   Model,
+  AllowCloud,
   BaseUrl,
   ConnectTimeout,
   MetadataTimeout,
@@ -166,6 +167,13 @@ struct Config {
   /// The Ollama tag to drive. No default: guessing which of the fourteen installed
   /// models was meant is not a service to anybody.
   std::string model;
+
+  /// D18: whether `model` is permitted to name an Ollama Cloud proxy
+  /// (`ollama::is_cloud_tag`).
+  /// Off by default and deliberately flag-only -- no environment variable -- so the
+  /// local/cloud boundary is a decision made at each invocation rather than a setting
+  /// left on in a shell profile. `validate()` is where this is actually enforced.
+  bool allow_cloud = false;
 
   ollama::ClientOptions client;
   ollama::Policy preflight;

@@ -29,6 +29,7 @@ add_executable(hermit_tests
   reinvoke_test.cpp
   semantic_test.cpp
   undo_test.cpp
+  usage_test.cpp
   verify_test.cpp
   judge_test.cpp
   expect_test.cpp)

@@ -1,6 +1,6 @@
 # 13. CLI reference
 
-One binary, seven subcommands. This chapter matches the binary as built 2026-09-01;
+One binary, eight subcommands. This chapter matches the binary as built 2026-09-02;
 `hermit --help` is always the tie-breaker, and `hermit config` shows every setting actually in
 force and where it came from.
 
@@ -10,6 +10,7 @@ hermit preflight --model NAME
 hermit session   --model NAME
 hermit agent     --root DIR --model NAME <instruction>
 hermit undo      --root DIR
+hermit usage     --root DIR
 hermit mcp       --root DIR
 hermit config
 ```
@@ -27,6 +28,17 @@ per call, a hash-verified changeset after every turn, a verdict for anything sta
 
 Lists the backup store's generations by default; mutates only by explicit flag.
 [Chapter 17](./17-undo-and-backups.md).
+
+### `hermit usage` — estimated Cloud spend, per root
+
+Reads `.hermit-usage-<root name>/usage.jsonl` (D18), groups by model, and prices each group
+against a rate table kept in this binary (a hand-synced copy of
+[docs/31](./31-ollama-cloud-economics.md)'s). Scoped to one root at a time, the same as `undo`
+— a total across every root you've run Hermit against means running this once per root and
+adding the numbers yourself. Estimate only: Ollama Cloud has no usage API
+(`ollama/ollama#15132`, `#15663`), and the estimate assumes no cache discount, since Cloud's is
+not reliably applied (`ollama/ollama#16714`). Cross-check `ollama.com/settings` before trusting
+it for a budget decision. A model with no rate-card entry is reported, not silently dropped.
 
 ### `hermit mcp` — the programmatic front door
 
@@ -78,6 +90,7 @@ Precedence, increasing: **defaults < `--config` file < environment < flags.**
 | `--config PATH` | a JSON config file. Never searched for implicitly |
 | `--root DIR` | sandbox root (R1). No default, ever |
 | `--model NAME` | the Ollama tag to drive |
+| `--allow-cloud` / `--no-allow-cloud` | permit a Cloud-tagged model (D18); off by default, and required before one is accepted |
 | `--url URL` | Ollama base URL; loopback only (D7) |
 | `--max-num-ctx N` | hard ceiling on any `num_ctx` sent (D8 safety clamp; default 65536) |
 | `--min-context N` | R9 architectural context floor |
