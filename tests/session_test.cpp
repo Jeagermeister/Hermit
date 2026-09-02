@@ -300,6 +300,23 @@ TEST(SessionRecord, AppendsTheReplyAndAccumulatesTheGenerationCount) {
   EXPECT_EQ(session.turns().back().message.content, "answer");
   EXPECT_EQ(session.completed_turns(), 1u);
   EXPECT_EQ(session.generated_tokens(), 42u);
+  EXPECT_EQ(session.prompt_tokens_seen(), 30u);
+}
+
+TEST(SessionRecord, PromptTokensSeenAccumulatesAcrossTurns) {
+  // D18: the raw wire value summed across the session, for usage tracking -- distinct
+  // from estimated_prompt_tokens(), which reports only the current window's cost.
+  auto session = small_session();
+
+  session.add_user("first");
+  ASSERT_TRUE(session.prepare().has_value());
+  ASSERT_TRUE(session.record(reply_with("one", 30, 10)).has_value());
+  EXPECT_EQ(session.prompt_tokens_seen(), 30u);
+
+  session.add_user("second");
+  ASSERT_TRUE(session.prepare().has_value());
+  ASSERT_TRUE(session.record(reply_with("two", 45, 12)).has_value());
+  EXPECT_EQ(session.prompt_tokens_seen(), 75u);
 }
 
 TEST(SessionRecord, RefusesAReplyWithNoPreparedRequestBehindIt) {

@@ -23,6 +23,7 @@
 #include <hermit/app/expect.h>
 #include <hermit/app/mcp.h>
 #include <hermit/app/toolset.h>
+#include <hermit/app/usage.h>
 #include <hermit/core/confine.h>
 #include <hermit/core/sandbox.h>
 #include <hermit/ollama/preflight.h>
@@ -40,8 +41,10 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <iomanip>
 #include <optional>
 #include <iostream>
+#include <map>
 #include <ostream>
 #include <span>
 #include <string>
@@ -60,6 +63,7 @@ int usage(std::ostream& to = std::cerr) {
       "       hermit session   --model NAME   (try --max-num-ctx 2048 to force a trim)\n"
       "       hermit agent     --root DIR --model NAME <instruction>\n"
       "       hermit undo      --root DIR    (lists what can be restored; --restore/--last/--prune act)\n"
+      "       hermit usage     --root DIR    (D18: estimated Cloud spend logged for this root)\n"
       "       hermit mcp       --root DIR    (D7: an MCP server over stdio; no positional args)\n"
       "       hermit config\n"
       "\n"
@@ -67,6 +71,8 @@ int usage(std::ostream& to = std::cerr) {
       "  --config PATH          a JSON config file. Never searched for implicitly.\n"
       "  --root DIR             sandbox root (R1). No default, ever.\n"
       "  --model NAME           the Ollama tag to drive\n"
+      "  --allow-cloud / --no-allow-cloud   permit a Cloud-tagged model (D18); off by\n"
+      "                             default, and required before one is accepted\n"
       "  --url URL              Ollama base URL; loopback only (D7)\n"
       "  --max-num-ctx N        hard ceiling on any num_ctx sent (D8 safety clamp)\n"
       "  --min-context N        R9 architectural context floor\n"
@@ -303,8 +309,11 @@ int session_command(std::span<const std::string_view> args) {
       "Here is still more: " + filler + "\nName a fourth.",
   };
 
-  std::cout << "model  : " << config->model << '\n'
-            << "window : " << session->window() << " tokens (least of the request, the D8 clamp"
+  std::cout << "model  : " << config->model << '\n';
+  if (hermit::ollama::is_cloud_tag(config->model)) {
+    std::cout << "cloud  : yes -- routed via the local daemon to Ollama Cloud (D18)\n";
+  }
+  std::cout << "window : " << session->window() << " tokens (least of the request, the D8 clamp"
             << (options.architecture_context ? ", and the model's architecture)" : ")") << '\n'
             << "budget : " << session->prompt_budget() << " tokens for the prompt, "
             << options.reply_reserve << " reserved for the reply\n\n"
@@ -355,7 +364,8 @@ int session_command(std::span<const std::string_view> args) {
     }
   }
 
-  std::cout << "\ngenerated " << session->generated_tokens() << " tokens across "
+  std::cout << "\ngenerated " << session->generated_tokens() << " tokens, "
+            << session->prompt_tokens_seen() << " prompt tokens seen, across "
             << session->completed_turns() << " turns; " << session->dropped()
             << " turns dropped to stay inside the window\n";
   return 0;
@@ -639,10 +649,19 @@ int agent_command(std::span<const std::string_view> args) {
   loop_options.unjudged_requirements = expectations.unjudged;
   loop_options.budget = std::chrono::seconds{static_cast<long>(budget_seconds)};
 
+  // D18: summed here rather than read off the Session afterwards, because R7 gives each
+  // retry attempt a fresh Session (make_session above) -- no single Session's counters
+  // cover a whole job, but every turn from every attempt passes through this observer.
+  std::uint64_t job_prompt_tokens = 0;
+  std::uint64_t job_completion_tokens = 0;
+
   // One line per turn, then one indented line per call. The result is truncated for
   // display only -- a `read` of a real file would otherwise bury the trace, and what is
   // wanted here is the shape of the run, not its payload.
-  loop_options.observer = [](const hermit::supervisor::TurnEvent& event) {
+  loop_options.observer = [&job_prompt_tokens, &job_completion_tokens](
+                              const hermit::supervisor::TurnEvent& event) {
+    job_prompt_tokens += event.prompt_tokens;
+    job_completion_tokens += event.generated_tokens;
     std::cout << "  turn " << event.turn << "  prompt " << event.prompt_tokens
               << "  generated " << event.generated_tokens;
     if (event.reasoning_chars > 0) std::cout << "  thinking " << event.reasoning_chars << "ch";
@@ -692,6 +711,21 @@ int agent_command(std::span<const std::string_view> args) {
   if (!expectations.semantic.empty()) {
     std::uint64_t judge_window = probe->window();
     if (judge_model && *judge_model != config->model) {
+      // D18: --judge-model is parsed by this command's own flag loop, outside
+      // hermit::app::load(), so validate()'s gate never sees it -- confirmed by a real
+      // review pass finding real sandbox file content (semantic.cpp:156-157) reaching
+      // judge.chat() (semantic.cpp:171) with a Cloud-tagged judge and no --allow-cloud
+      // at all. The working model's own cloud status is covered by validate(); a judge
+      // named separately needs the same check repeated here, or it is not covered by
+      // anything.
+      if (hermit::ollama::is_cloud_tag(*judge_model) && !config->allow_cloud) {
+        std::cerr << "error: judge model \"" << *judge_model
+                  << "\" is a Cloud-tagged model, which the local daemon proxies to "
+                     "Ollama Cloud. D18 permits this only with allow_cloud set "
+                     "explicitly: pass --allow-cloud, or put \"allow_cloud\": true in "
+                     "a config file.\n";
+        return 2;
+      }
       // The working model was preflighted through the probe; a judge model named by
       // flag has passed no gate at all, and a typo here would run the whole job and
       // then leave every criterion Undecidable -- reported, but only after the tokens
@@ -730,8 +764,11 @@ int agent_command(std::span<const std::string_view> args) {
   std::cout << "root    : " << box->root() << '\n'
             << "backups : " << *store_dir << "  (outside the root, R4; kept "
             << keep_hours << "h)\n"
-            << "model   : " << config->model << '\n'
-            << "window  : " << probe->window() << " tokens, " << probe->prompt_budget()
+            << "model   : " << config->model << '\n';
+  if (hermit::ollama::is_cloud_tag(config->model)) {
+    std::cout << "cloud   : yes -- routed via the local daemon to Ollama Cloud (D18)\n";
+  }
+  std::cout << "window  : " << probe->window() << " tokens, " << probe->prompt_budget()
             << " for the prompt\n"
             << "tools   : " << tools->registry().tools().size() << " offered\n"
             << "bounds  : " << max_turns << " turns, " << budget_seconds << "s, "
@@ -747,9 +784,14 @@ int agent_command(std::span<const std::string_view> args) {
                           " unjudged, up to " + std::to_string(attempts) + " attempts (R7)")
             << '\n';
   if (!expectations.semantic.empty()) {
-    std::cout << "judge   : " << judge_model.value_or(config->model)
+    const std::string& judge_name = judge_model.value_or(config->model);
+    std::cout << "judge   : " << judge_name
               << "  (a fresh session per attempt; its verdicts are the model's judgment,"
                  " not a measurement)\n";
+    if (hermit::ollama::is_cloud_tag(judge_name)) {
+      std::cout << "cloud   : yes -- the judge routes real file content to Ollama Cloud "
+                   "via the local daemon (D18)\n";
+    }
   }
   std::cout << "\n"
             << "instruction: " << instruction << "\n\n";
@@ -757,6 +799,15 @@ int agent_command(std::span<const std::string_view> args) {
   const auto job = hermit::supervisor::reinvoke(*client, tools->registry(), *box,
                                                 loop_options, reinvoke_options, make_session,
                                                 instruction);
+
+  // D18: recorded regardless of job.error below -- tokens already spent are billed
+  // whether or not the job finished cleanly, and before the early return so an error
+  // path cannot skip it.
+  if (hermit::ollama::is_cloud_tag(config->model)) {
+    hermit::app::record_cloud_usage(*box, config->model, job_prompt_tokens,
+                                    job_completion_tokens);
+  }
+
   if (!job.error.empty()) {
     std::cerr << "error: " << job.error << '\n';
     return 1;
@@ -1106,6 +1157,104 @@ int undo_command(std::span<const std::string_view> args) {
   return 0;
 }
 
+// D18: what Cloud-routed jobs against this root are estimated to have cost. Grouped by
+// model rather than listed per job -- a long-lived root accumulates many jobs against
+// the same handful of models, and the number worth seeing first is "how much did
+// deepseek-v4-flash cost me", not fifty individual lines.
+int usage_command(std::span<const std::string_view> args) {
+  std::vector<std::string_view> extra;
+  // Same shape as undo: pure filesystem/log reading, no model, no network.
+  const auto config =
+      hermit::app::load(args, {.sandbox_root = true, .model = false, .ollama = false}, extra);
+  if (!config) return report(config.error());
+  if (!extra.empty()) {
+    std::cerr << "error: usage takes no positional arguments, got: " << extra.front() << '\n';
+    return 2;
+  }
+
+  auto box = hermit::Sandbox::open(config->sandbox_root);
+  if (!box) {
+    std::cerr << "error: " << hermit::to_string(box.error()) << ": " << config->sandbox_root
+              << '\n';
+    return 1;
+  }
+
+  const auto dir = hermit::app::resolve_usage_dir(*box);
+  std::vector<std::string> warnings;
+  const auto records = hermit::app::read_usage_records(dir, warnings);
+  for (const auto& warning : warnings) {
+    std::cerr << "warning: skipped a damaged usage-log line: " << warning << '\n';
+  }
+
+  if (records.empty()) {
+    std::cout << "no Cloud usage logged for " << box->root().string() << " (checked "
+              << dir.string() << ")\n";
+    return 0;
+  }
+
+  struct Aggregate {
+    std::size_t jobs = 0;
+    std::uint64_t prompt_tokens = 0;
+    std::uint64_t completion_tokens = 0;
+  };
+  std::map<std::string, Aggregate> by_model;
+  for (const auto& record : records) {
+    auto& agg = by_model[record.model];
+    ++agg.jobs;
+    agg.prompt_tokens += record.prompt_tokens;
+    agg.completion_tokens += record.completion_tokens;
+  }
+
+  std::cout << "usage in " << dir.string() << " (" << records.size()
+            << (records.size() == 1 ? " job" : " jobs") << ", " << by_model.size()
+            << (by_model.size() == 1 ? " model" : " models") << "):\n\n"
+            << "  model                       jobs   prompt tok  completion tok    est. $\n";
+
+  double total = 0.0;
+  std::vector<std::string> unpriced;
+  for (const auto& [model, agg] : by_model) {
+    hermit::app::UsageRecord synthetic;
+    synthetic.model = model;
+    synthetic.prompt_tokens = agg.prompt_tokens;
+    synthetic.completion_tokens = agg.completion_tokens;
+    const auto cost = hermit::app::price_usage(synthetic);
+
+    std::string name = model;
+    if (name.size() < 26) name.append(26 - name.size(), ' ');
+    std::string jobs = std::to_string(agg.jobs);
+    if (jobs.size() < 6) jobs.insert(0, 6 - jobs.size(), ' ');
+    std::string prompt = std::to_string(agg.prompt_tokens);
+    if (prompt.size() < 12) prompt.insert(0, 12 - prompt.size(), ' ');
+    std::string completion = std::to_string(agg.completion_tokens);
+    if (completion.size() < 14) completion.insert(0, 14 - completion.size(), ' ');
+
+    std::cout << "  " << name << jobs << "  " << prompt << "  " << completion << "  ";
+    if (cost) {
+      std::cout << "$" << std::fixed << std::setprecision(4) << *cost << '\n';
+      total += *cost;
+    } else {
+      std::cout << "  n/a\n";
+      unpriced.push_back(model);
+    }
+  }
+
+  std::cout << "\ntotal (priced models only): $" << std::fixed << std::setprecision(4) << total
+            << '\n';
+  if (!unpriced.empty()) {
+    std::cout << "\nno rate-card entry, not counted in the total above:\n";
+    for (const auto& model : unpriced) std::cout << "  " << model << '\n';
+    std::cout << "add it to kRateCard in usage.cpp (and docs/31-ollama-cloud-economics.md)\n"
+                 "if it is worth tracking.\n";
+  }
+
+  std::cout << "\nEstimate only, from this root's local log -- not the account balance.\n"
+               "Ollama Cloud has no usage API (ollama/ollama#15132, #15663). Cross-check at\n"
+               "ollama.com/settings, especially before trusting this for a budget decision.\n"
+               "Priced at full input rate: Cloud's cache discount is not reliably applied\n"
+               "(ollama/ollama#16714), so this assumes none is credited.\n";
+  return 0;
+}
+
 // Everything that is in force, and where each value came from.
 int config_command(std::span<const std::string_view> args) {
   std::vector<std::string_view> extra;
@@ -1140,6 +1289,7 @@ int main(int argc, char** argv) {
   if (command == "session") return session_command(args);
   if (command == "agent") return agent_command(args);
   if (command == "undo") return undo_command(args);
+  if (command == "usage") return usage_command(args);
   if (command == "mcp") return hermit::app::mcp_command(args);
   if (command == "config") return config_command(args);
   if (command == "--help" || command == "-h" || command == "help") {

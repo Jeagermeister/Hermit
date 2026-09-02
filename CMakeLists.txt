@@ -259,7 +259,8 @@ add_library(hermit_app
   src/hermit/app/config.cpp
   src/hermit/app/expect.cpp
   src/hermit/app/mcp.cpp
-  src/hermit/app/toolset.cpp)
+  src/hermit/app/toolset.cpp
+  src/hermit/app/usage.cpp)
 
 target_include_directories(hermit_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # mcp.cpp's `initialize` response reports this as the server version -- fed from the

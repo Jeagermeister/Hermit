@@ -418,6 +418,32 @@ class Client {
 /// a URL in the report that is not the URL being talked to.
 [[nodiscard]] std::expected<void, Failure> validate_base_url(std::string_view url);
 
+/// Whether a model tag names Ollama's Cloud proxy rather than a locally-resident model.
+///
+/// The local daemon transparently forwards a Cloud-tagged model to Ollama Cloud through
+/// the same `/api/chat`/`/api/show` shape a local model uses -- `base_url` never changes, so
+/// `validate_base_url` cannot see this on its own. D18 gates it separately, in `validate()`.
+///
+/// Checks two suffix forms, both observed on a live daemon 2026-09-02: `:cloud` on a tag
+/// with no size component (`kimi-k3:cloud`), and `-cloud` appended after one when the colon
+/// is already spoken for (`qwen3.5:397b-cloud`) -- Ollama tags are `name:tag`, one colon, so
+/// a model whose local form already uses it cannot also carry a second `:cloud`. Missing the
+/// second form is the worse failure: it would let real Cloud traffic through with neither
+/// the `--allow-cloud` gate nor the run-time notice, which is silently the opposite of D18's
+/// intent. `/api/show`'s response is a more structurally certain signal -- a Cloud model's
+/// response carries no `modelfile`, `template` or `license` at all -- but that needs a
+/// network round-trip, which `validate()` deliberately runs before any `Client` exists.
+///
+/// Accepted false-positive risk, found by review, not yet triggered by any known model:
+/// a purely local model whose own name happens to end in `-cloud` (no such tag is
+/// installed anywhere as of this writing) would be misread as Cloud-tagged and asked for
+/// `--allow-cloud` it does not need. Deliberately not "fixed" -- the failure direction is
+/// the safe one (an unnecessary prompt, not a missed real Cloud tag), and the only more
+/// certain signal is the network-round-trip check above, which this function exists
+/// specifically to avoid needing. See `IsCloudTag.DoesNotMatchAsASubstringElsewhere` for
+/// what is and is not covered.
+[[nodiscard]] bool is_cloud_tag(std::string_view model) noexcept;
+
 /// Build the `options` object for /api/chat, applying the num_ctx clamp.
 ///
 /// Pure, and exposed for testing on purpose: the clamp is a safety property, and the

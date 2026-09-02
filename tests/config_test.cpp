@@ -132,6 +132,7 @@ TEST(Config, EveryDocumentedKeyIsRead) {
   ASSERT_TRUE(apply_json(config, parse(R"({
     "sandbox_root": "/srv/work",
     "model": "qwen35-agent",
+    "allow_cloud": true,
     "ollama": {
       "base_url": "http://127.0.0.1:11434",
       "connect_timeout_s": 5,
@@ -145,6 +146,7 @@ TEST(Config, EveryDocumentedKeyIsRead) {
 
   EXPECT_EQ(config.sandbox_root, std::filesystem::path{"/srv/work"});
   EXPECT_EQ(config.model, "qwen35-agent");
+  EXPECT_TRUE(config.allow_cloud);
   EXPECT_EQ(config.client.base_url, "http://127.0.0.1:11434");
   EXPECT_EQ(config.client.connect_timeout.count(), 5);
   EXPECT_EQ(config.client.metadata_timeout.count(), 45);
@@ -154,7 +156,7 @@ TEST(Config, EveryDocumentedKeyIsRead) {
   EXPECT_FALSE(config.preflight.require_tools);
   EXPECT_TRUE(config.preflight.warmup);
 
-  for (const Field field : {Field::SandboxRoot, Field::Model, Field::BaseUrl,
+  for (const Field field : {Field::SandboxRoot, Field::Model, Field::AllowCloud, Field::BaseUrl,
                             Field::ConnectTimeout, Field::MetadataTimeout, Field::ChatTimeout,
                             Field::MaxNumCtx, Field::MinimumContext, Field::RequireTools,
                             Field::Warmup}) {
@@ -713,6 +715,41 @@ TEST(Config, ANonLoopbackUrlIsRejectedForACommandThatDialsIt) {
   EXPECT_EQ(result.error().kind, ConfigError::BadValue);
 }
 
+TEST(Config, ACloudTaggedModelIsRejectedWithoutAllowCloud) {
+  // D18: base_url stays loopback for a :cloud tag, so ValidateBaseUrl above cannot
+  // catch this -- the model string needs its own check, and this is here to catch
+  // that wiring being dropped the same way the URL test above does for D7.
+  Config config;
+  config.model = "deepseek-v4-flash:cloud";
+  const auto result = validate(config, {.sandbox_root = false, .model = true, .ollama = true});
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error().kind, ConfigError::BadValue);
+  EXPECT_NE(result.error().detail.find("allow_cloud"), std::string::npos);
+}
+
+TEST(Config, ACloudTaggedModelIsAcceptedWithAllowCloud) {
+  Config config;
+  config.model = "deepseek-v4-flash:cloud";
+  config.allow_cloud = true;
+  EXPECT_TRUE(validate(config, {.sandbox_root = false, .model = true, .ollama = true}));
+}
+
+TEST(Config, ALocalModelNeedsNoAllowCloud) {
+  Config config;
+  config.model = "qwen3.5:9b";
+  EXPECT_TRUE(validate(config, {.sandbox_root = false, .model = true, .ollama = true}));
+}
+
+TEST(Config, ACloudTaggedModelDoesNotBlockACommandThatNeverDialsIt) {
+  // Same reasoning as AUrlNothingOpensDoesNotBlockACommandThatNeverDialsIt below: a
+  // model string nothing sends cannot leak anything, so a command with no network
+  // requirement must not be blocked by allow_cloud being unset.
+  Config config;
+  config.model = "deepseek-v4-flash:cloud";
+  config.sandbox_root = "/srv/work";
+  EXPECT_TRUE(validate(config, {.sandbox_root = true, .model = false, .ollama = false}));
+}
+
 TEST(Config, AUrlNothingOpensDoesNotBlockACommandThatNeverDialsIt) {
   // `resolve` is pure filesystem work. An HERMIT_OLLAMA_URL exported for some other
   // tool used to break it, and used to stop `config` printing the very value that was
@@ -899,6 +936,46 @@ TEST(Config, RenderNamesShellSettingsAndCallsOutWhenEnabled) {
   EXPECT_EQ(disabled_text.find("⚠"), std::string::npos);
 
   ASSERT_TRUE(apply(config, {"--shell"}));
+  EXPECT_NE(config.render().find("⚠"), std::string::npos);
+}
+
+TEST(Config, AllowCloudDefaultsToFalse) {
+  Config config;
+  EXPECT_FALSE(config.allow_cloud);
+}
+
+TEST(Config, AllowCloudJsonRoundTrips) {
+  Config config;
+  ASSERT_TRUE(apply_json(config, parse(R"({"allow_cloud": true})"), kBase));
+  EXPECT_TRUE(config.allow_cloud);
+  EXPECT_EQ(config.origin(Field::AllowCloud), ConfigSource::File);
+}
+
+TEST(Config, AllowCloudFlagsSetAndClear) {
+  Config config;
+  ASSERT_TRUE(apply(config, {"--allow-cloud"}));
+  EXPECT_TRUE(config.allow_cloud);
+  EXPECT_EQ(config.origin(Field::AllowCloud), ConfigSource::Flag);
+
+  ASSERT_TRUE(apply(config, {"--no-allow-cloud"}));
+  EXPECT_FALSE(config.allow_cloud);
+}
+
+TEST(Config, AFlagOverridesAFileEnablingAllowCloud) {
+  Config config;
+  ASSERT_TRUE(apply_json(config, parse(R"({"allow_cloud": true})"), kBase));
+  ASSERT_TRUE(apply(config, {"--no-allow-cloud"}));
+  EXPECT_FALSE(config.allow_cloud);
+  EXPECT_EQ(config.origin(Field::AllowCloud), ConfigSource::Flag);
+}
+
+TEST(Config, RenderNamesAllowCloudAndCallsOutWhenOn) {
+  Config config;
+  const std::string off_text = config.render();
+  EXPECT_NE(off_text.find("allow_cloud"), std::string::npos);
+  EXPECT_EQ(off_text.find("⚠"), std::string::npos);
+
+  ASSERT_TRUE(apply(config, {"--allow-cloud"}));
   EXPECT_NE(config.render().find("⚠"), std::string::npos);
 }
 

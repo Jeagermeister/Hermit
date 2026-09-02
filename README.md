@@ -57,8 +57,8 @@ sessions, verified state between turns, and guardrails on anything destructive.
 Two front doors, and that is a decision ([D7](./DECISIONS.md)): a person drives it directly, or
 a larger model calls it as a tool.
 
-**A person, one machine, no cloud.** John has a folder of meeting notes and wants order out of
-chaos:
+**A person, one machine, local by default.** John has a folder of meeting notes and wants order
+out of chaos:
 
 ```
 hermit session --root ~/notes --prompt "Find every note that mentions

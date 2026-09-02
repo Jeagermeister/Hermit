@@ -37,6 +37,7 @@ while you believed you had changed it.
 ```json
 {
   "model": "qwen3.5:9b",
+  "allow_cloud": false,
   "sandbox_root": "./notes",
   "ollama": {
     "base_url": "http://127.0.0.1:11434",
@@ -68,6 +69,10 @@ Notes on the shape:
   object form is how you name a path containing `=`
   ([chapter 14](./14-expectations.md)).
 - `sandbox_root` here is relative to the file's own directory, per the table above.
+- `allow_cloud` permits a Cloud-tagged `model` to reach Ollama Cloud through the local
+  daemon's own proxying (D18). Off by default here too — setting it in a file is legitimate
+  for a fixed, deliberate setup, but the flag exists for the common case of deciding this
+  per invocation rather than leaving it on.
 - Repeated `--expect` flags land in this same array through one parser — the command line and
   the file cannot disagree about the grammar.
 

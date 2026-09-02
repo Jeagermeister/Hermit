@@ -369,6 +369,10 @@ SessionResult<void> Session::record(const ollama::ChatReply& reply) {
   // and that the next `prepare()` would then admit against the budget.
   ++completed_turns_;
   generated_tokens_ += reply.completion_tokens;
+  // D18: the raw value, before the window clamp below -- usage tracking wants what the
+  // daemon actually reported processing, not what this session's own budget math can
+  // make sense of.
+  prompt_tokens_seen_ += reply.prompt_tokens;
 
   // A prompt cannot evaluate more tokens than the window it was sent in; `num_ctx` is
   // what that number means. Anything above it is a daemon this code cannot reason

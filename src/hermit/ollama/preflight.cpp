@@ -171,6 +171,9 @@ const Check* Report::first_failure() const noexcept {
 
 std::string Report::render() const {
   std::string text = "preflight " + model + ": " + (ok ? "ok" : "FAILED") + "\n";
+  if (is_cloud_tag(model)) {
+    text += "  cloud : yes -- routed via the local daemon to Ollama Cloud (D18)\n";
+  }
   for (const auto& check : checks) {
     text += "  ";
     text += check.ok ? "ok    " : "FAIL  ";
