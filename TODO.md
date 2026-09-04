@@ -26,6 +26,18 @@ message or body), and a `LICENSE` at the root.
   (the same proof the SWEEP4 scrub carried). Zero literal occurrences remain in tracked
   files.
 
+  **Then the premise turned out to be wrong, and the fix went further.** The repository was
+  already public: a Gitea push-mirror to GitHub, synced on every commit, had carried the
+  four files into public history. So on 2026-09-04 the history itself was rewritten on
+  Gitea (`git filter-repo --replace-text`) and force-synced to the mirror: the home path
+  became `~` in every commit, and a second form the docket had never listed — the username
+  as an `ls -l` owner column captured inside a check's `detail`, in two older result files
+  — became `user user`. Verified before the push: 186 commits intact, every branch's file
+  list identical, the scored-field fingerprints of all six files unchanged, commit
+  messages untouched. The mirror was set private for the duration; making it public again
+  is a separate, deliberate step. Every other clone (Kitchen, Framework) diverges the way
+  the August attribution scrub made them diverge, and takes the same tag-then-reset.
+
 - [x] ~~**Fix two Tailscale URLs that would go public.**~~ — **done 2026-09-04.** The README's
   evidence list now points at [hermit-bench](https://github.com/Jeagermeister/hermit-bench)
   and names the private tournament repository without linking it; the logo build script's
