@@ -220,7 +220,8 @@ int mcp_command(std::span<const std::string_view> args) {
         box->root(), std::chrono::duration_cast<std::chrono::milliseconds>(config->shell.timeout)};
   }
 
-  auto tools = ToolSet::tier0(*store_dir, shell_options);
+  auto tools = ToolSet::tier0(*store_dir, shell_options, kDefaultMaxReadBytes,
+                              config->delete_tool.enabled);
   if (!tools) {
     std::cerr << "error: composing the tool set failed: " << to_string(tools.error().kind) << '\n';
     return 1;
@@ -228,7 +229,14 @@ int mcp_command(std::span<const std::string_view> args) {
 
   std::cerr << "hermit mcp: root=" << box->root() << " backups=" << *store_dir
             << " tools=" << tools->registry().tools().size()
+            << (config->delete_tool.enabled ? " (delete enabled)" : "")
             << (shell_options ? " (shell enabled)" : "") << '\n';
+  if (shell_options && !config->delete_tool.enabled) {
+    // D19's named trap, same note agent_command prints.
+    std::cerr << "note: shell is enabled and delete is not; a removal the model decides on "
+                 "can only go through `rm` under shell, which is neither gated nor backed "
+                 "up. --delete adds a path that is both (DECISIONS.md, D19).\n";
+  }
 
   // A generous cap above what a legitimate call needs -- `write`/`edit`'s content
   // argument is bounded by core's own 16 MiB read cap before JSON escaping inflates it,

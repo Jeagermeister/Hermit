@@ -17,8 +17,12 @@
 // ToolSet would relocate the state while the tools inside the registry went on
 // referring to where it used to be.
 //
-// `shell` is conditional, not unconditional like the other eight: pass `shell` to
-// tier0() and it is registered ninth. The gate this was once described as waiting on
+// Two tools are conditional, not unconditional like the other eight, and both are
+// appended after them so the eight's prompt bytes never move: `delete` (D19) when
+// `with_delete` is set, then `shell` when a ShellOptions is supplied -- ninth and tenth
+// when both are on, ninth when only one is. `delete`'s gate is the flag alone; its own
+// guard is the observation table and the backup store, and there is no machine
+// capability to probe for. `shell`'s gate is what the rest of this comment is about. The gate this was once described as waiting on
 // was broader than it turned out to be -- DECISIONS.md's own D7 text says the
 // `openat(O_NOFOLLOW)` component walk (ROUTING.md section 12 step 5's second condition)
 // gates *the programmatic frontend* specifically (`mcp.cpp`, step 6, still unbuilt),
@@ -83,9 +87,10 @@ class ToolSet {
  public:
   /// The eight Tier 0 tools: `read`, `hash`, `list`, `find`, `grep`, `write`, `edit`,
   /// `move`, registered in that order -- observe before mutate, which is also the order
-  /// ROUTING.md section 4's table reads in. `shell`, ninth and last when `shell` is
-  /// supplied, so the first eight's prompt bytes stay exactly what they were before this
-  /// parameter existed.
+  /// ROUTING.md section 4's table reads in. Then, only on request and in this order:
+  /// `delete` when `with_delete` is set (D19), and `shell` when `shell` is supplied --
+  /// appended, so the first eight's prompt bytes stay exactly what they were before either
+  /// parameter existed. The structural remover precedes the opaque one.
   ///
   /// Order is part of the contract, not an accident: it fixes the byte order of the tool
   /// definitions in every prompt, and a moving tool list moves the prompt bytes and with
@@ -100,7 +105,7 @@ class ToolSet {
   /// mid-session.
   [[nodiscard]] static std::expected<ToolSet, RegistryError> tier0(
       std::filesystem::path backup_dir, std::optional<ShellOptions> shell = std::nullopt,
-      std::uint64_t max_read_bytes = kDefaultMaxReadBytes);
+      std::uint64_t max_read_bytes = kDefaultMaxReadBytes, bool with_delete = false);
 
   [[nodiscard]] ToolRegistry& registry() noexcept { return *registry_; }
   [[nodiscard]] const ToolRegistry& registry() const noexcept { return *registry_; }

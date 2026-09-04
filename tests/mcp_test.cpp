@@ -108,6 +108,16 @@ TEST_F(McpFixture, ToolsListHasNoShellByDefault) {
   }
 }
 
+TEST_F(McpFixture, ToolsListHasNoDeleteByDefault) {
+  // D19: delete is granted per job, never inherited -- the MCP surface is the front door
+  // that runs with the least operator attention, so its default matters most.
+  const auto response = handle(json{{"jsonrpc", "2.0"}, {"id", 2}, {"method", "tools/list"}});
+  ASSERT_TRUE(response.has_value());
+  for (const auto& tool : (*response)["result"]["tools"]) {
+    EXPECT_NE(tool["name"], "delete");
+  }
+}
+
 // --- tools/call ------------------------------------------------------------------
 
 TEST_F(McpFixture, ToolsCallDispatchesAndWrapsContentAsText) {

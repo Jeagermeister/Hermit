@@ -1590,6 +1590,89 @@ it was for.
 
 ---
 
+## D19 — `delete` is admitted: opt-in, gated on observation, backed up first; dry-run is decided against
+
+**Decided 2026-09-04.** [ROUTING.md §11](./ROUTING.md) deferred `delete` behind two
+conditions. Both hold, so the tool is built — narrowly, and off by default.
+
+**The two conditions, checked.** *(1) Undo exists and works.* Held since
+[D14](#d14--undo-is-list-first-and-never-destructive-retention-is-short-and-automatic),
+2026-08-18; restoring a generation whose target is missing recreates it
+(`undo.cpp`, pinned by `RestoreOfAMissingFileRecreatesItAndPreservesNothing`), which is
+exactly the shape a deleted file's recovery takes. *(2) A retested `06_selective_delete`
+holds for the model being built against, at more than three repeats with a `--deterministic`
+pass.* [SWEEP3](https://github.com/Jeagermeister/hermit-bench/blob/main/fsops/SWEEP3.md) —
+2026-08-26, this laptop, five repeats, temperature 0, seed 1337, through the fsops harness —
+scores task 06 at **5/5 for `gemma-e4b` and 5/5 for `qwen-9b`**, the two models the laptop
+tier is built against (`llama31-8b` also 5/5; `granite4-7b` 3/5, `llama32-3b` 0/5,
+`hermes3-8b` 0/5, and nothing here is built against those). Stated at its real width: SWEEP3
+§4 records that the repeat index reaches the model through the working-tree path, so those
+five passes are five slightly different prompts rather than five samples of one. For this
+purpose that is the stronger result, not the weaker one, and the condition as written is
+met. Nobody had said so; the docket had been stale about its own gate for nine days.
+
+**What was built.** One regular file per call, `path` its only argument.
+
+- *The gate.* The target must have been observed **Present** this session — a `read`, a
+  `list` that saw it, or a `write`/`move` that landed it — and its identity tuple must
+  still match. That is the read-first rule `write` and `edit` enforce, applied to the one
+  mutation that leaves nothing behind to re-read: a model removes what it has looked at,
+  never what it guessed exists. The gate costs a read only for files the model has not
+  touched; its own creations are already Present. Directories, symlinks and anything not
+  regular are refused by construction, since neither `read` nor `list` records them Present.
+- *R4 before the name goes.* The bytes stream into the store as a generation from the same
+  open descriptor the staleness check used; a failed backup deletes nothing.
+- *The removal.* `unlinkat` by name from a parent handle opened by walking from the root
+  (ROUTING.md §12 step 5), after re-checking that the name still carries the identity the
+  gate accepted — `unlink` acts on a name and the gate checked an object, and a swap between
+  the two is refused rather than deleting whatever now sits under the name. Then the name is
+  confirmed gone. The result row is the path, the hash of what was removed, and its size;
+  the store's path is host layout and is never rendered.
+- *Recovery.* `hermit undo` lists the generation like any other; `--restore N` recreates the
+  file at its recorded path. The erased `tally.py` this project started from would now be
+  one listing and one flag away.
+
+**Opt-in, registered ninth.** `--delete` / `delete.enabled`, off by default, appended after
+the eight structural tools and before `shell`. Three reasons. Every published number was
+collected against the eight-tool menu, and a ninth definition changes every prompt's bytes
+— appending behind a flag keeps the eight's bytes what they were, the same reasoning that
+put `shell` ninth. The tool that removes should be the one the operator turns on per job,
+which is [D18](#d18--ollama-cloud-admitted-narrowly-the-local-daemon-is-the-only-new-egress-point)'s
+"decided per invocation" stance for the same reason. And the origin story: making removal
+something a run was *granted* rather than something it *inherited* is the structural form of
+the lesson `tally.py` taught.
+
+**The trap this creates, named.** With `--shell` on and `--delete` off, a model that decides
+to remove a file has exactly one way to do it — `rm` under the confined shell — and that path
+has no gate and no backup ([docs/17](./docs/17-undo-and-backups.md): "it does not cover what
+`shell` did"). Enabling `delete` beside `shell` gives the model a removal path that is both.
+`agent` and `mcp` print a one-line note at startup when shell is on and delete is off. The
+two are deliberately not coupled: an implied setting would need an origin `hermit config`
+cannot show, and the flag-per-decision rule above cuts both ways.
+
+**Dry-run: decided against, and what would reopen it.** ROADMAP parked dry-run "until a
+destructive tool lands", and one has. It is not built, for a structural reason rather than
+an effort one. A dry-run mutation returns success for a change that did not happen, and the
+model's next call reads a tree that contradicts the result it was just handed — the
+adjacent-success shape ROUTING.md §3 forbids in tool results, imposed by the supervisor on
+itself. And `delete` under this decision is already non-destructive at the byte level in the
+same sense `write` is: every removal is a generation in the store, restorable for the
+retention window. The coherent form of a dry-run for an agentic loop is *run against a copy*
+— snapshot the root, run there, print the changeset, discard — an operator feature with a
+real cost (the copy) and no demand yet. That is the shape it would take, recorded so it is
+not redesigned from scratch; it is decided-not-built, not deferred.
+
+**What would overturn this.** *The gate:* a measured run where the read-first cost turned
+into a wasted turn per removal on files the model had no reason to read — measure before
+widening, since its own creations are already covered. *Opt-in:* evidence that `--delete` is
+being set once in a config file and forgotten, or that models with `shell` on route removals
+through `rm` in numbers — the first says the per-invocation stance failed, the second says
+the safer path needs to be the default. *Dry-run:* a mutation the store cannot preserve —
+recursive removal is the obvious candidate — would be the first destructive operation with
+no byte-level undo, and dry-run pays for itself that day.
+
+---
+
 ## Still open
 
 ### ~~Which chat endpoint~~ — settled as D8

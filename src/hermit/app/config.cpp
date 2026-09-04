@@ -18,11 +18,13 @@ namespace {
 // setting that is added here and nowhere else fails loudly rather than being accepted
 // and ignored -- which is the direction of failure worth having.
 constexpr std::string_view kTopLevelKeys[] = {"sandbox_root", "model",   "allow_cloud", "ollama",
-                                              "preflight",    "expectations", "unjudged", "shell"};
+                                              "preflight",    "expectations", "unjudged", "shell",
+                                              "delete"};
 constexpr std::string_view kOllamaKeys[] = {"base_url", "connect_timeout_s", "metadata_timeout_s",
                                             "chat_timeout_s", "max_num_ctx"};
 constexpr std::string_view kPreflightKeys[] = {"minimum_context", "require_tools", "warmup"};
 constexpr std::string_view kShellKeys[] = {"enabled", "timeout_s"};
+constexpr std::string_view kDeleteKeys[] = {"enabled"};
 
 /// Every flag that consumes the argument after it.
 ///
@@ -336,6 +338,17 @@ ConfigResult<void> overlay_json(Config& config, const nlohmann::json& doc,
       return std::unexpected(p.error());
     } else if (*p) {
       config.set_origin(Field::ShellTimeout, ConfigSource::File);
+    }
+  }
+
+  if (const auto it = doc.find("delete"); it != doc.end()) {
+    if (!it->is_object()) return std::unexpected(wrong_type("delete", "an object"));
+    if (auto ok = reject_unknown(*it, "delete", kDeleteKeys); !ok) return ok;
+
+    if (auto p = read_bool(*it, "enabled", "delete.enabled", config.delete_tool.enabled); !p) {
+      return std::unexpected(p.error());
+    } else if (*p) {
+      config.set_origin(Field::DeleteEnabled, ConfigSource::File);
     }
   }
 
@@ -668,6 +681,12 @@ ConfigResult<void> overlay_flags(Config& config, std::span<const std::string_vie
       if (!value) return std::unexpected(value.error());
       config.shell.timeout = *value;
       config.set_origin(Field::ShellTimeout, ConfigSource::Flag);
+    } else if (flag == "--delete") {
+      config.delete_tool.enabled = true;
+      config.set_origin(Field::DeleteEnabled, ConfigSource::Flag);
+    } else if (flag == "--no-delete") {
+      config.delete_tool.enabled = false;
+      config.set_origin(Field::DeleteEnabled, ConfigSource::Flag);
     } else {
       return std::unexpected(
           ConfigProblem{ConfigError::UnknownFlag, std::string{flag}});
@@ -803,6 +822,7 @@ std::string Config::render() const {
   line("unjudged", std::to_string(unjudged_requirements), Field::Unjudged);
   line("shell.enabled", shell.enabled ? "true" : "false", Field::ShellEnabled);
   line("shell.timeout_s", std::to_string(shell.timeout.count()), Field::ShellTimeout);
+  line("delete.enabled", delete_tool.enabled ? "true" : "false", Field::DeleteEnabled);
 
   // Printed as written rather than as parsed, which is the useful form here: this command
   // exists to show an operator which value is in force, and a spec that will be *rejected*

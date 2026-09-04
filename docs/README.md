@@ -6,7 +6,7 @@ its own words, and links down to the design documents where the binding reasonin
 chapter here and a design document ever disagree, the design document is right and the chapter
 is stale; say so in an issue rather than trusting either silently.
 
-Status statements in these chapters are dated. The book was last brought current **2026-09-01**.
+Status statements in these chapters are dated. The book was last brought current **2026-09-04**.
 
 ## Where to start
 
@@ -26,7 +26,7 @@ Status statements in these chapters are dated. The book was last brought current
 |---|---|
 | [1. What Hermit is](./01-what-hermit-is.md) | A supervisor, not a chatbot — and what that means in practice |
 | [2. The evidence](./02-the-evidence.md) | The recorded failures every guarantee traces to |
-| [3. A tour of the architecture](./03-architecture.md) | Tiers, the nine tools, what "verified" means mechanically |
+| [3. A tour of the architecture](./03-architecture.md) | Tiers, the ten tools, what "verified" means mechanically |
 
 ### Part II — Using Hermit
 
@@ -37,7 +37,7 @@ Status statements in these chapters are dated. The book was last brought current
 | [12. Choosing a model](./12-choosing-a-model.md) | The four gates, the measured field, sizes and speed |
 | [13. CLI reference](./13-cli-reference.md) | Every subcommand, flag, environment variable and exit code |
 | [14. Expectations](./14-expectations.md) | Stating post-conditions, and what the verdict means |
-| [15. Shell and Landlock](./15-shell-and-landlock.md) | The ninth tool: what confinement buys and what it does not |
+| [15. Shell and Landlock](./15-shell-and-landlock.md) | The opaque tool: what confinement buys and what it does not |
 | [16. Configuration](./16-configuration.md) | Four sources, their precedence, and the config file |
 | [17. Undo and backups](./17-undo-and-backups.md) | The store, restore, retention — and what undo cannot do |
 | [18. Troubleshooting](./18-troubleshooting.md) | Symptoms, causes, and fixes |

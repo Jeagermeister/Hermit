@@ -113,6 +113,7 @@ enum class Field {
   Unjudged,
   ShellEnabled,
   ShellTimeout,
+  DeleteEnabled,
   kCount,
 };
 
@@ -149,6 +150,15 @@ struct ShellConfig {
   std::chrono::seconds timeout{60};
 };
 
+/// Whether `delete` is registered (D19). Off by default: the one tool that removes a file
+/// is granted per job rather than inherited, the same per-invocation stance D18 takes for
+/// `--allow-cloud`. Nothing to probe -- the tool's own guard is the observation gate and
+/// the backup store -- so unlike shell the flag alone decides. Named `delete_tool` in code
+/// because `delete` is a keyword; the JSON key and the flag are plain `delete`.
+struct DeleteConfig {
+  bool enabled = false;
+};
+
 struct Config {
   /// R1: never inferred, and absolute by the time `load` returns.
   ///
@@ -178,6 +188,7 @@ struct Config {
   ollama::ClientOptions client;
   ollama::Policy preflight;
   ShellConfig shell;
+  DeleteConfig delete_tool;
 
   /// The file that was read, if one was named. `nullopt` means none was, which is the
   /// normal case rather than a degraded one.

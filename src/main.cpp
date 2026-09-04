@@ -86,6 +86,9 @@ int usage(std::ostream& to = std::cerr) {
       "                             confinement probe reports Enforced\n"
       "  --shell-timeout N          seconds; R8 per-call wall-clock bound for shell\n"
       "                             (default 60)\n"
+      "  --delete / --no-delete     register the delete tool (D19): one file the model has\n"
+      "                             already read or listed, backed up before the name goes;\n"
+      "                             off by default\n"
       "\n"
       "agent only:\n"
       "  --max-turns N          turn bound for one run (default 12)\n"
@@ -601,11 +604,20 @@ int agent_command(std::span<const std::string_view> args) {
         box->root(), std::chrono::duration_cast<std::chrono::milliseconds>(config->shell.timeout)};
   }
 
-  auto tools = hermit::app::ToolSet::tier0(*store_dir, shell_options);
+  auto tools = hermit::app::ToolSet::tier0(*store_dir, shell_options, hermit::kDefaultMaxReadBytes,
+                                           config->delete_tool.enabled);
   if (!tools) {
     std::cerr << "error: composing the tool set failed: "
               << hermit::to_string(tools.error().kind) << '\n';
     return 1;
+  }
+  if (shell_options && !config->delete_tool.enabled) {
+    // D19's named trap: with shell on and delete off, the only removal path the model has
+    // is `rm` under the confined shell -- no gate, no backup. A note, not a refusal: the
+    // two flags are deliberately independent, and this is the operator's call to make.
+    std::cerr << "note: shell is enabled and delete is not; a removal the model decides on "
+                 "can only go through `rm` under shell, which is neither gated nor backed "
+                 "up. --delete adds a path that is both (DECISIONS.md, D19).\n";
   }
 
   hermit::supervisor::SessionOptions options;

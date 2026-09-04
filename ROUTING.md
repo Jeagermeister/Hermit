@@ -73,6 +73,12 @@ makes R5's read-back compare against the wrong intent, and the guarantee is holl
 | `edit` | Exact `old` → `new`, read back, compare | R5; R4 backup; fails closed on a stale identity tuple |
 | `move` | Hash source, move, verify destination | R3 both ends |
 
+**`delete`** is Tier 0 by the same rules but registered only on request (`--delete`), appended
+ninth so the eight's prompt bytes never move: remove one regular file observed this session, its
+bytes to the store before the name goes, the identity tuple re-checked at the name, the name
+confirmed gone. Admitted 2026-09-04 under [D19](./DECISIONS.md); §11 has the two conditions it
+waited on.
+
 `find` and `grep` are a deliberate split of the roadmap's single `search` — name matching and
 content matching have different inputs and different failure modes. `hash` is new to the roadmap
 and earns its place by making R3 and R6 cheap enough to run after every turn.
@@ -263,9 +269,10 @@ question — see §8.
 Short on purpose. Both are latency-tolerant, token-expensive and reliability-forgiving — the
 profile local inference wins on. Neither is on a critical path.
 
-### Deferred — `delete`
+### Opt-in — `delete`
 
-Recorded in §11 with the conditions that would unblock it.
+Admitted 2026-09-04 under [D19](./DECISIONS.md), registered ninth by `--delete`; §11 records
+the two conditions it waited on and how each was met.
 
 ---
 
@@ -510,33 +517,35 @@ Nothing inside Hermit gains a thread. The join is `hash` — deterministic, and 
 
 ## 11. Open, and deliberately deferred
 
-### `delete` — deferred, two conditions
+### `delete` — admitted 2026-09-04, opt-in ([D19](./DECISIONS.md))
 
-Not in the roadmap's tool list, and this project exists partly because a tournament run erased
-`tally.py`. It is added only when **both** hold:
+Not in the roadmap's original tool list, and this project exists partly because a tournament
+run erased `tally.py`. It was deferred behind two conditions, and both now hold:
 
 1. **Undo exists and works.** R4 says "undo is a first-class operation, not a debugging aid."
-   **Where** backups live is settled as of 2026-08-15 and the answer came from an unexpected
-   direction:
+   **Where** backups live was settled 2026-08-15 from an unexpected direction:
    [D10](./DECISIONS.md#d10--kernel-confinement-for-shell-landlock-vendored-one-writable-root)
    permits exactly one writable directory grant, so a backup store outside the sandbox would need
    a second one — and two writable roots let a confined shell rename or hardlink between them.
    The resolution is that **backups are never granted to the child at all**: R4 is a per-turn
    supervisor concern under §6, and the supervisor is the unrestricted parent. Backups may
    therefore live anywhere convenient, including outside the root, because the confined process
-   cannot address them.
-   **Designed and built 2026-08-18** ([D14](./DECISIONS.md)): `hermit undo` lists the store's
-   generations and restores by explicit flag, restore preserves what it overwrites, and
-   retention (72h default, `--keep-hours`) prunes at agent start behind a store-marker check.
-   Every other mutating tool overwrites content a snapshot holds; `delete` is the only one whose
-   failure is irreversible if that story is missing. **This condition now holds** — what a
-   `delete` destroys would be preserved and restorable. Condition 2 below is what still blocks.
+   cannot address them. **Designed and built 2026-08-18** ([D14](./DECISIONS.md)): `hermit undo`
+   lists the store's generations and restores by explicit flag, restore preserves what it
+   overwrites, and a restore whose target is missing recreates it — the exact shape a deleted
+   file's recovery takes. **Held since then.**
 2. **A retested `06_selective_delete` holds for the model being built against** — on the current
-   harness, with more than 3 repeats and a `--deterministic` pass. SWEEP2 §4
-   demonstrates that per-cell numbers at n=3 are not capability: the control moved 3/3 → 0/3 on
-   the simplest task in the suite, same machine, same night.
+   harness, with more than 3 repeats and a `--deterministic` pass. SWEEP2 §4 demonstrated that
+   per-cell numbers at n=3 are not capability: the control moved 3/3 → 0/3 on the simplest task
+   in the suite, same machine, same night. **Held since 2026-08-26**: SWEEP3, five repeats,
+   sampling pinned — `gemma-e4b` 5/5, `qwen-9b` 5/5. D19 states the width of that claim.
 
-Until then, `write` covers truncation and shell covers the rest for the local model.
+What was built, in one paragraph: one regular file per call, gated on an observation this
+session whose identity tuple still matches; the bytes go to the store before the name goes, and
+a failed backup deletes nothing; the name is re-checked against the observed identity before
+`unlink` and confirmed gone after. `--delete` registers it, ninth, ahead of `shell`, off by
+default. Dry-run was decided against in the same decision — D19 says why, and what would
+reopen it.
 
 ### Fuzzy `edit` — not inside `edit`, if ever
 

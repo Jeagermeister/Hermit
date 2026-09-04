@@ -44,8 +44,9 @@ it for a budget decision. A model with no rate-card entry is reported, not silen
 
 An MCP server over stdio: reads one JSON-RPC message per line on stdin, writes one back on
 stdout, until the client closes its side. No listener, no port, no auth, no TLS ([D7](../DECISIONS.md)).
-Offers the same eight structural tools `agent` does (nine with `--shell`, gated identically —
-refused at startup unless this machine's confinement probe reports Enforced), published from the
+Offers the same eight structural tools `agent` does (plus `delete` with `--delete`, and `shell`
+with `--shell`, gated identically — refused at startup unless this machine's confinement probe
+reports Enforced), published from the
 same descriptor list that renders `agent`'s Ollama tool definitions, so there is no second schema
 to drift. Takes no positional arguments and no `--model`/`--url` (tool-serving needs no model or
 Ollama client). `--backups DIR` works the same as below; retention is fixed at the CLI's own
@@ -97,8 +98,9 @@ Precedence, increasing: **defaults < `--config` file < environment < flags.**
 | `--connect-timeout N` / `--metadata-timeout N` / `--chat-timeout N` | seconds |
 | `--warmup` / `--no-warmup` | R9 inference check; off by default |
 | `--tools` / `--no-tools` | R9 tools-capability gate; on by default |
-| `--shell` / `--no-shell` | register the ninth tool, kernel-confined (D10); off by default, and refused at startup unless this machine's confinement probe reports Enforced |
+| `--shell` / `--no-shell` | register the shell tool, kernel-confined (D10); off by default, and refused at startup unless this machine's confinement probe reports Enforced |
 | `--shell-timeout N` | seconds; per-call wall-clock bound for shell (default 60) |
+| `--delete` / `--no-delete` | register the delete tool ([D19](../DECISIONS.md)): one file the model has already read or listed, its bytes preserved before the name goes; off by default, and independent of `--shell` — with shell on and delete off, `agent` and `mcp` print a note that `rm` under shell is neither gated nor backed up |
 | `--` | end of flags; lets a path or instruction begin with a dash |
 
 ## `agent` only

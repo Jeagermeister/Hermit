@@ -40,7 +40,7 @@ them is decided ([D11](../DECISIONS.md)) but **not yet built** as of 2026-08-27:
 nothing validates the root's filesystem, and rooting on an exotic substrate (a network
 mount, `/mnt/c` under WSL) means trusting semantics nobody has checked there.
 
-## The nine tools
+## The ten tools
 
 Eight structural tools, each one complete job, verified per call wherever a call has
 something to verify ([ROUTING.md](../ROUTING.md) §4):
@@ -56,8 +56,11 @@ something to verify ([ROUTING.md](../ROUTING.md) §4):
 | `edit` | Exact `old` → `new`, exactly once | read-back; backup; fails closed on a stale target |
 | `move` | Hash source, rename, hash destination | hash at both ends; can never replace an existing file |
 
-Plus `shell`, the ninth — kernel-confined, off by default, and different enough to get
-[its own chapter](./15-shell-and-landlock.md).
+Plus two registered only on request, appended after the eight in this order: `delete` — one
+regular file the model has already read or listed, its bytes preserved in the backup store
+before the name goes, so [undo](./17-undo-and-backups.md) can put it back
+([D19](../DECISIONS.md)) — and `shell`, kernel-confined and different enough to get
+[its own chapter](./15-shell-and-landlock.md). Both are off by default.
 
 Three semantics worth knowing before you watch a run:
 

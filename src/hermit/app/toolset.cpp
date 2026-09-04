@@ -2,6 +2,7 @@
 
 #include <utility>
 
+#include <hermit/core/tools/delete.h>
 #include <hermit/core/tools/edit.h>
 #include <hermit/core/tools/find.h>
 #include <hermit/core/tools/grep.h>
@@ -70,7 +71,8 @@ ToolSet::ToolSet(std::unique_ptr<ObservedState> observed,
 
 std::expected<ToolSet, RegistryError> ToolSet::tier0(std::filesystem::path backup_dir,
                                                      std::optional<ShellOptions> shell,
-                                                     std::uint64_t max_read_bytes) {
+                                                     std::uint64_t max_read_bytes,
+                                                     bool with_delete) {
   auto observed = std::make_unique<ObservedState>();
   auto backups = std::make_unique<BackupStore>(std::move(backup_dir));
   auto registry = std::make_unique<ToolRegistry>();
@@ -101,11 +103,18 @@ std::expected<ToolSet, RegistryError> ToolSet::tier0(std::filesystem::path backu
     return std::unexpected(ok.error());
   }
 
-  // Ninth and last, and only when the caller supplies it: appending rather than
-  // interleaving keeps the first eight's prompt bytes -- and with them the server's
-  // prompt-cache hit -- exactly what they were before this parameter existed. The
-  // caller (main.cpp) is where the actual gate lives: an explicit config flag plus a
-  // live probe_confinement() reporting Enforced, checked once at startup.
+  // Only when the caller asks, and appended rather than interleaved, so the first
+  // eight's prompt bytes -- and with them the server's prompt-cache hit -- stay exactly
+  // what they were before either parameter existed. `delete` first (D19): its gate is the
+  // flag alone, its guard is the observation table and the store it shares with write and
+  // edit. Then `shell`, last: the caller (main.cpp, mcp.cpp) is where its actual gate
+  // lives -- an explicit config flag plus a live probe_confinement() reporting Enforced,
+  // checked once at startup.
+  if (with_delete) {
+    if (auto ok = add(std::make_unique<DeleteTool>(*observed, *backups)); !ok) {
+      return std::unexpected(ok.error());
+    }
+  }
   if (shell) {
     if (auto ok = add(std::make_unique<ShellTool>(shell->root, shell->timeout, max_read_bytes));
         !ok) {

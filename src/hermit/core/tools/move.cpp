@@ -11,7 +11,6 @@
 #include <unistd.h>
 
 #include <hermit/core/fsio.h>
-#include <hermit/core/sha256.h>
 
 namespace hermit {
 namespace {
@@ -34,23 +33,6 @@ const ToolSpec kSpec{
 
 std::unexpected<ToolError> refuse(std::string why) {
   return std::unexpected{ToolError{"move: " + std::move(why)}};
-}
-
-std::expected<std::string, IoError> hash_fd(int fd) {
-  Sha256 digest;
-  char buf[65536];
-  off_t offset = 0;
-  for (;;) {
-    const ssize_t n = ::pread(fd, buf, sizeof buf, offset);
-    if (n < 0) {
-      if (errno == EINTR) continue;
-      return std::unexpected{IoError{.code = errno}};
-    }
-    if (n == 0) break;
-    digest.update({buf, static_cast<std::size_t>(n)});
-    offset += n;
-  }
-  return to_hex(digest.finish());
 }
 
 /// The suggestion half of the no-replace refusal: the first free
@@ -92,7 +74,7 @@ std::expected<ToolOutput, ToolError> MoveTool::run(const ToolArgs& args) {
   if (!source) {
     return refuse(from.relative().string() + ": " + to_string(source.error()));
   }
-  auto source_hash = hash_fd(source->fd.get());
+  auto source_hash = sha256_of_fd(source->fd.get());
   if (!source_hash) {
     return refuse(from.relative().string() + ": " + to_string(source_hash.error()));
   }
@@ -163,7 +145,7 @@ std::expected<ToolOutput, ToolError> MoveTool::run(const ToolArgs& args) {
     return refuse(to.relative().string() + ": moved, but verification failed: " +
                   to_string(dest.error()));
   }
-  auto dest_hash = hash_fd(dest->fd.get());
+  auto dest_hash = sha256_of_fd(dest->fd.get());
   if (!dest_hash) {
     observed_.record_present(to.relative(), tuple_from(dest->meta));
     return refuse(to.relative().string() + ": moved, but verification failed: " +

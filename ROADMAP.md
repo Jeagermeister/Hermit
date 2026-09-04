@@ -713,10 +713,18 @@ model calling this as a tool.
       agent start, refusing any directory without the `.hermit-store` marker. The erased
       `tally.py` was the argument, and its recovery is now the smoke test. *Where* backups
       live was settled 2026-08-15 — never granted to the confined child, per
-      [D10](./DECISIONS.md) and [ROUTING.md](./ROUTING.md) §11. **Dry-run remains unbuilt**
-      and moves to the `delete` discussion where it belongs: every current mutation is
-      backed up or non-destructive, so dry-run pays for itself the day a destructive tool
-      lands.
+      [D10](./DECISIONS.md) and [ROUTING.md](./ROUTING.md) §11. **Dry-run was decided
+      against 2026-09-04**, the day `delete` landed ([D19](./DECISIONS.md)): a dry-run
+      result is a success for a change that did not happen, and `delete` is backed up the
+      way `write` is, so the destructive tool it was waiting on arrived non-destructive at
+      the byte level. D19 records the shape (run against a copy) that would reopen it.
+- [x] ~~**`delete`**~~ — **done 2026-09-04**, [D19](./DECISIONS.md): opt-in (`--delete`),
+      registered ninth ahead of `shell`; one regular file per call, gated on an
+      observation this session whose identity tuple still matches; the bytes go to the
+      store before the name goes and a failed backup deletes nothing; `hermit undo` puts
+      it back. [ROUTING.md](./ROUTING.md) §11's two conditions were met by D14 and by
+      SWEEP3 (`gemma-e4b` 5/5, `qwen-9b` 5/5 on `06_selective_delete`, five pinned
+      repeats) — the second had held since 2026-08-26 without anyone saying so.
 - [ ] **Bounded sessions** — fresh session per unit of work rather than one long autonomous run.
 
 ---

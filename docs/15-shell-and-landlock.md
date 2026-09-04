@@ -1,6 +1,6 @@
 # 15. Shell and Landlock
 
-`--shell` adds a ninth tool to the menu: the model may run an opaque shell command. It is off
+`--shell` adds a tool to the menu: the model may run an opaque shell command. It is off
 by default, kernel-confined when on, and the only tool that gets a whole chapter of caveats —
 deliberately, because it is the one tool that cannot be made safe by construction, only
 contained by the kernel.

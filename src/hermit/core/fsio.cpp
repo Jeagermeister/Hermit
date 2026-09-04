@@ -1,5 +1,7 @@
 #include <hermit/core/fsio.h>
 
+#include <hermit/core/sha256.h>
+
 #include <array>
 #include <cerrno>
 #include <cstdio>
@@ -242,6 +244,23 @@ std::expected<std::string, IoError> write_temp_in_dir(int parent_fd,
     return std::unexpected{IoError{.code = e}};
   }
   return name;
+}
+
+std::expected<std::string, IoError> sha256_of_fd(int fd) {
+  Sha256 digest;
+  char buf[65536];
+  off_t offset = 0;
+  for (;;) {
+    const ssize_t n = ::pread(fd, buf, sizeof buf, offset);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      return std::unexpected{IoError{.code = errno}};
+    }
+    if (n == 0) break;
+    digest.update({buf, static_cast<std::size_t>(n)});
+    offset += n;
+  }
+  return to_hex(digest.finish());
 }
 
 }  // namespace hermit
