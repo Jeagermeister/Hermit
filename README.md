@@ -6,7 +6,7 @@
 
 **Never trust a completion claim; check the tree.**
 
-Hermit is a supervisor for small local models doing filesystem work. It hands a 3–9B model,
+Hermit is a supervisor for small local models doing filesystem work. It hands a 3–12B model,
 running through Ollama on your own GPU, a menu of eight structural tools; runs every call inside
 one sandbox root; verifies each mutating call by hash and re-hashes the whole tree after every
 turn; and when the model says "done", inspects the tree instead of believing it. A stated
@@ -82,7 +82,7 @@ The design follows an empirical finding rather than a preference. Local-model to
 > Break larger work into fresh sessions. The isolated-session results strongly support this
 > architecture.
 
-So this is **a supervisor, not a chatbot**. Its job is keeping a 3–9B model on rails: bounded
+So this is **a supervisor, not a chatbot**. Its job is keeping a 3–12B model on rails: bounded
 sessions, verified state between turns, and guardrails on anything destructive.
 
 ## What this looks like in use
