@@ -1,6 +1,6 @@
 # 13. CLI reference
 
-One binary, eight subcommands. This chapter matches the binary as built 2026-09-02;
+One binary, eight subcommands. This chapter matches the binary as built 2026-09-04;
 `hermit --help` is always the tie-breaker, and `hermit config` shows every setting actually in
 force and where it came from.
 
@@ -19,8 +19,8 @@ hermit config
 
 ### `hermit agent` — the product
 
-One instruction, one root, one model. Offers the eight structural tools (nine with
-`--shell`), drives the model through a bounded session, prints one trace line per turn and
+One instruction, one root, one model. Offers the eight structural tools (plus `delete` with
+`--delete`, `shell` with `--shell`), drives the model through a bounded session, prints one trace line per turn and
 per call, a hash-verified changeset after every turn, a verdict for anything stated with
 `--expect`, and a summary naming which bound stopped the run.
 

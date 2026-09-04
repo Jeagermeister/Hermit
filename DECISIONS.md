@@ -1602,8 +1602,9 @@ conditions. Both hold, so the tool is built — narrowly, and off by default.
 exactly the shape a deleted file's recovery takes. *(2) A retested `06_selective_delete`
 holds for the model being built against, at more than three repeats with a `--deterministic`
 pass.* [SWEEP3](https://github.com/Jeagermeister/hermit-bench/blob/main/fsops/SWEEP3.md) —
-2026-08-26, this laptop, five repeats, temperature 0, seed 1337, through the fsops harness —
-scores task 06 at **5/5 for `gemma-e4b` and 5/5 for `qwen-9b`**, the two models the laptop
+2026-08-26, this laptop, five repeats, temperature 0, seed 1337, through the fsops harness
+under Hermes Agent v0.20.0, so it measures the *model's* selective-delete behaviour and not
+this tool, which did not exist — scores task 06 at **5/5 for `gemma-e4b` and 5/5 for `qwen-9b`**, the two models the laptop
 tier is built against (`llama31-8b` also 5/5; `granite4-7b` 3/5, `llama32-3b` 0/5,
 `hermes3-8b` 0/5, and nothing here is built against those). Stated at its real width: SWEEP3
 §4 records that the repeat index reaches the model through the working-tree path, so those
@@ -1618,8 +1619,14 @@ met. Nobody had said so; the docket had been stale about its own gate for nine d
   still match. That is the read-first rule `write` and `edit` enforce, applied to the one
   mutation that leaves nothing behind to re-read: a model removes what it has looked at,
   never what it guessed exists. The gate costs a read only for files the model has not
-  touched; its own creations are already Present. Directories, symlinks and anything not
-  regular are refused by construction, since neither `read` nor `list` records them Present.
+  touched; its own creations are already Present. A directory is refused by construction,
+  since neither `read` nor `list` records one Present. A symlink the model names is expanded
+  by resolution before the tool sees it ([D6](#d6--the-sandbox-is-a-capability-type-and-resolution-is-posix-order),
+  POSIX order, final component included): the gate is asked about the *target*, the target
+  is what is removed, the link is left dangling, and the result row names the target — the
+  through-the-link semantics `write` and `move` already have, and unlike `rm`, which removes
+  the link itself. Stated here because the first draft of this decision claimed the opposite
+  and a test passed for the wrong reason; the test now pins the real behaviour.
 - *R4 before the name goes.* The bytes stream into the store as a generation from the same
   open descriptor the staleness check used; a failed backup deletes nothing.
 - *The removal.* `unlinkat` by name from a parent handle opened by walking from the root
@@ -1640,7 +1647,10 @@ put `shell` ninth. The tool that removes should be the one the operator turns on
 which is [D18](#d18--ollama-cloud-admitted-narrowly-the-local-daemon-is-the-only-new-egress-point)'s
 "decided per invocation" stance for the same reason. And the origin story: making removal
 something a run was *granted* rather than something it *inherited* is the structural form of
-the lesson `tally.py` taught.
+the lesson `tally.py` taught. A config file can carry `delete.enabled`, as it can
+`allow_cloud`; `hermit config` marks it with the same ⚠ line either way, and says so when it
+came from the file rather than the invocation — which is how the overturn condition below
+would be noticed.
 
 **The trap this creates, named.** With `--shell` on and `--delete` off, a model that decides
 to remove a file has exactly one way to do it — `rm` under the confined shell — and that path
@@ -1667,7 +1677,9 @@ into a wasted turn per removal on files the model had no reason to read — meas
 widening, since its own creations are already covered. *Opt-in:* evidence that `--delete` is
 being set once in a config file and forgotten, or that models with `shell` on route removals
 through `rm` in numbers — the first says the per-invocation stance failed, the second says
-the safer path needs to be the default. *Dry-run:* a mutation the store cannot preserve —
+the safer path needs to be the default. *Through-the-link removal:* a recorded run where a model named a link meaning the link and
+lost the target would argue for a `SandboxPath` that remembers its final component was a
+link, so `delete` can refuse rather than resolve. *Dry-run:* a mutation the store cannot preserve —
 recursive removal is the obvious candidate — would be the first destructive operation with
 no byte-level undo, and dry-run pays for itself that day.
 

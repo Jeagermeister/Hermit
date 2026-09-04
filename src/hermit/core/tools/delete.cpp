@@ -24,8 +24,7 @@ constexpr std::array<ArgSpec, 1> kArgs{{
 
 const ToolSpec kSpec{
     "delete",
-    "Delete one file you have already read or listed this session. Its bytes are backed up "
-    "first, so the operator can restore it.",
+    "Delete one regular file you have already read or listed this session.",
     kArgs};
 
 std::unexpected<ToolError> refuse(const SandboxPath& p, std::string_view why) {
@@ -53,8 +52,10 @@ std::expected<ToolOutput, ToolError> DeleteTool::run(const ToolArgs& args) {
   }
 
   // One open carries the staleness check, the hash for the result row, and the R4 backup
-  // -- all statements about the same object. A symlink or directory planted at the path
-  // since the observation fails here as not-regular, and is refused, not followed.
+  // -- all statements about the same object. A directory, or a link swapped in between
+  // resolve() and this open, fails here as not-regular and is refused, not followed. A
+  // link that was already there when the model named the path never reaches this open:
+  // resolve() expanded it, and `target` is its target (delete.h).
   auto current = open_regular(target);
   if (!current) {
     if (current.error().kind == IoError::Kind::Kernel && current.error().code == ENOENT) {
@@ -91,18 +92,28 @@ std::expected<ToolOutput, ToolError> DeleteTool::run(const ToolArgs& args) {
   // still carries the identity the gate accepted before removing it, so a swap between
   // the two is refused rather than deleting whatever now sits under the name. The window
   // between this check and the unlink is the same one write's rename has.
+  // Every refusal from here on happens AFTER the backup was taken: the store holds a spare
+  // generation for a file that is still on disk (or already gone). Harmless -- retention is
+  // age-based and restore preserves current bytes first -- and the message says so, because
+  // "permission denied" alone reads as "nothing happened" and something did.
   struct ::stat by_name {};
   if (::fstatat(parent->dir.get(), parent->name.c_str(), &by_name, AT_SYMLINK_NOFOLLOW) != 0) {
     const int e = errno;
-    if (e == ENOENT) observed_.record_absent(target.relative());
-    return refuse(target, to_string(IoError{.code = e}));
+    if (e == ENOENT) {
+      observed_.record_absent(target.relative());
+      return refuse(target, "was present when last observed, now missing; absence is now "
+                            "recorded, and the backup taken a moment ago was kept");
+    }
+    return refuse(target, to_string(IoError{.code = e}) + "; the backup was kept and nothing "
+                                                          "was deleted");
   }
   if (!S_ISREG(by_name.st_mode) || tuple_from(by_name) != tuple_from(current->meta)) {
     return refuse(target, "the name no longer refers to the file that was observed; read it "
-                          "again first");
+                          "again first (the backup was kept and nothing was deleted)");
   }
   if (::unlinkat(parent->dir.get(), parent->name.c_str(), 0) != 0) {
-    return refuse(target, to_string(IoError{.code = errno}));
+    return refuse(target, to_string(IoError{.code = errno}) + "; the backup was kept and "
+                                                              "nothing was deleted");
   }
 
   // The name is gone whatever the check below concludes, so that observation records
@@ -111,10 +122,13 @@ std::expected<ToolOutput, ToolError> DeleteTool::run(const ToolArgs& args) {
 
   // R6 in miniature: the tool's one job was making the name not exist. Confirm it.
   struct ::stat after {};
-  if (::fstatat(parent->dir.get(), parent->name.c_str(), &after, AT_SYMLINK_NOFOLLOW) == 0 ||
-      errno != ENOENT) {
+  if (::fstatat(parent->dir.get(), parent->name.c_str(), &after, AT_SYMLINK_NOFOLLOW) == 0) {
     return refuse(target, "unlinked, but the name is still present; the directory is in an "
                           "unexpected state");
+  }
+  if (const int e = errno; e != ENOENT) {
+    return refuse(target, "unlinked, but confirming the name is gone failed: " +
+                              to_string(IoError{.code = e}));
   }
 
   // What was removed, in the terms the model can use: the hash and size of the bytes now

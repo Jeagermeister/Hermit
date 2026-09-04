@@ -109,8 +109,9 @@ TEST_F(McpFixture, ToolsListHasNoShellByDefault) {
 }
 
 TEST_F(McpFixture, ToolsListHasNoDeleteByDefault) {
-  // D19: delete is granted per job, never inherited -- the MCP surface is the front door
-  // that runs with the least operator attention, so its default matters most.
+  // D19: delete is turned on deliberately, never inherited. This pins tier0's default as
+  // seen through tools/list; mcp_command's own wiring of delete.enabled into tier0 is
+  // exercised by hand, the same way shell's is.
   const auto response = handle(json{{"jsonrpc", "2.0"}, {"id", 2}, {"method", "tools/list"}});
   ASSERT_TRUE(response.has_value());
   for (const auto& tool : (*response)["result"]["tools"]) {

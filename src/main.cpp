@@ -782,7 +782,9 @@ int agent_command(std::span<const std::string_view> args) {
   }
   std::cout << "window  : " << probe->window() << " tokens, " << probe->prompt_budget()
             << " for the prompt\n"
-            << "tools   : " << tools->registry().tools().size() << " offered\n"
+            << "tools   : " << tools->registry().tools().size() << " offered"
+            << (config->delete_tool.enabled ? " (delete on)" : "")
+            << (shell_options ? " (shell on)" : "") << '\n'
             << "bounds  : " << max_turns << " turns, " << budget_seconds << "s, "
             << loop_options.max_calls_per_turn << " calls/turn\n"
             << "verify  : " << (verify ? "per-turn hash diff of the tree (R6)" : "off")

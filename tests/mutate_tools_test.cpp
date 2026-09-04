@@ -1017,20 +1017,38 @@ TEST_F(MutateToolsTest, DeleteRefusesWhenBackupFailsAndLeavesTheFileIntact) {
   EXPECT_EQ(state_.lookup("seen.txt").status, ObservedState::Status::Present);
 }
 
-TEST_F(MutateToolsTest, DeleteRefusesASymlinkPlantedAfterObservation) {
-  // The gate saw a regular file; a symlink now sits under the name. open_regular refuses
-  // it (O_NOFOLLOW), so the link is neither followed nor removed -- and the target it
-  // points at is untouched.
+TEST_F(MutateToolsTest, DeleteThroughALinkIsGatedOnTheTargetAndRemovesTheTarget) {
+  // Sandbox::resolve expands a link at the final component too (D6), so naming a link
+  // names its target: the gate is asked about the target, and the target is what goes.
+  // This pins the real semantics -- the same through-the-link behaviour write and move
+  // have, and unlike `rm` -- rather than a refusal the tool does not actually make.
   observe_seen();
   write_file(tmp_ / "root" / "elsewhere.txt", "not yours\n");
   fs::remove(tmp_ / "root" / "seen.txt");
   fs::create_symlink("elsewhere.txt", tmp_ / "root" / "seen.txt");
   DeleteTool del{state_, *store_};
-  auto out = call(del, {{"path", std::string{"seen.txt"}}});
-  ASSERT_FALSE(out.has_value());
+
+  // Half one: the observation of seen.txt does not carry over. The target was never
+  // read, so the gate refuses, naming the target -- not O_NOFOLLOW, which never runs.
+  auto refused = call(del, {{"path", std::string{"seen.txt"}}});
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_NE(refused.error().reason.find("elsewhere.txt: never read or listed"),
+            std::string::npos)
+      << refused.error().reason;
   EXPECT_TRUE(fs::is_symlink(tmp_ / "root" / "seen.txt"));
   EXPECT_EQ(slurp(tmp_ / "root" / "elsewhere.txt"), "not yours\n");
-  EXPECT_TRUE(backups_of("seen.txt").empty());
+  EXPECT_TRUE(backups_of("elsewhere.txt").empty());
+
+  // Half two: once the target has been read, deleting through the link removes the
+  // TARGET, leaves the link dangling, and the row names the target.
+  ReadTool read{state_};
+  ASSERT_TRUE(call(read, {{"paths", std::vector<std::string>{"elsewhere.txt"}}}).has_value());
+  auto out = call(del, {{"path", std::string{"seen.txt"}}});
+  ASSERT_TRUE(out.has_value()) << out.error().reason;
+  EXPECT_EQ(*text(out->rows[0], "path"), "elsewhere.txt");
+  EXPECT_FALSE(fs::exists(tmp_ / "root" / "elsewhere.txt"));
+  EXPECT_TRUE(fs::is_symlink(tmp_ / "root" / "seen.txt")) << "the link itself is untouched";
+  EXPECT_EQ(slurp(backups_of("elsewhere.txt").at(0)), "not yours\n");
 }
 
 TEST_F(MutateToolsTest, DeleteRefusesADirectoryBecauseNothingObservesOneAsPresent) {

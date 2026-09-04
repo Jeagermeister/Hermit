@@ -22,7 +22,9 @@
 // `with_delete` is set, then `shell` when a ShellOptions is supplied -- ninth and tenth
 // when both are on, ninth when only one is. `delete`'s gate is the flag alone; its own
 // guard is the observation table and the backup store, and there is no machine
-// capability to probe for. `shell`'s gate is what the rest of this comment is about. The gate this was once described as waiting on
+// capability to probe for.
+//
+// `shell`'s gate is what the rest of this comment is about. The gate this was once described as waiting on
 // was broader than it turned out to be -- DECISIONS.md's own D7 text says the
 // `openat(O_NOFOLLOW)` component walk (ROUTING.md section 12 step 5's second condition)
 // gates *the programmatic frontend* specifically (`mcp.cpp`, step 6, still unbuilt),

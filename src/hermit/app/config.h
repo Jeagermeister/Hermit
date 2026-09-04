@@ -151,10 +151,12 @@ struct ShellConfig {
 };
 
 /// Whether `delete` is registered (D19). Off by default: the one tool that removes a file
-/// is granted per job rather than inherited, the same per-invocation stance D18 takes for
-/// `--allow-cloud`. Nothing to probe -- the tool's own guard is the observation gate and
-/// the backup store -- so unlike shell the flag alone decides. Named `delete_tool` in code
-/// because `delete` is a keyword; the JSON key and the flag are plain `delete`.
+/// is turned on deliberately -- a flag, or a config file line -- rather than inherited, the
+/// stance D18 takes for `--allow-cloud`, and `render()` marks it when on and says so when
+/// it came from the file rather than the invocation. Nothing to probe -- the tool's own
+/// guard is the observation gate and the backup store -- so unlike shell the setting alone
+/// decides. Named `delete_tool` in code because `delete` is a keyword; the JSON key and the
+/// flag are plain `delete`.
 struct DeleteConfig {
   bool enabled = false;
 };

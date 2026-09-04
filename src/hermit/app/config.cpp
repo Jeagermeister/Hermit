@@ -881,6 +881,15 @@ std::string Config::render() const {
            "    network and pathname unix sockets (D10). Containment bounds what shell can\n"
            "    touch; it says nothing about what shell can send.\n";
   }
+  if (delete_tool.enabled) {
+    out << "\n  ⚠ delete is enabled: the model can remove a file it has read or listed this\n"
+           "    session, one per call, its bytes preserved in the backup store before the name\n"
+           "    goes -- `hermit undo` restores it (DECISIONS.md, D19).\n";
+    if (origin(Field::DeleteEnabled) == ConfigSource::File) {
+      out << "    It is on from the config file, not this invocation. D19 asks that removal be\n"
+             "    a per-job decision; confirm it is still meant.\n";
+    }
+  }
 
   return out.str();
 }

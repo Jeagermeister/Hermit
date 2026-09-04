@@ -1122,6 +1122,26 @@ TEST(Config, DeleteFlagsSetAndClear) {
   EXPECT_FALSE(config.delete_tool.enabled);
 }
 
+TEST(Config, RenderNamesDeleteSettingAndCallsOutWhenEnabled) {
+  // docs/16's promise: nothing unusual can be in force silently. D19's own overturn
+  // condition -- delete set once in a file and forgotten -- is exactly what the second
+  // half of the marked line exists to surface.
+  Config config;
+  const std::string disabled_text = config.render();
+  EXPECT_NE(disabled_text.find("delete.enabled"), std::string::npos);
+  EXPECT_EQ(disabled_text.find("⚠"), std::string::npos);
+
+  ASSERT_TRUE(apply(config, {"--delete"}));
+  const std::string flagged = config.render();
+  EXPECT_NE(flagged.find("⚠ delete is enabled"), std::string::npos);
+  EXPECT_EQ(flagged.find("not this invocation"), std::string::npos)
+      << "a flag is this invocation's own decision";
+
+  Config from_file;
+  ASSERT_TRUE(apply_json(from_file, parse(R"({"delete": {"enabled": true}})"), kBase));
+  EXPECT_NE(from_file.render().find("not this invocation"), std::string::npos);
+}
+
 TEST(Config, AFlagOverridesAFileEnablingDelete) {
   Config config;
   ASSERT_TRUE(apply_json(config, parse(R"({"delete": {"enabled": true}})"), kBase));

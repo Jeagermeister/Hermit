@@ -15,9 +15,16 @@
 //   recreates the file at its recorded path (undo.cpp already handles a missing target).
 //
 // Regular files only, one per call: a directory has no content hash and no single
-// generation to restore from, and the surface has no mkdir either. The gate refuses
-// anything else by construction -- neither `read` nor `list` records a directory or a
-// symlink as Present.
+// generation to restore from, and the surface has no mkdir either. The gate refuses a
+// directory by construction -- neither `read` nor `list` records one as Present.
+//
+// A symlink is a different matter, stated so nobody assumes the opposite: Sandbox::resolve
+// expands links at every component including the last (D6, POSIX order), so a link the
+// model names arrives here already resolved to its target. The gate is asked about the
+// TARGET, the target is what is removed, the link is left dangling, and the result row
+// names the target. That is the through-the-link semantics `write` and `move` already
+// have -- and unlike `rm`, which removes the link itself. D19 records it, and what would
+// change it. The O_NOFOLLOW open below covers only a link swapped in after resolution.
 //
 // Registered only when the caller asks (toolset.cpp, `--delete`): ninth, after the eight
 // structural tools and before `shell`, so the eight's prompt bytes stay what they were.
