@@ -6,13 +6,13 @@
 
 **Never trust a completion claim; check the tree.**
 
-Hermit is a supervisor for small local models doing filesystem work. It hands a 3–12B model,
+Hermit is a supervisor for small local models doing filesystem work. It hands a 3–9B model,
 running through Ollama on your own GPU, a menu of eight structural tools; runs every call inside
 one sandbox root; verifies each mutating call by hash and re-hashes the whole tree after every
 turn; and when the model says "done", inspects the tree instead of believing it. A stated
 post-condition the tree does not meet comes back as one concrete failure, handed to a fresh
 session, up to three times. Anything overwritten is backed up first to a store the model cannot
-reach, and nothing leaves the machine unless you pass `--allow-cloud` ([D18](./DECISIONS.md)).
+reach, and nothing leaves the machine unless you pass `--allow-cloud`.
 
 It exists because of a measurement, not a preference. Small local models can do this work, and
 they misreport having done it: across the 259 runs in [`bench/fsops/`](./bench/fsops/) and the
@@ -56,8 +56,8 @@ authority · **I**ndependent verification · **T**iered dispatch.
 | [parity.tsv](./parity.tsv) | machine-readable scope ledger; `tools/parity` reports drift |
 | [bench/fsops/](./bench/fsops/) | the evidence: 259 runs of local models doing filesystem work |
 
-**Scope in one line:** upstream is ~870k lines of non-test Python; ~38k of it is in scope, and
-the part that matters most — verification, backup, retry — has no upstream equivalent that these
+**Scope in one line:** upstream is ~870k lines of non-test Python, and ~38k of it is in scope.
+The part that matters most — verification, backup, retry — has no upstream equivalent that these
 runs revealed. That last claim is inferred from behaviour, not from reading upstream's code; see
 [REQUIREMENTS.md](./REQUIREMENTS.md).
 
@@ -82,7 +82,7 @@ The design follows an empirical finding rather than a preference. Local-model to
 > Break larger work into fresh sessions. The isolated-session results strongly support this
 > architecture.
 
-So this is **a supervisor, not a chatbot**. Its job is keeping a 9–12B model on rails: bounded
+So this is **a supervisor, not a chatbot**. Its job is keeping a 3–9B model on rails: bounded
 sessions, verified state between turns, and guardrails on anything destructive.
 
 ## What this looks like in use
@@ -121,60 +121,23 @@ server", and it is the ecosystem's own warning inverted: a typical stdio MCP ser
 *all* the launching user's authority; this is the one that **reduces** authority instead of
 inheriting it.
 
-**Status, honestly** (2026-08-17): the second half of these stories is built — the sandbox, all
-eight Tier 0 tools with per-call verification, the staleness guard, and the backup store are
-merged and tested. **The loop that drives the local model is now built too**, so a whole story
-runs end to end: `hermit agent` takes one instruction, offers the eight tools to a local
-model, dispatches what it asks for, and stops on a turn or wall-clock bound.
-
-**Phase 3's observation half landed 2026-08-17**: the tree is snapshotted before the run and
-after every turn, and `agent` prints a hash-verified changeset that owes nothing to the reply
-([D13](./DECISIONS.md)). A model announcing success over an untouched tree is now contradicted by
-evidence rather than merely doubted.
-
-**The judgment half landed 2026-08-18.** A free-text instruction carries no post-condition, so one
-is stated alongside it — `--expect exists:falcon-index.md`, or an `expectations` array in a config
-file. Those are judged against the tree after every turn, and `agent` prints the verdict and exits
-3 when something stated is measurably undone. A model that answers `DONE` over an untouched tree
-now produces a named failure — `falcon-index.md does not exist` — rather than only a suspiciously
-empty changeset.
-
-**And the verdict now feeds back — R7, done the same day.** An unmet verdict no longer just exits
-3: `agent` re-invokes, up to three attempts by default (`--attempts`), each a **fresh session**
-handed the original task plus the one concrete remaining failure. Every attempt is judged against
-the one baseline taken before the first, so a wrong first attempt cannot change what the stated
-expectations mean mid-job. Undecidable-only verdicts and infrastructure failures are never retried —
-R7 exists for model inconsistency, nothing else. This is the ~67% → ~96% arithmetic the
-tournaments recommended, wired end to end; *measuring* it as a delta is `bench/delta`'s
-reliability experiment, still ahead.
+**Status, honestly** (2026-09-04): the whole loop is built and tested. `hermit agent` takes one
+instruction, offers the eight structural tools to a local model, dispatches what it asks for, and
+stops on a turn or wall-clock bound. After every turn it snapshots the tree and prints a
+hash-verified changeset that owes nothing to the reply. A stated post-condition (`--expect
+exists:falcon-index.md`) is judged against the tree, and an unmet one re-invokes the model — up to
+three attempts by default, each a fresh session handed the one concrete remaining failure. Two
+tools are opt-in: `shell`, kernel-confined by Landlock and refused rather than run unconfined, and
+`delete`, gated on an observation this session and backed up before the name goes. The MCP
+frontend — the same tool surface over stdio — is built and shipped. The dated record of how each
+piece landed lives in [ROADMAP.md](./ROADMAP.md); [ROUTING.md](./ROUTING.md) §12 is the honest
+odometer.
 
 One limit remains, deliberate and visible on screen. **Structure is not meaning:** four
 predicates — exists, absent, bytes-preserved-across-a-move, identical — cover 329 of the 413
 failures recorded in `bench/fsops`, and the residue is named rather than absorbed. `report.md`
 containing the literal text `grep -oP '(?<=^).*' notes.txt` satisfies `exists:report.md` perfectly,
 and that is a real recorded run.
-
-**A confined shell landed 2026-08-18 through 2026-08-26.** [D10](./DECISIONS.md) built kernel
-confinement itself — Landlock via a vendored, sha256-pinned launcher, one writable root, fixed
-read grants — and the follow-up slice wired it into a real ninth tool: `shell`, R8-bounded on
-the wall clock, its stdout and stderr captured and truncation-flagged rather than silently cut
-off, killed as a whole process group (so a command that backgrounds a grandchild does not
-outlive its timeout). It is off by default, opts in with `--shell`, and refuses to start rather
-than silently run unconfined if this machine's own confinement probe cannot confirm the kernel
-is actually enforcing the ruleset ([D11](./DECISIONS.md)). Registering it also switches R6's
-per-turn tree diff to rehash unconditionally, closing a gap [D13](./DECISIONS.md) named: a
-`MAP_SHARED` write can change a file's bytes without moving the timestamp/size tuple the default
-diff reuses hashes from.
-
-**`delete` landed 2026-09-04** ([D19](./DECISIONS.md)), the first tool this project deferred on
-its own evidence and then admitted on it: [ROUTING.md](./ROUTING.md) §11's two conditions —
-working undo, and a retested selective-delete task holding at more than three pinned repeats —
-were met by D14 and by sweep 3. It is opt-in, gated on an observation this session, and its
-bytes reach the store before the name goes; the erased `tally.py` this project started from would
-now be one listing and one flag away. Dry-run was decided against in the same decision.
-
-So: the stories' mechanics run, and their structural guarantees now hold. The MCP frontend
-shipped as [ROUTING.md](./ROUTING.md) §12 step 6, and §12 remains the honest odometer.
 
 ## Why native code, honestly
 
@@ -283,12 +246,12 @@ which is neither gated nor backed up, and `agent` prints a note saying so.
 State a post-condition with `--expect` and it prints a verdict too: each expectation in the order
 written, met or unmet or undecidable, decided from the tree and never from the reply. Exit 3 means
 something stated is undone. With nothing stated it stays report-only, because a clean stop plus an
-accurate changeset is evidence and not a verdict -- and a command that implied otherwise would be
+accurate changeset is evidence and not a verdict — and a command that implied otherwise would be
 the more useful lie.
 
 An expectation names a path exactly as the tree spells it from the root: no leading `/`, no `..`,
 and a symlink means the link rather than what it points at. Anything else is refused before the
-model is called, because a mis-spelled path is not a harmless typo here -- it becomes a permanent
+model is called, because a mis-spelled path is not a harmless typo here — it becomes a permanent
 `unmet` that R7 would hand back as a concrete failure to go and fix. A set that contradicts itself
 (`exists:x` beside `absent:x`) is refused for the same reason.
 
