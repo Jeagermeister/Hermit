@@ -39,6 +39,8 @@ The project's working vocabulary, one line each. R-numbers are requirements
 | **D15** | Meaning is judged by a model, after structure, and labelled as judgment everywhere |
 | **D16** | LTO is measured, real, and opt-in (`HERMIT_LTO`) |
 | **D17** | Compaction rebuilds the context window from the tree once it fills; it never summarizes |
+| **D18** | Ollama Cloud admitted narrowly, behind `--allow-cloud`; the local daemon is the only new egress point |
+| **D19** | `delete` is admitted: opt-in, gated on observation, backed up first; dry-run is decided against |
 
 ## Terms
 

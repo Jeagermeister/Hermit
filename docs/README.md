@@ -58,7 +58,7 @@ Status statements in these chapters are dated. The book was last brought current
 
 | chapter | what it answers |
 |---|---|
-| [90. Glossary](./90-glossary.md) | R1–R9, D1–D16, and the project's working vocabulary |
+| [90. Glossary](./90-glossary.md) | R1–R9, D1–D19, and the project's working vocabulary |
 
 ## How this book relates to the design documents
 
