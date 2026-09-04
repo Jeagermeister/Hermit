@@ -1,5 +1,5 @@
-<p align="center">
-  <img src="assets/logo/hermit-readme-200.png" alt="Hermit" width="160">
+<p>
+  <img src="assets/logo/hermit-readme-320.png" alt="Hermit" width="200">
 </p>
 
 # Hermit
