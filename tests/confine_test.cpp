@@ -16,6 +16,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "fd_baseline.h"
+
 namespace fs = std::filesystem;
 using hermit::ConfineError;
 using hermit::ConfinementProbeResult;
@@ -34,30 +36,7 @@ fs::path make_temp_dir(std::string_view tag) {
   return fs::canonical(fs::path(buf.data()));
 }
 
-// Every fd currently open in this process, read the same way assert_no_inheritable_fds itself
-// does. The test binary is launched by whatever runs it -- direct invocation, or ctest, which in
-// practice leaves an extra fd of its own open without O_CLOEXEC (observed empirically building
-// this: fd 3, presumably ctest's own output-capture plumbing). That fd is ctest's business, not
-// this test's, and not something a real `hermit` process launched normally would ever have --
-// so tests snapshot "what's already open" as their baseline and only assert about fds THEY
-// deliberately add on top of it, rather than assuming a pristine table no test harness owes them.
-std::vector<int> currently_open_fds() {
-  std::vector<int> fds;
-  DIR* dir = ::opendir("/proc/self/fd");
-  if (dir == nullptr) return fds;
-  int self_fd = ::dirfd(dir);
-  while (::dirent* entry = ::readdir(dir)) {
-    std::string_view name{entry->d_name};
-    if (name == "." || name == "..") continue;
-    int fd = -1;
-    auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), fd);
-    if (ec == std::errc{} && ptr == name.data() + name.size() && fd != self_fd) {
-      fds.push_back(fd);
-    }
-  }
-  ::closedir(dir);
-  return fds;
-}
+using hermit::test::currently_open_fds;
 
 }  // namespace
 

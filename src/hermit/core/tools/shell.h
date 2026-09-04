@@ -16,6 +16,9 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <utility>
+#include <vector>
+
 #include <hermit/core/fsio.h>
 #include <hermit/core/tool.h>
 
@@ -28,9 +31,20 @@ class ShellTool final : public Tool {
   /// per-call wall-clock bound: exceeding it kills the confined process group and the call
   /// reports as a ToolError, never as a ToolOutput row -- "a timeout treated as a failure rather
   /// than as missing data."
+  ///
+  /// `allowed_fds` is forwarded verbatim to run_confined's pre-fork audit (confine.h,
+  /// assert_no_inheritable_fds): descriptors the launching environment handed this process
+  /// without O_CLOEXEC and which are therefore its business, not Hermit's -- a test harness's
+  /// capture pipe is the motivating case. Empty by default, which is the production posture:
+  /// the audit then fails closed on ANY inheritable descriptor beyond stdio, exactly as before
+  /// this parameter existed. Nothing in main.cpp or mcp.cpp passes one.
   ShellTool(std::filesystem::path root, std::chrono::milliseconds timeout,
-            std::uint64_t max_output_bytes = kDefaultMaxReadBytes) noexcept
-      : root_(std::move(root)), timeout_(timeout), max_output_bytes_(max_output_bytes) {}
+            std::uint64_t max_output_bytes = kDefaultMaxReadBytes,
+            std::vector<int> allowed_fds = {}) noexcept
+      : root_(std::move(root)),
+        timeout_(timeout),
+        max_output_bytes_(max_output_bytes),
+        allowed_fds_(std::move(allowed_fds)) {}
 
   [[nodiscard]] const ToolSpec& spec() const noexcept override;
 
@@ -40,6 +54,7 @@ class ShellTool final : public Tool {
   std::filesystem::path root_;
   std::chrono::milliseconds timeout_;
   std::uint64_t max_output_bytes_;
+  std::vector<int> allowed_fds_;
 };
 
 }  // namespace hermit

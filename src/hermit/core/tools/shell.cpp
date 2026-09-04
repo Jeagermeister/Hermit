@@ -50,7 +50,7 @@ std::expected<ToolOutput, ToolError> ShellTool::run(const ToolArgs& args) {
       .stderr_cap = max_output_bytes_,
   };
   auto result = run_confined(root_, std::vector<std::string>{"/usr/bin/sh", "-c", command},
-                             /*allowed=*/{}, limits);
+                             /*allowed=*/allowed_fds_, limits);
   if (!result) {
     return std::unexpected{ToolError{"shell: " + to_string(result.error())}};
   }
