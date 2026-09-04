@@ -4,8 +4,42 @@
 
 # Hermit
 
-**H**ash-verified · **E**vidence-driven · **R**etries with concrete failure · **M**inimal
-structurally-enforced authority · **I**ndependent verification · **T**iered dispatch
+**Never trust a completion claim; check the tree.**
+
+Hermit is a supervisor for small local models doing filesystem work. It hands a 3–12B model,
+running through Ollama on your own GPU, a menu of eight structural tools; runs every call inside
+one sandbox root; verifies each mutating call by hash and re-hashes the whole tree after every
+turn; and when the model says "done", inspects the tree instead of believing it. A stated
+post-condition the tree does not meet comes back as one concrete failure, handed to a fresh
+session, up to three times. Anything overwritten is backed up first to a store the model cannot
+reach, and nothing leaves the machine unless you pass `--allow-cloud` ([D18](./DECISIONS.md)).
+
+It exists because of a measurement, not a preference. Small local models can do this work, and
+they misreport having done it: across the 259 runs in [`bench/fsops/`](./bench/fsops/) and the
+sweeps that followed, models announced success over untouched trees, "copied" a file by
+re-typing it one byte wrong, and erased a `tally.py` nobody asked them to touch. The tournaments'
+own recommendation was a supervisor outside the model, checking state and re-invoking with the
+one remaining failure. This is that supervisor, in C++.
+
+**What it buys, stated at its real width.** Seven tasks, five repeats each, the same 9B model
+pinned at a 65,536-token window on one machine, one referee applied to the filesystem and never
+to the transcript — 105 runs:
+
+| | Hermes Agent as shipped | Hermit, 1 attempt | Hermit, 3 attempts |
+|---|---|---|---|
+| tasks completed | 26/35 (74%) | 33/35 (94%) | 33/35 (94%) |
+
+Four task-level wins, zero losses, three ties: p = 0.125, which seven paired tasks cannot
+improve on, reported as underpowered rather than as proof. In the 70 supervised runs nothing was
+destroyed, nothing escaped the sandbox, and no undeclared file changed. The protocols, the
+graders and every run behind that table live in
+[hermit-bench](https://github.com/Jeagermeister/hermit-bench), frozen before the first run, with
+the losses published beside the wins.
+
+The name is a backronym, kept because each letter names a requirement or a design rule with a
+measured failure behind it ([REQUIREMENTS.md](./REQUIREMENTS.md)): **H**ash-verified ·
+**E**vidence-driven · **R**etries with concrete failure · **M**inimal structurally-enforced
+authority · **I**ndependent verification · **T**iered dispatch.
 
 ## Start here
 
@@ -15,7 +49,7 @@ structurally-enforced authority · **I**ndependent verification · **T**iered di
 | [REQUIREMENTS.md](./REQUIREMENTS.md) | what this must do, each requirement traced to a measured failure |
 | [SCOPE.md](./SCOPE.md) | what gets built, read, or ignored — and why |
 | [ROADMAP.md](./ROADMAP.md) | sequencing, and what must be settled before code |
-| [ROUTING.md](./ROUTING.md) | the tool surface: three tiers, the eight tools, who may call what |
+| [ROUTING.md](./ROUTING.md) | the tool surface: three tiers, the eight structural tools plus the opt-in `shell`, who may call what |
 | [FLOW.md](./FLOW.md) | the same thing drawn: request path, one mutating call, the supervisor turn |
 | [FAQ.md](./FAQ.md) | the questions an evaluator asks first — shell, Python, "why not wait for better models" — each with what it concedes |
 | [DECISIONS.md](./DECISIONS.md) | the hard-to-reverse choices, and what would overturn each |
@@ -28,8 +62,7 @@ runs revealed. That last claim is inferred from behaviour, not from reading upst
 [REQUIREMENTS.md](./REQUIREMENTS.md).
 
 
-A fast, local-first agent runner in **C/C++**, built around **local inference** (Ollama today, vLLM from [D9](./DECISIONS.md)).
-
+Built in **C++** around **local inference** — Ollama today, vLLM from [D9](./DECISIONS.md).
 Inspired by [NousResearch Hermes Agent](https://github.com/nousresearch/hermes-agent) (Python),
 but **not a port of it**. Upstream is a reference for behaviour worth having, not a target to
 match. Most of it — the messaging gateway, the plugin surface, the fifty cloud providers — is
@@ -41,7 +74,7 @@ Driving **local** models to do real filesystem work: create, modify, move, summa
 files, either directly or when called as a tool by a larger model.
 
 The design follows an empirical finding rather than a preference. Local-model tournaments run on
-`kitchen-desktop` (the `local-agent-benchmarks` repo) concluded:
+`kitchen-desktop` concluded:
 
 > Use an external supervisor that checks repository state and reinvokes the model with one
 > concrete remaining failure instead of relying on a single long autonomous session.
@@ -147,13 +180,16 @@ structural:
 | **Verification** | Checking what the model actually did — walking trees, hashing, diffing — happens every turn. That is real work, and native code is good at it. |
 | **Distribution** | One binary, versus a Python environment plus Node plus system dependencies. |
 
-The evidence sits in two places, across two machines and two agent harnesses:
+The evidence sits in three places:
 
-- **[`bench/fsops/`](./bench/fsops/) in this repo** — 259 runs on the MSI laptop
+- **[`bench/fsops/`](./bench/fsops/) in this repo** — the first 259 runs, on the dev laptop
   (RTX 5080 16 GB) through Hermes Agent. This is what REQUIREMENTS.md is built on.
-- **[`local-agent-benchmarks`](https://gitea-ec2.tail328f9a.ts.net/Jeagermeister/local-agent-benchmarks)**
-  — five harnesses on `kitchen-desktop` (W7900): the earlier tournaments through OpenCode, and
-  the 144 Phase 0 diagnostic runs through Hermes.
+- **[hermit-bench](https://github.com/Jeagermeister/hermit-bench)** — the benchmark repository:
+  the later sweeps, the pre-registered delta experiments (E1, E3, E4, E5), and every run behind
+  the numbers this README quotes.
+- The earlier OpenCode tournaments and the 144 Phase 0 diagnostic runs on `kitchen-desktop`
+  (W7900) live in a private repository; what transferred from them is recorded in
+  [ROADMAP.md](./ROADMAP.md) Phase 0.
 
 ## Layout
 

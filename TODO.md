@@ -8,42 +8,52 @@ there, so nothing below duplicates it.
 
 This file should be deletable once the repository is public.
 
-Audited 2026-08-29, re-checked 2026-09-01 on the dev laptop. Two things were checked and
-came back clean, so they are recorded rather than docketed: **no AI attribution anywhere in
-152 commits** (no `Co-Authored-By`, no generator watermark, in any message or body), and a
-`LICENSE` at the root.
+Audited 2026-08-29, re-checked 2026-09-01 and cleared 2026-09-04 on the dev laptop. Two
+things were checked and came back clean, so they are recorded rather than docketed: **no AI
+attribution anywhere in the commits** (no `Co-Authored-By`, no generator watermark, in any
+message or body), and a `LICENSE` at the root.
 
 ---
 
 ## Before the first public push
 
-- [ ] **Scrub `~` from four bench result files.** Fourteen occurrences
-  across `bench/fsops/results/fsops-20260813T12{2555,2605,3010,3040}Z.{json,jsonl}`.
-  hermit-bench records home directories as `~` and has zero literal occurrences; these
-  files predate that convention. Publishing them as-is puts the operator's username in
-  permanent history for no benefit.
+- [x] ~~**Scrub the operator's home directory from four bench result files.**~~ — **done
+  2026-09-04.** Fourteen occurrences across
+  `bench/fsops/results/fsops-20260813T12{2555,2605,3010,3040}Z.{json,jsonl}`, each replaced
+  with `~`, which is the convention hermit-bench records under. The scrub changed no
+  measurement: the scored fields of every record — model, task, repeat, passed, valid,
+  checks_passed, checks_total — were fingerprinted before and after and the digests match
+  (the same proof the SWEEP4 scrub carried). Zero literal occurrences remain in tracked
+  files.
 
-  **The scrub must not change a measurement.** Fingerprint the scored fields — model,
-  task, repeat, passed, valid, checks_passed, checks_total — before and after, and
-  require the hashes to match. That is the same proof the SWEEP4 scrub carried.
+  **Then the premise turned out to be wrong, and the fix went further.** The repository was
+  already public: a Gitea push-mirror to GitHub, synced on every commit, had carried the
+  four files into public history. So on 2026-09-04 the history itself was rewritten on
+  Gitea (`git filter-repo --replace-text`) and force-synced to the mirror: the home path
+  became `~` in every commit, and a second form the docket had never listed — the username
+  as an `ls -l` owner column captured inside a check's `detail`, in two older result files
+  — became `user user`. Verified before the push: 186 commits intact, every branch's file
+  list identical, the scored-field fingerprints of all six files unchanged, commit
+  messages untouched. The mirror was set private for the duration; making it public again
+  is a separate, deliberate step. Every other clone (Kitchen, Framework) diverges the way
+  the August attribution scrub made them diverge, and takes the same tag-then-reset.
 
-- [ ] **Fix two Tailscale URLs that would go public.** [README.md:154](./README.md) links
-  `local-agent-benchmarks` at `gitea-ec2.tail328f9a.ts.net` — a dead link outside the
-  tailnet, and the name is stale besides; the repository is `hermit-bench`.
-  [assets/logo/build.sh:36](./assets/logo/build.sh) has a comment pointing at the private
-  `aiscrub` repository. Not a security hole, just unnecessary exposure. Repoint the README
-  at the GitHub URL once it exists.
+- [x] ~~**Fix two Tailscale URLs that would go public.**~~ — **done 2026-09-04.** The README's
+  evidence list now points at [hermit-bench](https://github.com/Jeagermeister/hermit-bench)
+  and names the private tournament repository without linking it; the logo build script's
+  comment names `aiscrub` without a URL. No Tailscale hostname remains in tracked files.
 
-- [ ] **Rewrite the README lede.** It currently opens with a backronym and a 6-row table
-  of documents. A reader arriving from a GitHub profile gets 90 seconds and learns the
-  project has documents. Lead with what Hermit is and the thesis the benchmark repository
-  already states better than this one does — *never trust a completion claim; check the
-  tree* — then the finding that earns attention.
+- [x] ~~**Rewrite the README lede.**~~ — **done 2026-09-04.** It opens with the thesis — *never
+  trust a completion claim; check the tree* — then what Hermit is in one paragraph, why it
+  exists in one, and the E1 headline at its real width (74% → 94%, seven paired tasks,
+  p = 0.125, reported as underpowered). The backronym survives as a footnote to the lede,
+  and the document table is where it was.
 
-- [ ] **Flip the cross-references, both repositories in the same session.** hermit-bench
-  asserts the supervisor is private in three places: `README.md:9`, `README.md:18`, and
-  `TODO.md:90`. Each becomes wrong the moment this repository is pushed — keep the two
-  repos' descriptions of each other in sync.
+- [x] ~~**Flip the cross-references, both repositories in the same session.**~~ — **done
+  2026-09-04, differently.** hermit-bench's three sentences no longer say the supervisor is
+  private; they say it lives in its own repository and nothing about its visibility, so
+  nothing becomes wrong the moment this repository is pushed. What remains for push day is
+  additive: put the GitHub link into those three places once it exists.
 
 ## Recorded, not docketed
 
@@ -56,6 +66,11 @@ Be exact about what that proves. It proves the files carry no *readable* provena
 metadata — C2PA, XMP, EXIF, IPTC, generator exhaust in PNG text chunks. It says nothing
 about pixel-level watermarking, which survives re-encoding and has no public detector to
 check against.
+
+**Housekeeping done alongside, 2026-09-04.** The never-run Phase 0 diagnostic harness under
+`bench/` was removed (ROADMAP.md Phase 0 records where the real one lives); three stashes and
+the `fix/compaction-guard` branch, all superseded by what merged, were dropped; and the
+stale `origin/fix/note-injection` was deleted on Gitea.
 
 ## Not blocking publication
 

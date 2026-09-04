@@ -51,8 +51,8 @@ A finding you must design *around* is very different from one you can design *aw
 
 **Harness of record:** `local-agent-benchmarks/hermes-diagnostic/`. That is what produced the
 data — preflight/postflight, three-way classification, controller locking, protected-baseline
-hashing. `bench/run_hermit_diagnostic.py` in *this* repo was superseded and has never been run;
-don't reach for it.
+hashing. A `bench/run_hermit_diagnostic.py` once lived in *this* repo, superseded before it was
+ever run; it was removed 2026-09-04, and its design record survives in the history before that.
 
 ### Status: ran, and produced a leaderboard rather than the delta
 
@@ -723,7 +723,7 @@ model calling this as a tool.
 
 ## The measured levers — what the 2026-08-19 series priced
 
-E3/E4/E5 ran from the public [hermit-bench](https://github.com/Jeagermeister/hermit-bench)
+E3/E4/E5 ran from the [hermit-bench](https://github.com/Jeagermeister/hermit-bench)
 repository (its `TODO.md` keeps the experiment-side docket: the E6 tier question, harness
 work, statistical power). This section is the supervisor-side half, in evidence order —
 every item cites the published result that motivates it, and none is scheduled by being

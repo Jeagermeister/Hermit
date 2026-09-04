@@ -86,7 +86,8 @@ so `ollama pull gemma4:e4b-it-qat` should be near-instant.
 - Re-run `hermes3-8b` vs `llama31-8b`. 3/36 vs 10/36 at matched size and quant is suggestive but
   inside the noise floor, and it is the one result that most deserves to be right.
 - Phase 0 ran on 2026-08-13, but through `local-agent-benchmarks/hermes-diagnostic/`, not
-  `bench/run_hermit_diagnostic.py` (which remains unrun and superseded). It produced a
+  the diagnostic harness this repo once carried under `bench/` (never run, superseded, and
+  removed 2026-09-04). It produced a
   Hermes-only leaderboard rather than the harness comparison: there is no model overlap between
   the two harnesses, and the 64,000-context floor may make the matched run impossible as
   specified. So "is Hermes better or worse than OpenCode" is **still unanswered**, and this
