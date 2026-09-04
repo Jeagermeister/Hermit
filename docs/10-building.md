@@ -26,7 +26,8 @@ ctest --test-dir build --output-on-failure
 
 The test suite is GoogleTest; a handful of tests are environment-gated (they skip rather than
 fail where the machine cannot support what they check — a kernel without Landlock, for
-instance).
+instance). A skip says why in its own message; `ctest` only counts them, so run the binary
+directly (`build/tests/hermit_tests`) to read the reason.
 
 ## The sanitizer build
 
