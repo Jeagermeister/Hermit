@@ -33,7 +33,8 @@ magick hermit-icon-16.png hermit-icon-32.png hermit-icon-48.png favicon.ico
 
 # rsvg and ImageMagick both stamp their own metadata into the output. Strip it:
 # this repo's own rule is that nothing ships carrying provenance it did not ask
-# for. See https://gitea-ec2.tail328f9a.ts.net/Jeagermeister/aiscrub
+# for. aiscrub (Jeagermeister/aiscrub) is the tool that does it, looked for in
+# its two usual homes:
 for c in "$HOME/Source/aiscrub/aiscrub.py" \
          "$HOME/.claude/skills/scrub-ai-metadata/scripts/aiscrub.py"; do
     [ -r "$c" ] && { python3 "$c" strip -i ./*.png ./favicon.ico >/dev/null; break; }
