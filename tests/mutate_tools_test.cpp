@@ -1,3 +1,4 @@
+#include <hermit/core/tools/delete.h>
 #include <hermit/core/tools/edit.h>
 #include <hermit/core/tools/move.h>
 #include <hermit/core/tools/write.h>
@@ -25,9 +26,11 @@
 #include <hermit/core/tools/hash.h>
 #include <hermit/core/tools/list.h>
 #include <hermit/core/tools/read.h>
+#include <hermit/supervisor/undo.h>
 
 namespace fs = std::filesystem;
 using hermit::BackupStore;
+using hermit::DeleteTool;
 using hermit::EditTool;
 using hermit::Field;
 using hermit::ListTool;
@@ -915,3 +918,175 @@ TEST_F(MutateToolsTest, AllEightToolsComposeIntoOneRegistry) {
 }
 
 }  // namespace
+
+// --- delete (D19) ----------------------------------------------------------------------
+
+TEST_F(MutateToolsTest, DeleteRefusesAnUnseenFile) {
+  DeleteTool del{state_, *store_};
+  auto out = call(del, {{"path", std::string{"seen.txt"}}});
+  ASSERT_FALSE(out.has_value());
+  EXPECT_NE(out.error().reason.find("never read or listed"), std::string::npos)
+      << out.error().reason;
+  EXPECT_TRUE(fs::exists(tmp_ / "root" / "seen.txt")) << "a refusal must not delete";
+  EXPECT_TRUE(backups_of("seen.txt").empty()) << "a refusal must not preserve either";
+}
+
+TEST_F(MutateToolsTest, DeleteRefusesAnObservedAbsentFile) {
+  state_.record_absent("gone.txt");
+  DeleteTool del{state_, *store_};
+  auto out = call(del, {{"path", std::string{"gone.txt"}}});
+  ASSERT_FALSE(out.has_value());
+  EXPECT_NE(out.error().reason.find("observed absent"), std::string::npos) << out.error().reason;
+}
+
+TEST_F(MutateToolsTest, DeleteRemovesAnObservedFileAndBacksItUpFirst) {
+  observe_seen();
+  DeleteTool del{state_, *store_};
+  auto out = call(del, {{"path", std::string{"seen.txt"}}});
+  ASSERT_TRUE(out.has_value()) << out.error().reason;
+  ASSERT_EQ(out->rows.size(), 1u);
+  const auto* hash = text(out->rows[0], "hash");
+  ASSERT_NE(hash, nullptr);
+  EXPECT_EQ(*hash, sha256_hex("one two three\n"));
+
+  EXPECT_FALSE(fs::exists(tmp_ / "root" / "seen.txt"));
+  const auto kept = backups_of("seen.txt");
+  ASSERT_EQ(kept.size(), 1u) << "exactly one generation holds the removed bytes";
+  EXPECT_EQ(slurp(kept[0]), "one two three\n");
+  EXPECT_EQ(state_.lookup("seen.txt").status, ObservedState::Status::Absent);
+}
+
+TEST_F(MutateToolsTest, DeleteAfterAListObservationSucceeds) {
+  ListTool list{state_};
+  ASSERT_TRUE(call(list, {{"path", std::string{"sub"}}}).has_value());
+  DeleteTool del{state_, *store_};
+  auto out = call(del, {{"path", std::string{"sub/deep.txt"}}});
+  ASSERT_TRUE(out.has_value()) << out.error().reason;
+  EXPECT_FALSE(fs::exists(tmp_ / "root" / "sub" / "deep.txt"));
+  EXPECT_EQ(slurp(backups_of("deep.txt").at(0)), "delta one\n");
+}
+
+TEST_F(MutateToolsTest, DeleteOfAFileTheModelCreatedNeedsNoRead) {
+  // A create records the new file Present, so the gate costs a read only for files the
+  // model has not touched -- D19's "its own creations are already covered".
+  WriteTool write{state_, *store_};
+  ASSERT_TRUE(call(write, {{"path", std::string{"scratch.tmp"}},
+                           {"content", std::string{"temporary\n"}}}).has_value());
+  DeleteTool del{state_, *store_};
+  auto out = call(del, {{"path", std::string{"scratch.tmp"}}});
+  ASSERT_TRUE(out.has_value()) << out.error().reason;
+  EXPECT_FALSE(fs::exists(tmp_ / "root" / "scratch.tmp"));
+  EXPECT_EQ(slurp(backups_of("scratch.tmp").at(0)), "temporary\n");
+}
+
+TEST_F(MutateToolsTest, DeleteRefusesWhenTheFileChangedSinceObservation) {
+  observe_seen();
+  write_file(tmp_ / "root" / "seen.txt", "one two three four\n");
+  DeleteTool del{state_, *store_};
+  auto out = call(del, {{"path", std::string{"seen.txt"}}});
+  ASSERT_FALSE(out.has_value());
+  EXPECT_NE(out.error().reason.find("changed since last observed"), std::string::npos)
+      << out.error().reason;
+  EXPECT_EQ(slurp(tmp_ / "root" / "seen.txt"), "one two three four\n");
+  EXPECT_TRUE(backups_of("seen.txt").empty());
+}
+
+TEST_F(MutateToolsTest, DeleteRefusesWhenAnObservedFileVanished) {
+  observe_seen();
+  fs::remove(tmp_ / "root" / "seen.txt");
+  DeleteTool del{state_, *store_};
+  auto out = call(del, {{"path", std::string{"seen.txt"}}});
+  ASSERT_FALSE(out.has_value());
+  EXPECT_NE(out.error().reason.find("now missing"), std::string::npos) << out.error().reason;
+  EXPECT_EQ(state_.lookup("seen.txt").status, ObservedState::Status::Absent);
+}
+
+TEST_F(MutateToolsTest, DeleteRefusesWhenBackupFailsAndLeavesTheFileIntact) {
+  // Same construction as write's: a FILE where the store's directory should be makes every
+  // preserve fail, which turns "backup strictly before the name goes" into an observable
+  // fact. This is the property the whole decision rests on.
+  fs::remove_all(tmp_ / "backups");
+  write_file(tmp_ / "backups", "not a directory");
+
+  observe_seen();
+  DeleteTool del{state_, *store_};
+  auto out = call(del, {{"path", std::string{"seen.txt"}}});
+  ASSERT_FALSE(out.has_value()) << "no backup, no deletion";
+  EXPECT_NE(out.error().reason.find("backup failed"), std::string::npos) << out.error().reason;
+  EXPECT_EQ(slurp(tmp_ / "root" / "seen.txt"), "one two three\n");
+  EXPECT_EQ(state_.lookup("seen.txt").status, ObservedState::Status::Present);
+}
+
+TEST_F(MutateToolsTest, DeleteThroughALinkIsGatedOnTheTargetAndRemovesTheTarget) {
+  // Sandbox::resolve expands a link at the final component too (D6), so naming a link
+  // names its target: the gate is asked about the target, and the target is what goes.
+  // This pins the real semantics -- the same through-the-link behaviour write and move
+  // have, and unlike `rm` -- rather than a refusal the tool does not actually make.
+  observe_seen();
+  write_file(tmp_ / "root" / "elsewhere.txt", "not yours\n");
+  fs::remove(tmp_ / "root" / "seen.txt");
+  fs::create_symlink("elsewhere.txt", tmp_ / "root" / "seen.txt");
+  DeleteTool del{state_, *store_};
+
+  // Half one: the observation of seen.txt does not carry over. The target was never
+  // read, so the gate refuses, naming the target -- not O_NOFOLLOW, which never runs.
+  auto refused = call(del, {{"path", std::string{"seen.txt"}}});
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_NE(refused.error().reason.find("elsewhere.txt: never read or listed"),
+            std::string::npos)
+      << refused.error().reason;
+  EXPECT_TRUE(fs::is_symlink(tmp_ / "root" / "seen.txt"));
+  EXPECT_EQ(slurp(tmp_ / "root" / "elsewhere.txt"), "not yours\n");
+  EXPECT_TRUE(backups_of("elsewhere.txt").empty());
+
+  // Half two: once the target has been read, deleting through the link removes the
+  // TARGET, leaves the link dangling, and the row names the target.
+  ReadTool read{state_};
+  ASSERT_TRUE(call(read, {{"paths", std::vector<std::string>{"elsewhere.txt"}}}).has_value());
+  auto out = call(del, {{"path", std::string{"seen.txt"}}});
+  ASSERT_TRUE(out.has_value()) << out.error().reason;
+  EXPECT_EQ(*text(out->rows[0], "path"), "elsewhere.txt");
+  EXPECT_FALSE(fs::exists(tmp_ / "root" / "elsewhere.txt"));
+  EXPECT_TRUE(fs::is_symlink(tmp_ / "root" / "seen.txt")) << "the link itself is untouched";
+  EXPECT_EQ(slurp(backups_of("elsewhere.txt").at(0)), "not yours\n");
+}
+
+TEST_F(MutateToolsTest, DeleteRefusesADirectoryBecauseNothingObservesOneAsPresent) {
+  ListTool list{state_};
+  ASSERT_TRUE(call(list, {{"path", std::string{"."}}}).has_value());  // sees `sub` as a dir
+  DeleteTool del{state_, *store_};
+  auto out = call(del, {{"path", std::string{"sub"}}});
+  ASSERT_FALSE(out.has_value());
+  EXPECT_NE(out.error().reason.find("never read or listed"), std::string::npos)
+      << out.error().reason;
+  EXPECT_TRUE(fs::is_directory(tmp_ / "root" / "sub"));
+}
+
+TEST_F(MutateToolsTest, DeleteThenUndoRestoresTheBytesAtTheRecordedPath) {
+  // The whole point of building delete under D14: the erased file is one listing and one
+  // flag away. Restore of a missing target recreates it and preserves nothing.
+  observe_seen();
+  DeleteTool del{state_, *store_};
+  ASSERT_TRUE(call(del, {{"path", std::string{"seen.txt"}}}).has_value());
+  ASSERT_FALSE(fs::exists(tmp_ / "root" / "seen.txt"));
+
+  auto generations = hermit::supervisor::enumerate(tmp_ / "backups");
+  ASSERT_TRUE(generations.has_value()) << generations.error();
+  ASSERT_EQ(generations->size(), 1u);
+  EXPECT_EQ(generations->at(0).relative, fs::path{"seen.txt"});
+
+  auto restored = hermit::supervisor::restore(tmp_ / "backups", *box_, generations->at(0).seq);
+  ASSERT_TRUE(restored.has_value()) << restored.error();
+  EXPECT_FALSE(restored->preserved.has_value()) << "absence has no bytes to preserve";
+  EXPECT_EQ(slurp(tmp_ / "root" / "seen.txt"), "one two three\n");
+}
+
+TEST_F(MutateToolsTest, DeleteSpecTakesOneRequiredPath) {
+  DeleteTool del{state_, *store_};
+  const auto& spec = del.spec();
+  EXPECT_EQ(spec.name, "delete");
+  ASSERT_EQ(spec.args.size(), 1u);
+  EXPECT_EQ(spec.args[0].name, "path");
+  EXPECT_EQ(spec.args[0].type, hermit::ArgType::Path);
+  EXPECT_TRUE(spec.args[0].required);
+}

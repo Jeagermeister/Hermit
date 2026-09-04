@@ -470,7 +470,7 @@ TEST(Config, TheSharedTableHoldsExactlyTheTwelveValueTakingFlags) {
 
 TEST(Config, NoBooleanFlagIsListedAsValueTaking) {
   for (const std::string_view boolean :
-       {"--warmup", "--no-warmup", "--tools", "--no-tools", "--shell", "--no-shell"}) {
+       {"--warmup", "--no-warmup", "--tools", "--no-tools", "--shell", "--no-shell", "--delete", "--no-delete"}) {
     for (const std::string_view listed : hermit::app::flags_taking_a_value()) {
       EXPECT_NE(boolean, listed) << boolean << " must not consume the next argument";
     }
@@ -1089,3 +1089,63 @@ TEST(Expectations, BothFlagsAreRegisteredAsTakingAValue) {
 }
 
 }  // namespace
+
+// --- delete (D19) --------------------------------------------------------------------
+
+TEST(Config, DeleteDefaultsToDisabled) {
+  Config config;
+  EXPECT_FALSE(config.delete_tool.enabled);
+  EXPECT_EQ(config.origin(Field::DeleteEnabled), ConfigSource::Default);
+}
+
+TEST(Config, DeleteJsonRoundTrips) {
+  Config config;
+  ASSERT_TRUE(apply_json(config, parse(R"({"delete": {"enabled": true}})"), kBase));
+  EXPECT_TRUE(config.delete_tool.enabled);
+  EXPECT_EQ(config.origin(Field::DeleteEnabled), ConfigSource::File);
+}
+
+TEST(Config, DeleteUnknownKeyIsRejected) {
+  Config config;
+  const auto result = apply_json(config, parse(R"({"delete": {"enable": true}})"), kBase);
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error().kind, ConfigError::UnknownKey);
+  EXPECT_NE(result.error().detail.find("delete.enable"), std::string::npos);
+}
+
+TEST(Config, DeleteFlagsSetAndClear) {
+  Config config;
+  ASSERT_TRUE(apply(config, {"--delete"}));
+  EXPECT_TRUE(config.delete_tool.enabled);
+  EXPECT_EQ(config.origin(Field::DeleteEnabled), ConfigSource::Flag);
+  ASSERT_TRUE(apply(config, {"--no-delete"}));
+  EXPECT_FALSE(config.delete_tool.enabled);
+}
+
+TEST(Config, RenderNamesDeleteSettingAndCallsOutWhenEnabled) {
+  // docs/16's promise: nothing unusual can be in force silently. D19's own overturn
+  // condition -- delete set once in a file and forgotten -- is exactly what the second
+  // half of the marked line exists to surface.
+  Config config;
+  const std::string disabled_text = config.render();
+  EXPECT_NE(disabled_text.find("delete.enabled"), std::string::npos);
+  EXPECT_EQ(disabled_text.find("⚠"), std::string::npos);
+
+  ASSERT_TRUE(apply(config, {"--delete"}));
+  const std::string flagged = config.render();
+  EXPECT_NE(flagged.find("⚠ delete is enabled"), std::string::npos);
+  EXPECT_EQ(flagged.find("not this invocation"), std::string::npos)
+      << "a flag is this invocation's own decision";
+
+  Config from_file;
+  ASSERT_TRUE(apply_json(from_file, parse(R"({"delete": {"enabled": true}})"), kBase));
+  EXPECT_NE(from_file.render().find("not this invocation"), std::string::npos);
+}
+
+TEST(Config, AFlagOverridesAFileEnablingDelete) {
+  Config config;
+  ASSERT_TRUE(apply_json(config, parse(R"({"delete": {"enabled": true}})"), kBase));
+  ASSERT_TRUE(apply(config, {"--no-delete"}));
+  EXPECT_FALSE(config.delete_tool.enabled);
+  EXPECT_EQ(config.origin(Field::DeleteEnabled), ConfigSource::Flag);
+}

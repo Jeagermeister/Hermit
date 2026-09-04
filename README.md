@@ -49,7 +49,7 @@ authority · **I**ndependent verification · **T**iered dispatch.
 | [REQUIREMENTS.md](./REQUIREMENTS.md) | what this must do, each requirement traced to a measured failure |
 | [SCOPE.md](./SCOPE.md) | what gets built, read, or ignored — and why |
 | [ROADMAP.md](./ROADMAP.md) | sequencing, and what must be settled before code |
-| [ROUTING.md](./ROUTING.md) | the tool surface: three tiers, the eight structural tools plus the opt-in `shell`, who may call what |
+| [ROUTING.md](./ROUTING.md) | the tool surface: three tiers, the eight structural tools plus the opt-in `delete` and `shell`, who may call what |
 | [FLOW.md](./FLOW.md) | the same thing drawn: request path, one mutating call, the supervisor turn |
 | [FAQ.md](./FAQ.md) | the questions an evaluator asks first — shell, Python, "why not wait for better models" — each with what it concedes |
 | [DECISIONS.md](./DECISIONS.md) | the hard-to-reverse choices, and what would overturn each |
@@ -166,6 +166,13 @@ per-turn tree diff to rehash unconditionally, closing a gap [D13](./DECISIONS.md
 `MAP_SHARED` write can change a file's bytes without moving the timestamp/size tuple the default
 diff reuses hashes from.
 
+**`delete` landed 2026-09-04** ([D19](./DECISIONS.md)), the first tool this project deferred on
+its own evidence and then admitted on it: [ROUTING.md](./ROUTING.md) §11's two conditions —
+working undo, and a retested selective-delete task holding at more than three pinned repeats —
+were met by D14 and by sweep 3. It is opt-in, gated on an observation this session, and its
+bytes reach the store before the name goes; the erased `tally.py` this project started from would
+now be one listing and one flag away. Dry-run was decided against in the same decision.
+
 So: the stories' mechanics run, and their structural guarantees now hold. The MCP frontend
 shipped as [ROUTING.md](./ROUTING.md) §12 step 6, and §12 remains the honest odometer.
 
@@ -196,7 +203,7 @@ The evidence sits in three places:
 | Path | What |
 |---|---|
 | `src/hermit/core/` | Library code. `sandbox` (R1), `tool` (D4's interface), `fsio` (the one open primitive), `sha256` (R3's hash), `observed` (the staleness guard), `backup` (R4's archive) |
-| `src/hermit/core/tools/` | The eight structural Tier 0 tools — read, list, find, grep, hash, write, edit, move — [ROUTING.md](./ROUTING.md) §4's surface, verified per call, plus `shell`: the ninth, kernel-confined by [D10](./DECISIONS.md), off by default behind `--shell` |
+| `src/hermit/core/tools/` | The eight structural Tier 0 tools — read, list, find, grep, hash, write, edit, move — [ROUTING.md](./ROUTING.md) §4's surface, verified per call, plus two registered only on request: `delete` — one file the model has already read or listed, its bytes preserved before the name goes ([D19](./DECISIONS.md), `--delete`) — and `shell`, kernel-confined by [D10](./DECISIONS.md) (`--shell`) |
 | `src/hermit/ollama/` | The only layer that speaks HTTP: client and R9 preflight |
 | `src/hermit/supervisor/` | The turn: `loop` (dispatch and the R8 bounds), `session` (history and the context budget), `compact` (D17: rebuilds the window from the tree once it fills, rather than trimming), `wire` (the JSON bridge between `core`'s pure data and the model), `verify` (R6's per-turn hash diff of the tree — `force_rehash` whenever `shell` is registered, closing [D13](./DECISIONS.md)'s gap), `judge` (what the stated post-conditions came to), `semantic` (D15: judges `satisfies:` expectations — a fresh model session reading the tree, never the transcript), `reinvoke` (R7: re-invokes with the one concrete remaining failure, fresh session each attempt), `undo` (R4's other half: enumerate, restore and retention over the backup store) — [D7](./DECISIONS.md)'s middle layer |
 | `src/hermit/app/` | `config`, `toolset` (composing the tools), `expect` (post-conditions, parsed against a root) and `mcp` (the JSON-RPC frontend), shared by the CLI and MCP surfaces |
@@ -256,7 +263,7 @@ prints, in so many words, what it did and did not check. After every turn it tak
 the whole tree and prints what actually moved, owing nothing to the model's reply (R6's
 observation half, `--no-verify` to skip it).
 
-Add `--shell` and a ninth, kernel-confined tool joins the menu ([D10](./DECISIONS.md)): the model
+Add `--shell` and a kernel-confined tool joins the menu ([D10](./DECISIONS.md)): the model
 can run an opaque shell command, still writable only inside `--root`, still killed at a wall-clock
 bound (`--shell-timeout`, default 60s, R8) — as a whole process group, so nothing it backgrounds
 outlives the kill. It refuses to start rather than silently run unconfined if this machine's own
@@ -266,6 +273,12 @@ confinement probe cannot confirm the kernel is actually enforcing the ruleset:
 hermit agent --root ~/scratch --model qwen35-agent --shell --shell-timeout 30 \
   'Count the lines in every .md file in this folder and write the totals to counts.txt.'
 ```
+
+Add `--delete` and the model may remove a file ([D19](./DECISIONS.md)): one it has already read
+or listed this session, one per call, its bytes preserved in the backup store before the name
+goes, so `hermit undo` can put it back. Off by default, and independent of `--shell` — with
+shell on and delete off, the only removal path the model has is `rm` under the confined shell,
+which is neither gated nor backed up, and `agent` prints a note saying so.
 
 State a post-condition with `--expect` and it prints a verdict too: each expectation in the order
 written, met or unmet or undecidable, decided from the tree and never from the reply. Exit 3 means

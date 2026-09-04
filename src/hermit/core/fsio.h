@@ -112,6 +112,12 @@ struct OpenedFile {
 /// makes that a refusal rather than a hang).
 [[nodiscard]] std::expected<OpenedFile, IoError> open_regular(const SandboxPath& path);
 
+/// SHA-256 of an open descriptor's whole content, as hex. Reads with pread from offset
+/// zero so the caller's file position is untouched, in constant memory -- the one
+/// implementation for every tool that hashes what it already holds open (move's both
+/// ends, delete's result row), so R3's hash cannot drift between them.
+[[nodiscard]] std::expected<std::string, IoError> sha256_of_fd(int fd);
+
 struct FileContent {
   std::string bytes;
   struct ::stat meta {};

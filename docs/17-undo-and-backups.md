@@ -6,7 +6,8 @@ The design record is [D14](../DECISIONS.md).
 
 ## The store
 
-One generation per overwriting mutation — a `write` over an existing file, an `edit` — landed
+One generation per mutation that would destroy bytes — a `write` over an existing file, an
+`edit`, a `delete` — landed
 in a directory **outside the sandbox root**: by default `.hermit-backups-<root name>` beside
 the root, or wherever `--backups` points (it must be outside the root). Outside for two
 load-bearing reasons: the model must never be able to list, read, edit or move its own undo
@@ -40,6 +41,11 @@ mistake becomes two. Both mutations are an explicit flag away.
 restore path also re-resolves the recorded target through the sandbox on the way out, so a
 hand-edited store row or a planted symlink cannot carry a restore outside the root.
 
+**A deleted file comes back the same way.** `delete` ([D19](../DECISIONS.md)) preserves the
+bytes before the name goes, so its generation sits in the listing like any other. Restoring it
+recreates the file at its recorded path — and, since absence has no bytes, preserves nothing
+first.
+
 ## Retention
 
 Generations older than `--keep-hours` (default **72**) are pruned when an `agent` job starts
@@ -66,4 +72,6 @@ Stated here so it is read before it is needed:
   of restores you read off the listing, not one command.
 - **It does not cover what `shell` did.** Only the structural mutating tools feed the store.
   A shell command that overwrites a file bypasses it — one more reason `shell` is opt-in, and
-  one more thing the per-turn changeset (which does see shell's effects) is for.
+  one more thing the per-turn changeset (which does see shell's effects) is for. A shell `rm`
+  bypasses it too, which is why `--delete` exists beside `--shell`: a removal path that is
+  both gated and preserved ([D19](../DECISIONS.md)).

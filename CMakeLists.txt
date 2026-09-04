@@ -194,6 +194,7 @@ add_library(hermit_core
   src/hermit/core/sandbox.cpp
   src/hermit/core/sha256.cpp
   src/hermit/core/tool.cpp
+  src/hermit/core/tools/delete.cpp
   src/hermit/core/tools/edit.cpp
   src/hermit/core/tools/find.cpp
   src/hermit/core/tools/grep.cpp

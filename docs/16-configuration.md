@@ -6,7 +6,7 @@ Settings come from four places, overlaid field by field in increasing precedence
 
 `hermit config` prints the resolved set with the origin of each value, and it is a product
 surface, not a debugging aid: anything unusual in force — a raised clamp, a waived tools gate,
-shell enabled, a non-loopback URL — prints as a marked line, so nothing unusual can be in
+shell or delete enabled, a non-loopback URL — prints as a marked line, so nothing unusual can be in
 force silently.
 
 ## Two things Hermit will never do
@@ -54,6 +54,9 @@ while you believed you had changed it.
   "shell": {
     "enabled": false,
     "timeout_s": 60
+  },
+  "delete": {
+    "enabled": false
   },
   "expectations": [
     "exists:falcon-index.md",

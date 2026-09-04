@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -9,12 +10,16 @@
 #include <vector>
 #include <unistd.h>
 
+#include <hermit/core/fsio.h>
 #include <hermit/core/sandbox.h>
+#include <hermit/core/tool.h>
 
 namespace fs = std::filesystem;
 using hermit::Sandbox;
 using hermit::app::resolve_backup_dir;
+using hermit::app::ShellOptions;
 using hermit::app::to_string;
+using hermit::app::ToolSet;
 
 namespace {
 
@@ -79,3 +84,45 @@ TEST_F(ToolsetTest, ToStringNamesBothPathsForTheCallersMessage) {
 }
 
 }  // namespace
+
+// --- registration order -----------------------------------------------------------------
+// Order is part of the contract (toolset.h): it fixes the byte order of the tool
+// definitions in every prompt. The eight never move; the two opt-in tools append, delete
+// before shell.
+
+namespace {
+std::vector<std::string> names_of(const ToolSet& set) {
+  std::vector<std::string> out;
+  for (const auto& tool : set.registry().tools()) out.emplace_back(tool->spec().name);
+  return out;
+}
+const std::vector<std::string> kEight{"read", "hash", "list", "find",
+                                      "grep", "write", "edit", "move"};
+}  // namespace
+
+TEST_F(ToolsetTest, TheEightRegisterInTheDocumentedOrderAndNothingElseByDefault) {
+  auto set = ToolSet::tier0(tmp_ / "backups");
+  ASSERT_TRUE(set.has_value());
+  EXPECT_EQ(names_of(*set), kEight);
+}
+
+TEST_F(ToolsetTest, DeleteRegistersNinthAndShellLast) {
+  auto with_delete = ToolSet::tier0(tmp_ / "backups", std::nullopt, hermit::kDefaultMaxReadBytes,
+                                    /*with_delete=*/true);
+  ASSERT_TRUE(with_delete.has_value());
+  std::vector<std::string> expected = kEight;
+  expected.push_back("delete");
+  EXPECT_EQ(names_of(*with_delete), expected);
+
+  auto both = ToolSet::tier0(tmp_ / "backups", ShellOptions{root_, std::chrono::seconds{5}},
+                             hermit::kDefaultMaxReadBytes, /*with_delete=*/true);
+  ASSERT_TRUE(both.has_value());
+  expected.push_back("shell");
+  EXPECT_EQ(names_of(*both), expected);
+
+  auto shell_only = ToolSet::tier0(tmp_ / "backups", ShellOptions{root_, std::chrono::seconds{5}});
+  ASSERT_TRUE(shell_only.has_value());
+  std::vector<std::string> nine = kEight;
+  nine.push_back("shell");
+  EXPECT_EQ(names_of(*shell_only), nine) << "shell alone is still ninth, as before D19";
+}

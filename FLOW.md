@@ -8,10 +8,11 @@ disagree, the source is right and the diagram is a bug. That constraint is delib
 place stating the architecture is a second place for it to drift, which is the failure
 [tool.h](./src/hermit/core/tool.h) exists to make unrepresentable elsewhere.
 
-**Dashed = not built yet.** Status as of 2026-09-01 — the sandbox, all eight Tier 0 tools with
+**Dashed = not built yet.** Status as of 2026-09-04 — the sandbox, all eight Tier 0 tools with
 per-call verification, the staleness guard, the backup store, the agent loop that drives the
-local model, `shell` (registered ninth, gated by an explicit config flag and a live confinement
-probe; see [ROUTING.md](./ROUTING.md) §12 step 3), the MCP frontend
+local model, `delete` (registered ninth on request, gated on observation and backed up first;
+[D19](./DECISIONS.md)), `shell` (registered last, gated by an explicit config flag and a live
+confinement probe; see [ROUTING.md](./ROUTING.md) §12 step 3), the MCP frontend
 ([ROUTING.md](./ROUTING.md) §12 step 6), and — in diagram 3 — the full verify/judge/re-invoke
 ring that makes the loop a supervisor ([ROUTING.md](./ROUTING.md) §12 steps 4b–4c) are all
 merged and tested. What is left dashed is Tier 1 (`triage`, `summarize`; §12 step 7), deferred
