@@ -63,9 +63,7 @@ repository's branches on the remote are 168 with a pre-rewrite id, all in the ta
 rewrite time. That figure does not reconcile with anything measurable now, and is not the
 basis of this map.)
 
-## Where the old objects live, and where they still do
-
-Two places, and the second one matters.
+## Where the old objects live
 
 The pre-rewrite tips of 34 branches were kept as `backup/pre-rewrite-20260904/<branch>` tags on
 the operator's laptop clone when the rewrite was force-pushed. Those tags were never pushed and
@@ -73,21 +71,24 @@ will not be; pushing them would republish the strings the rewrite removed. All 1
 commits are reachable from those 34 tips, so the local coverage is complete even though the
 remote carried 51 branches at the time.
 
-**The pre-rewrite objects also still exist on GitHub, and are still publicly served.** This
-repository is mirrored there, and a force-push does not delete what it unreferences — it only
-makes it unreachable from any branch. Checked on 2026-09-06: the pre-rewrite commits are
-returned by the API by full id, and a pre-rewrite blob still containing the username was
-fetched over `raw.githubusercontent.com` at a force-pushed commit id. So the 2026-09-04 rewrite
-achieved its goal on Gitea and on every fresh clone, but **not** on the mirror, where the old
-objects remain reachable to anyone who knows an id. Removing them there needs GitHub to
-garbage-collect unreachable objects, which is a support request, not something a push can do.
-Tracked in [DOCKET.md](../DOCKET.md) 1.14.
+For two days they lived in a second place, and this file said so. A force-push does not delete
+what it unreferences, and the GitHub mirror went on serving the pre-rewrite commits by id: on
+2026-09-06 a pre-rewrite blob still containing the username was fetched over
+`raw.githubusercontent.com` at a force-pushed commit id. The rewrite had achieved its goal on
+Gitea and in every fresh clone, and missed the one remote that was public.
 
-This is why the disaster-recovery argument for committing the map — "if the laptop is lost, the
-old ids become unrecoverable" — should be read as weaker than it looks: today the objects are
-recoverable from the mirror by anyone holding an id. It is also why the left-hand column of the
-table below is not inert. Publishing it is a deliberate choice, made with the sentence above in
-view.
+**That is closed.** The same day, the mirror was deleted and recreated rather than waiting on a
+support queue, which destroys the repository's object store outright. The mirror carried no
+forks, no network members, no issues, no pull requests and no releases, so deleting it cost a
+single star and the repository description. The Gitea push-mirror then repopulated all 53
+branches from the source of truth. The fetches that had returned the username now return 404,
+and because Gitea carries no tags at all, the rebuilt mirror carries none either — the backup
+tags stayed where they were.
+
+So the ids in the left-hand column below now resolve nowhere public, and the laptop's backup
+tags are the only place the objects themselves survive. That is what makes this file worth
+committing: it is the durable record of what those ids meant, and after 2026-09-06 it is the
+only one.
 
 ## The full map
 

@@ -44,9 +44,17 @@ message or body), and a `LICENSE` at the root.
   remote holds those 168 plus 13 made since. More seriously, **the scrub did not reach the
   GitHub mirror.** A force-push unreferences objects, it does not delete them, and GitHub
   still serves the pre-rewrite commits by id — a blob still containing the username was
-  fetched from `raw.githubusercontent.com` on 2026-09-06 at a force-pushed id. Docketed as
-  [DOCKET.md](./DOCKET.md) 1.14; the fix is a GitHub Support request to garbage-collect
-  unreachable objects. The old→new mapping is [docs/91-commit-map.md](./docs/91-commit-map.md). Every other clone (Kitchen, Framework) diverges the way
+  fetched from `raw.githubusercontent.com` on 2026-09-06 at a force-pushed id.
+
+  **Fixed the same day.** Not by the support request 1.14 first proposed — the mirror is a
+  push-mirror that holds nothing of its own, with no forks, network members, issues, pull
+  requests or releases, so it was deleted and recreated, which destroys the object store
+  outright. Cost: one star. The Gitea mirror repopulated all 53 branches immediately; the
+  pre-rewrite ids now 404 over both the API and `raw.githubusercontent.com`, and the rebuilt
+  mirror carries no tags. The old→new mapping is
+  [docs/91-commit-map.md](./docs/91-commit-map.md).
+
+  Every other clone (Kitchen, Framework) diverges the way
   the August attribution scrub made them diverge, and takes the same tag-then-reset.
 
 - [x] ~~**Fix two Tailscale URLs that would go public.**~~ — **done 2026-09-04.** The README's
