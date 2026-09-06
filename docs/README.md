@@ -6,7 +6,7 @@ its own words, and links down to the design documents where the binding reasonin
 chapter here and a design document ever disagree, the design document is right and the chapter
 is stale; say so in an issue rather than trusting either silently.
 
-Status statements in these chapters are dated. The book was last brought current **2026-09-04**.
+Status statements in these chapters are dated. The book was last brought current **2026-09-06**.
 
 ## Where to start
 
@@ -59,6 +59,7 @@ Status statements in these chapters are dated. The book was last brought current
 | chapter | what it answers |
 |---|---|
 | [90. Glossary](./90-glossary.md) | R1–R9, D1–D19, and the project's working vocabulary |
+| [91. The commit map](./91-commit-map.md) | Why the ids the measurements pin do not resolve, and what they map to |
 
 ## How this book relates to the design documents
 

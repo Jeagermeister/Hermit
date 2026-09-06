@@ -35,7 +35,18 @@ message or body), and a `LICENSE` at the root.
   — became `user user`. Verified before the push: 186 commits intact, every branch's file
   list identical, the scored-field fingerprints of all six files unchanged, commit
   messages untouched. The mirror was set private for the duration; making it public again
-  is a separate, deliberate step. Every other clone (Kitchen, Framework) diverges the way
+  is a separate, deliberate step.
+
+  **Not finished, found 2026-09-06.** Two corrections to the paragraph above. One commit
+  message *was* rewritten — filter-repo rewrites abbreviated hashes it finds in messages, and
+  one message cites a commit by its short id. And the 186 figure does not reconcile with what
+  is measurable now: 168 pre-rewrite commits are reachable from the backup tags, and the
+  remote holds those 168 plus 13 made since. More seriously, **the scrub did not reach the
+  GitHub mirror.** A force-push unreferences objects, it does not delete them, and GitHub
+  still serves the pre-rewrite commits by id — a blob still containing the username was
+  fetched from `raw.githubusercontent.com` on 2026-09-06 at a force-pushed id. Docketed as
+  [DOCKET.md](./DOCKET.md) 1.14; the fix is a GitHub Support request to garbage-collect
+  unreachable objects. The old→new mapping is [docs/91-commit-map.md](./docs/91-commit-map.md). Every other clone (Kitchen, Framework) diverges the way
   the August attribution scrub made them diverge, and takes the same tag-then-reset.
 
 - [x] ~~**Fix two Tailscale URLs that would go public.**~~ — **done 2026-09-04.** The README's

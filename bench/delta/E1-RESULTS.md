@@ -193,6 +193,11 @@ Arm A tokens are not reported: the only capture path is the recording proxy, who
 destabilisation bug is documented in `bench/fsops/NEXT-RUN.md` and unfixed. Arm B
 tokens come from hermit's own per-turn accounting.
 
+The `hermit` id above is the one recorded at collection time and does not resolve today: the
+repository's history was rewritten on 2026-09-04. `a5722dc` is now `68cfc63`; the mapping for
+every pre-rewrite id is [docs/91-commit-map.md](../../docs/91-commit-map.md). The recorded id
+is left as collected rather than edited to match the new history.
+
 ## What would change this picture
 
 More power: the five excluded tasks join when shell and delete land, and that re-run is

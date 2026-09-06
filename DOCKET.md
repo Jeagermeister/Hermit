@@ -294,11 +294,11 @@ statement appears — then the paragraph writes itself.
 
 ### 1.12 Housekeeping, found while surveying
 
-- **FAQ.md's build claim is stale twice.** It says "819 tests at zero warnings"; main has 821
-  (PR #52, still open, fixes the count), and on this laptop's GCC 16.2.1 build on 2026-09-04
-  `confine_test.cpp` produced seven warnings. Either fix the warnings and keep the claim, or
-  narrow the claim to the compiler it is true on. The count should stop being a literal in
-  prose or get a test that pins it.
+- **FAQ.md's build claim is still stale on warnings.** The count half was fixed by PR #52 on
+  2026-09-04 and `FAQ.md` now says 821. The "zero warnings" half is still false: this laptop's
+  GCC 16.2.1 build produced seven warnings in `confine_test.cpp` that day. Either fix the
+  warnings and keep the claim, or narrow it to the compiler it is true on. The count should
+  stop being a literal in prose, or get a test that pins it.
 - **`FileState` carries no `is_regular`.** `supervisor/verify.h` records this as a known gap.
   Close it or leave it; decide, since it is the one gap the verifier names about itself.
 - **hermit-bench still carries the owner-column username** in four tracked result files and
@@ -308,6 +308,16 @@ statement appears — then the paragraph writes itself.
   comments at `tool.h:9` and `tool.h:55` should say where it lives instead.
 
 ### 1.13 The commit map from the history rewrite
+
+**Struck 2026-09-06 — landed.** The map is [docs/91-commit-map.md](./docs/91-commit-map.md):
+all 168 pre-rewrite commits, verified by rewriting each old blob and comparing object hashes
+(19,634 blobs compared, 1,120 differ, all explained, none unexplained), plus a separate message
+comparison the tree check cannot do. The five ids the measurements cite are called out at the
+top of it, and errata notes landed in this repo's `bench/delta/E1-RESULTS.md` and in
+hermit-bench's four results documents and README.
+
+Building it falsified this entry's own premise twice: the old objects are **not** gone from
+every remote — see 1.14 — and 9 of the 168 ids never changed. Both are corrected in the map.
 
 **Why.** The 2026-09-04 history rewrite renumbered every commit. The benchmark results pin
 the supervisor at hashes that no longer resolve: E3/E4/E5 pin `070da1e`, E1 pins `a5722dc`,
@@ -328,6 +338,33 @@ the mapping is committed in this repository.
 **Struck if.** The mapping is committed and the errata lands — then it is done.
 
 **Size.** small. **Needs.** none.
+
+### 1.14 The 2026-09-04 rewrite did not reach the GitHub mirror
+
+**Why.** Found on 2026-09-06 while building the commit map. A force-push unreferences objects;
+it does not delete them, and GitHub keeps serving unreachable commits by id indefinitely. The
+pre-rewrite commits are still returned by GitHub's API, and a pre-rewrite blob still containing
+the username was fetched over `raw.githubusercontent.com` at a force-pushed id. So the scrub
+succeeded on Gitea and on every fresh clone, and failed on the one remote that is public.
+`TODO.md`'s account of the rewrite reads as finished; it is not.
+
+**Shape.** Ask GitHub Support to garbage-collect unreachable objects on the mirror, which is
+the only supported way to drop them, and re-run the same fetch to confirm. If that is refused
+or too slow, the alternative is deleting and recreating the mirror repository, which costs the
+stars and forks it does not have. Then correct `TODO.md`, and `docs/91-commit-map.md`'s section
+on where the old objects live.
+
+**Done when.** Fetching a known pre-rewrite blob by id over `raw.githubusercontent.com` returns
+404, checked for more than one id.
+
+**Struck if.** The mirror is taken down, or the exposure is accepted deliberately and the
+documents say so instead of implying otherwise.
+
+**Size.** small, but it is mostly waiting on someone else. **Needs.** none.
+
+**Open.** Whether the full 168-row map should be public while this is unresolved — its
+left-hand column is an index of exactly which ids are still fetchable. Publishing the five the
+measurements already cite costs nothing new; publishing all 159 changed ids is a decision.
 
 ---
 
@@ -360,7 +397,7 @@ to be argued with, not a plan.
 
 | # | Item | Why here | Size |
 |---|---|---|---|
-| 1 | Commit map (1.13) | Correctness; the benchmark pins are unfetchable until it lands, and the map dies with this session | small |
+| 1 | ~~Commit map (1.13)~~ | **Done 2026-09-06.** | small |
 | 2 | Release tag + checksum (1.4) | Serves the outside-user goal directly; no dependency; an hour's work | small |
 | 3 | Contributor surface (1.5) | Serves the outside-user goal; small | small |
 | 4 | Cloud provenance paragraph (1.11) | Small, dated, no dependency | small |

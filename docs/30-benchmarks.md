@@ -89,6 +89,11 @@ comparable within your machine, not with ours. The repository's own `GUIDE.md` w
 reading order and the pitfalls (the recording proxy destabilises long runs; reasoning level
 has never been a controlled variable; per-cell numbers at n=3 are not capability).
 
+**The supervisor commits pinned in those results no longer resolve.** This repository's history
+was rewritten on 2026-09-04, and that renumbered every commit made before it. The recorded ids
+are kept as collected rather than edited to match; [chapter 91](./91-commit-map.md) maps each
+one to the commit you can actually fetch.
+
 ## How to read any number from this project
 
 - **A paired delta on one machine** is the strongest form here; a raw suite score ranks
