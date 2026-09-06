@@ -37,7 +37,8 @@ This repository's own `bench/fsops/results/` carries the same three `harness_com
 The ids recorded *inside* the committed result files are left as collected — they are what the
 harness observed at collection time, and editing a result to match a later history would be
 falsifying the record. Resolve them through this table instead. hermit-bench applies the same
-rule to its own earlier rewrite, in that repository's README under *Provenance*.
+rule to its own earlier rewrite, in that repository's README under *Provenance* — that
+repository is not released yet, so the cross-reference is to a document you cannot open today.
 
 ## How the map was checked
 

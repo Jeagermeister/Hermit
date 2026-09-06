@@ -1601,7 +1601,7 @@ conditions. Both hold, so the tool is built — narrowly, and off by default.
 (`undo.cpp`, pinned by `RestoreOfAMissingFileRecreatesItAndPreservesNothing`), which is
 exactly the shape a deleted file's recovery takes. *(2) A retested `06_selective_delete`
 holds for the model being built against, at more than three repeats with a `--deterministic`
-pass.* [SWEEP3](https://github.com/Jeagermeister/hermit-bench/blob/main/fsops/SWEEP3.md) —
+pass.* SWEEP3 (`hermit-bench/fsops/SWEEP3.md`) —
 2026-08-26, this laptop, five repeats, temperature 0, seed 1337, through the fsops harness
 under Hermes Agent v0.20.0, so it measures the *model's* selective-delete behaviour and not
 this tool, which did not exist — scores task 06 at **5/5 for `gemma-e4b` and 5/5 for `qwen-9b`**, the two models the laptop

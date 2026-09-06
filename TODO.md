@@ -50,9 +50,11 @@ message or body), and a `LICENSE` at the root.
   the August attribution scrub made them diverge, and takes the same tag-then-reset.
 
 - [x] ~~**Fix two Tailscale URLs that would go public.**~~ — **done 2026-09-04.** The README's
-  evidence list now points at [hermit-bench](https://github.com/Jeagermeister/hermit-bench)
-  and names the private tournament repository without linking it; the logo build script's
-  comment names `aiscrub` without a URL. No Tailscale hostname remains in tracked files.
+  evidence list now points at **hermit-bench** and names the private tournament repository
+  without linking it; the logo build script's comment names `aiscrub` without a URL. No
+  Tailscale hostname remains in tracked files. *(Amended 2026-09-06: the hermit-bench link was
+  removed too. It was pointing at a repository that is not released, so it 404'd for everyone
+  but the operator. It is now named without a link, the same way the tournament repository is.)*
 
 - [x] ~~**Rewrite the README lede.**~~ — **done 2026-09-04.** It opens with the thesis — *never
   trust a completion claim; check the tree* — then what Hermit is in one paragraph, why it

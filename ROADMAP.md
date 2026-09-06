@@ -567,11 +567,12 @@ model calling this as a tool.
         a 14% malformed-tool-call transport-failure rate on the native endpoint; all
         recorded in the results with the discarded collections quarantined, not deleted.
         The raw data — result files, per-run logs, the wire capture, and both quarantined
-        collections — is published in the **hermit-bench** repository (the extraction
-        DESIGN.md always planned); this repo keeps the suites and the analysis documents.
-      - [x] ~~**E3/E4/E5**~~ — **ran 2026-08-19** on Kitchen, out of the public
-        [hermit-bench](https://github.com/Jeagermeister/hermit-bench) repository where the
-        suites and results now live. E3, the E1 question at 27B: **105/105 in all three
+        collections — is held in the **hermit-bench** repository (the extraction
+        DESIGN.md always planned), which is not released yet; this repo keeps the suites
+        and the analysis documents.
+      - [x] ~~**E3/E4/E5**~~ — **ran 2026-08-19** on Kitchen, out of the
+        **hermit-bench** repository where the suites and results now live. E3, the E1
+        question at 27B: **105/105 in all three
         cells**, verdict/referee agreement 70/70 — supervision cost nothing measurable, at a
         ~3.5× wall-clock advantage. E4, four repository-scale tasks against a 30B coder: the
         tier discriminates (55% baseline), supervision is a wash at five repeats, and D15's
@@ -731,7 +732,7 @@ model calling this as a tool.
 
 ## The measured levers — what the 2026-08-19 series priced
 
-E3/E4/E5 ran from the [hermit-bench](https://github.com/Jeagermeister/hermit-bench)
+E3/E4/E5 ran from the **hermit-bench**
 repository (its `TODO.md` keeps the experiment-side docket: the E6 tier question, harness
 work, statistical power). This section is the supervisor-side half, in evidence order —
 every item cites the published result that motivates it, and none is scheduled by being
