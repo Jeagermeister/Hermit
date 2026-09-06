@@ -33,8 +33,8 @@ Four task-level wins, zero losses, three ties: p = 0.125, which seven paired tas
 improve on, reported as underpowered rather than as proof. In the 70 supervised runs nothing was
 destroyed, nothing escaped the sandbox, and no undeclared file changed. The protocols, the
 graders and every run behind that table live in
-[hermit-bench](https://github.com/Jeagermeister/hermit-bench), frozen before the first run, with
-the losses published beside the wins.
+**hermit-bench**, a separate repository, frozen before the first run, with the losses recorded
+beside the wins. It is not released yet — see *The evidence sits in three places* below.
 
 The name is a backronym, kept because each letter names a requirement or a design rule with a
 measured failure behind it ([REQUIREMENTS.md](./REQUIREMENTS.md)): **H**ash-verified ·
@@ -154,9 +154,13 @@ The evidence sits in three places:
 
 - **[`bench/fsops/`](./bench/fsops/) in this repo** — the first 259 runs, on the dev laptop
   (RTX 5080 16 GB) through Hermes Agent. This is what REQUIREMENTS.md is built on.
-- **[hermit-bench](https://github.com/Jeagermeister/hermit-bench)** — the benchmark repository:
-  the later sweeps, the pre-registered delta experiments (E1, E3, E4, E5), and every run behind
-  the numbers this README quotes.
+- **hermit-bench** — the benchmark repository: the later sweeps, the pre-registered delta
+  experiments (E1, E3, E4, E5), and every run behind the numbers this README quotes. **Not
+  released yet**, and named without a link for that reason. The remaining model results, a
+  hardware pass, and a full replication run on machines that are not ours are still outstanding;
+  until those land, nobody could take the suite and reproduce these numbers, and a benchmark
+  that cannot be rerun is something you would have to take on trust. It gets linked here when
+  it can be rerun.
 - The earlier OpenCode tournaments and the 144 Phase 0 diagnostic runs on `kitchen-desktop`
   (W7900) live in a private repository; what transferred from them is recorded in
   [ROADMAP.md](./ROADMAP.md) Phase 0.

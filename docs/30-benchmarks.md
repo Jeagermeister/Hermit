@@ -3,9 +3,9 @@
 Every number this project quotes is meant to be reproducible, auditable, or refutable by
 someone who is not us. The suites, pre-registered protocols, and complete results live in the
 **hermit-bench** repository — a sibling repository, extracted from this one so the
-measurements can stand on their own; the copy under this repo's `bench/` is the legacy
-in-tree version, kept because older documents cite it. This chapter is the user's map — what
-each experiment asks, what it found, and how to run it yourself.
+measurements can stand on their own, and not released yet; the copy under this repo's `bench/`
+is the legacy in-tree version, kept because older documents cite it. This chapter is the
+user's map — what each experiment asks, what it found, and how to run it yourself.
 
 ## The rules the numbers were collected under
 
@@ -70,7 +70,10 @@ Five pre-registered experiments, each frozen before its first run.
 
 ## Reproducing
 
-Both suites are plain Python 3 over a local Ollama daemon, in the hermit-bench repository:
+Both suites are plain Python 3 over a local Ollama daemon, in the hermit-bench repository.
+That repository is not released yet — the remaining model results, a hardware pass and a
+replication run on machines that are not ours are still outstanding — so the commands below
+describe the shape of a reproduction rather than one you can run today:
 
 ```bash
 cd fsops
