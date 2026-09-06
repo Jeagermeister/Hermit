@@ -341,6 +341,15 @@ the mapping is committed in this repository.
 
 ### 1.14 The 2026-09-04 rewrite did not reach the GitHub mirror
 
+**Struck 2026-09-06 — fixed, the same day it was found, and not the way this entry proposed.**
+The shape below assumed a GitHub Support request. It was unnecessary: the mirror is a
+push-mirror of Gitea, holds nothing of its own, and had no forks, network members, issues,
+pull requests or releases — so deleting and recreating it destroyed the object store outright
+and cost one star. The Gitea mirror repopulated 53 branches immediately. Verified after:
+the pre-rewrite ids return 404 over both the API and `raw.githubusercontent.com`, `main`
+matches Gitea, and the rebuilt mirror carries no tags. Deletion should have been the first
+option in this entry rather than the fallback.
+
 **Why.** Found on 2026-09-06 while building the commit map. A force-push unreferences objects;
 it does not delete them, and GitHub keeps serving unreachable commits by id indefinitely. The
 pre-rewrite commits are still returned by GitHub's API, and a pre-rewrite blob still containing
@@ -355,16 +364,17 @@ stars and forks it does not have. Then correct `TODO.md`, and `docs/91-commit-ma
 on where the old objects live.
 
 **Done when.** Fetching a known pre-rewrite blob by id over `raw.githubusercontent.com` returns
-404, checked for more than one id.
+404, checked for more than one id. *(Met: five ids checked, all 404.)*
 
 **Struck if.** The mirror is taken down, or the exposure is accepted deliberately and the
 documents say so instead of implying otherwise.
 
 **Size.** small, but it is mostly waiting on someone else. **Needs.** none.
 
-**Open.** Whether the full 168-row map should be public while this is unresolved — its
-left-hand column is an index of exactly which ids are still fetchable. Publishing the five the
-measurements already cite costs nothing new; publishing all 159 changed ids is a decision.
+**Open, and now closed too.** Whether the full 168-row map should be public was a live
+question while the ids were still fetchable, since the left-hand column indexed exactly what to
+ask for. They are not fetchable any more, so the column is inert and the map stands as
+published.
 
 ---
 
