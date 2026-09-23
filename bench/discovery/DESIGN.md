@@ -1,7 +1,14 @@
 # Discovery — a replay-guided exploration loop for Hermit
 
 **Status: draft, 2026-09-21. Docketed as 1.15–1.21. Nothing here is scheduled, and nothing
-here is measured.** This file is a design target, argued out before code exists, in the same
+here is measured.**
+
+**Status, 2026-09-22: the gate (1.15) is passed as written, with one gap.** The domain is
+sum–difference Γ in [`sumdiff/`](./sumdiff/README.md), an exact objective computed outside
+the candidate's confined root. Hand controls score 1.0 and 1.034421. One `qwen3.8:27b`
+attempt found a set scoring 1.046752 but ran out of budget before putting it in `solve.py`,
+so the attempt as delivered scored 1.0 ([record](./sumdiff/results/2026-09-22-gate/RECORD.md)).
+n = 1, so no rate is claimed. Everything below this line is still unmeasured. This file is a design target, argued out before code exists, in the same
 discipline as `bench/delta/DESIGN.md`. It exists so the idea can be killed cheaply at the
 right component rather than expensively at the end.
 

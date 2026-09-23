@@ -404,6 +404,15 @@ here, which is why this is first.
 
 **Size.** small-medium. **Needs.** 30B tier (to produce the two differing attempts).
 
+**Status, 2026-09-22: passed as written, one gap named.** Domain: sum–difference Γ,
+[bench/discovery/sumdiff/](./bench/discovery/sumdiff/README.md). The objective is exact and
+computed outside the candidate's root, because a score file inside it can be rewritten by the
+candidate (tested). Hand controls: 1.0 against 1.034421. One `qwen3.8:27b` attempt on Kitchen
+searched its way to a set the official scorer confirms at 1.046752. It spent its 1,500 s
+budget before writing that set into `solve.py`, so the delivered attempt scored 1.0. n = 1.
+The gap, discoveries that never become deliverables, passes to 1.17. The record is
+[RECORD.md](./bench/discovery/sumdiff/results/2026-09-22-gate/RECORD.md).
+
 ### 1.16 Attempt-tree recording for discovery runs
 
 **Why.** A replay simulator reads recorded trees; nothing records them. A run's durable
