@@ -376,6 +376,164 @@ question while the ids were still fetchable, since the left-hand column indexed 
 ask for. They are not fetchable any more, so the column is inert and the map stands as
 published.
 
+### 1.15 A scored discovery domain — the discovery cluster's gate
+
+**Cluster of seven (1.15–1.21), designed together in
+[bench/discovery/DESIGN.md](./bench/discovery/DESIGN.md), 2026-09-21.** The source idea is an
+external preprint (Dream-RSI, arXiv:2609.14858v1) — a replay-simulator loop for improving a
+discovery system's exploration policy offline. It is a design idea, not evidence: single
+trajectories, no variance reported, unverified repo. The cluster's rule is that the idea dies
+at the cheapest component that can kill it rather than the most expensive one.
+
+**Why.** Every result in the source paper sits on a domain with a cheap scalar score. Hermit's
+verdicts are met/unmet predicates; nothing in the loop — replay objective, policy selection,
+validation — exists without a number to optimise. This is the gate the whole cluster hangs on.
+
+**Shape.** One task: a program in a sandbox root that a model is asked to improve against a
+*measured* number (script runtime on a pinned input, or a fixed scorer's objective value),
+scored by an existing confined path writing `eval/score.json`. Structural predicates still
+gate correctness; the optimisation target is scalar. Measured, not model-judged, for the
+first domain — D15's judge is a model and its stochasticity weakens replay determinism, which
+is the cheap property the design buys.
+
+**Done when.** The task and scorer exist on one machine, and two known-different attempts
+score measurably differently.
+
+**Struck if.** No honest scalar domain exists at local model tier — then the cluster closes
+here, which is why this is first.
+
+**Size.** small-medium. **Needs.** 30B tier (to produce the two differing attempts).
+
+**Status, 2026-09-22: passed as written, one gap named.** Domain: sum–difference Γ,
+[bench/discovery/sumdiff/](./bench/discovery/sumdiff/README.md). The objective is exact and
+computed outside the candidate's root, because a score file inside it can be rewritten by the
+candidate (tested). Hand controls: 1.0 against 1.034421. One `qwen3.8:27b` attempt on Kitchen
+searched its way to a set the official scorer confirms at 1.046752. It spent its 1,500 s
+budget before writing that set into `solve.py`, so the delivered attempt scored 1.0. n = 1.
+The gap, discoveries that never become deliverables, passes to 1.17. The record is
+[RECORD.md](./bench/discovery/sumdiff/results/2026-09-22-gate/RECORD.md).
+
+### 1.16 Attempt-tree recording for discovery runs
+
+**Why.** A replay simulator reads recorded trees; nothing records them. A run's durable
+record today is trace lines and `usage.jsonl`; docket 1.1's structured trace is the event
+source this item consumes.
+
+**Shape.** Each attempt becomes a node with a parent reference, a preservable workspace (the
+backup store already does this), the proposal text, the scorer's diagnostics, and the score
+from 1.15. Records hash-chained, so the replay pool is provably unmodified after the fact —
+a meta-agent that can rewrite its own history is a failure mode this repository already has
+requirements about.
+
+**Done when.** A full discovery round is reconstructable from node records alone, without
+parsing stdout.
+
+**Struck if.** 1.1 lands in a shape that already carries tree structure — then this folds
+into it.
+
+**Size.** medium. **Needs.** none (depends on 1.1 and 1.15, not on a model).
+
+### 1.17 Parallel refinement runner
+
+**Why.** The source design runs W attempts in parallel; D1 is one blocking thread per
+process. DOCKET 1.10 already wrote the answer — N processes on disjoint roots, join on hash —
+and it has been waiting for a workload. This is that workload.
+
+**Shape.** W branch workspaces under one job root, each disjoint and each driven by its own
+process, with R8 wall-clock bounds per attempt and the join verified by hash. The policy
+driving it is fixed parallel-refine — the paper's own Round-1 policy and, deliberately,
+1.21's controlled baseline.
+
+**Done when.** W workers × R refinements × one round completes inside its budget and yields a
+fully recorded tree via 1.16.
+
+**Struck if.** 1.10 is struck — but this *is* a workload needing N roots, so more likely this
+item is what un-strikes 1.10 into a phase.
+
+**Size.** large. **Needs.** 30B tier.
+
+### 1.18 Exploration policy as data
+
+**Why.** Today the exploration policy is compiled C++ ("retry ≤3 with one failure"). The whole
+loop hangs on that becoming a consulted artifact. This is the seam; everything after it is
+application of the seam.
+
+**Shape.** A policy file read per decision round: which recorded frontiers to extend, batch
+composition up to W, stop conditions. **Data before code** — the paper rewrites code, and
+code is exactly where its leakage guardrails are weakest. A data schema is auditable and
+refusable at the router, the way the tool menus already are. Code only if a data schema is
+measured too narrow.
+
+**Done when.** One discovery round runs identically under the fixed policy expressed as data,
+and a hand-edited policy produces measurably different allocation.
+
+**Struck if.** 1.15 is struck.
+
+**Size.** medium. **Needs.** none.
+
+### 1.19 Replay simulator over recorded trees
+
+**Why.** The cheap half of the idea, and the half with zero model risk. It is a measurement
+instrument; instruments are where this repository starts things.
+
+**Shape.** Offline, model-free, deterministic reveal: a candidate policy navigates a frozen
+recorded tree, is shown recorded children only, never generates, and is scored — best score
+seen, minus cost per attempt, plus a parallelism term. Lives in bench tooling; promotion to
+the product is a later parity.tsv conversation. Inherits the paper's bound by design: replay
+can only re-navigate recorded branches, so it answers *which re-use of seen work pays best*,
+never *what to try that was never tried*.
+
+**Done when.** Two hand-written policies score differently over the same recorded tree and
+the ordering survives inspection against the tree's actual contents.
+
+**Struck if.** 1.16's records prove insufficient to reconstruct a navigable tree — a record
+design failure, fixed there.
+
+**Size.** medium. **Needs.** none.
+
+### 1.20 The dreaming loop
+
+**Why.** The RSI claim proper: a policy-development agent reads replay trajectories, revises
+the policy (1.18's artifact), M revisions per round are scored by 1.19, and the best
+redeploys online with the incumbent always in the pool. The paper's only guarantee — never
+worse *on the replay objective* — is quoted with its scope; it says nothing about online
+quality, which is 1.21's entire job.
+
+**Shape.** A larger local model as the development agent, driven through D7's machine front
+door or a bench-side script; its own tokens metered through the same 1.1 trace as everything
+else, because the source paper never counted that cost and this repository has E2 docketed
+precisely because it counts. Anti-leakage is *mechanical* where possible: the replay API
+exposes prefix-observable state only — the unrepresentable-not-forbidden trick D6 plays with
+paths — rather than the paper's prompt-level "never look at unrevealed cells".
+
+**Done when.** One full loop runs unattended: online round → recorded tree → replay-scored
+revisions → policy redeployed → next online round.
+
+**Struck if.** 1.21 returns null; also struck if the development agent cannot produce legal
+policies at 30B tier after honest effort — that is a capability measurement worth recording,
+not a failure to hide.
+
+**Size.** large. **Needs.** 30B tier.
+
+### 1.21 The validation experiment — the exit gate
+
+**Why.** The two questions the source paper did not answer: at matched discovery-agent
+budgets, does a replay-improved policy beat fixed parallel-refine online, across enough
+repeats to see through the variance Phase 0 measured — and does replay score predict online
+outcome at all? The mechanism assumes the second; nobody has plotted it. This repository's
+whole culture exists to run exactly this experiment.
+
+**Shape.** Pre-registered, frozen protocol in hermit-bench's manner on 1.15's domain: paired
+runs, fixed vs replay-improved, repeats sized against measured variance, plus the
+replay-score/online-outcome correlation. Exit criteria written down before the first run.
+Losses recorded beside wins, whichever way it lands.
+
+**Done when.** The protocol is frozen and the result is recorded with a verdict either way.
+
+**Struck if.** 1.15 is struck — no domain, no experiment.
+
+**Size.** small for the protocol; medium including runs. **Needs.** 30B tier.
+
 ---
 
 ## 2 · Considered and set aside
@@ -394,6 +552,10 @@ Recorded so the next session does not re-open them without new information.
   system. Nothing has changed on either count.
 - **A smaller judge under a larger worker.** Real, but that is E2 territory and E2 is now
   runnable; measure before designing.
+- **Adopting the Dream-RSI loop without its validation experiment.** Considered alongside the
+  1.15–1.21 cluster (2026-09-21). The preprint asserts replay-to-online transfer and never
+  measures it; an unmeasured self-improvement claim is precisely what this repository exists
+  to distrust. The loop is docketed only with 1.21 attached as the exit gate.
 
 ---
 
@@ -421,3 +583,8 @@ to be argued with, not a plan.
 Unscheduled by design: Tier 1 tools (1.8) and multi-root (1.10) wait for a caller and a
 workload respectively. Kitchen-gated items (retry quality gating, E6 calibration) live in
 ROADMAP and hermit-bench, not here.
+
+The **discovery cluster (1.15–1.21)** is also deliberately not in this order: it is a
+dependency chain argued in [bench/discovery/DESIGN.md](./bench/discovery/DESIGN.md), to be
+scheduled or struck as a unit. Its internal order is fixed — 1.15 gates everything, 1.21
+gates the claim — and it consumes 1.1 when that lands.

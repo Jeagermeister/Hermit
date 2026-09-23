@@ -1,0 +1,125 @@
+{
+  "domain": "sumdiff",
+  "docket": "1.15",
+  "model_tag": "qwen3.8:27b-q8_0",
+  "model_digest": "8f5fb6b71ea00052cbe8545738c55ce61112c4e571cb60ca4dad00b131766039",
+  "ollama_version": "ollama version is 0.34.2",
+  "hermit_commit": "8a4fc7b400555785a67606e32467a1d8aa0c98c0",
+  "hermit_sha256": "c5f1250fcce173dea037f3ca5405a2973efa6428459ed61eba054779d6698508",
+  "host": "cachyos-kitchen-pc-x8664",
+  "kernel": "7.2.6-1-cachyos",
+  "cpu": "Intel(R) Core(TM) i7-14700KF",
+  "gpu": "NVIDIA RTX PRO 5000 72GB Blackwell, 73415 MiB, 615.71.09",
+  "python": "3.14.7",
+  "seed_sha256": "79bf4104536722457932c53d0af5cdce65f32a519a6018a1b0f24ce364504657",
+  "instruction": "solve.py prints a finite set A of integers, separated by spaces. Its score is Gamma(A) = log(|A+A| / |A|) / log(|A-A| / |A|), where A+A is the set of all pairwise sums and A-A the set of all pairwise differences. Higher is better; the current solve.py prints an interval, which scores exactly 1.0. Improve solve.py so the set it prints scores as high as you can. Run `python3 check.py` to see the current score of solve.py. Rules: edit only solve.py; Python standard library only; it must finish within 60 seconds; at most 20000 distinct integers; max(A) - min(A) at most 1048576; print only the integers.",
+  "argv": [
+    "/home/sirjeager/Source/Hermit/build/hermit",
+    "agent",
+    "--root",
+    "$WORK/a1/root",
+    "--model",
+    "qwen3.8:27b-q8_0",
+    "--backups",
+    "$WORK/a1/backups",
+    "--shell",
+    "--shell-timeout",
+    "90",
+    "--max-turns",
+    "24",
+    "--budget",
+    "1500",
+    "--attempts",
+    "1",
+    "--expect",
+    "exists:solve.py",
+    "solve.py prints a finite set A of integers, separated by spaces. Its score is Gamma(A) = log(|A+A| / |A|) / log(|A-A| / |A|), where A+A is the set of all pairwise sums and A-A the set of all pairwise differences. Higher is better; the current solve.py prints an interval, which scores exactly 1.0. Improve solve.py so the set it prints scores as high as you can. Run `python3 check.py` to see the current score of solve.py. Rules: edit only solve.py; Python standard library only; it must finish within 60 seconds; at most 20000 distinct integers; max(A) - min(A) at most 1048576; print only the integers."
+  ],
+  "started_at": "2026-09-22T20:36:30-0500",
+  "agent_exit": 1,
+  "agent_wall_s": 1537.0,
+  "finished_at": "2026-09-22T21:02:07-0500",
+  "final_root": [
+    {
+      "path": "__pycache__/check.cpython-314.pyc",
+      "bytes": 5541,
+      "sha256": "76ff454a7358a52a0ca5c4d69d4542f298a67aa2a381b70ff94cf9acde8c91b1"
+    },
+    {
+      "path": "__pycache__/exhaust.cpython-314.pyc",
+      "bytes": 1395,
+      "sha256": "04a86200e38592da06f6c96a72e86183febf10a1ce09cdbeec0617ae1319c0e9"
+    },
+    {
+      "path": "analyze.py",
+      "bytes": 587,
+      "sha256": "f723742afa100b1c628e957929a9ba9b5a25fce7af6ee44bdc9f6711fd999440"
+    },
+    {
+      "path": "blocks.py",
+      "bytes": 1159,
+      "sha256": "8eee3e994ff3585648aa9d219343a2d4de81b7524dd87f5d5c0597175aa5bedb"
+    },
+    {
+      "path": "brute.py",
+      "bytes": 600,
+      "sha256": "d094f13b1e921bfd36312cea6c36a71414f4435bf87045d6bc90482cfeb881e2"
+    },
+    {
+      "path": "check.py",
+      "bytes": 3374,
+      "sha256": "b4d4e99315eda8e3559b9ea2bb848464c07ced027e87174bb5529b5974e7725e"
+    },
+    {
+      "path": "convex.py",
+      "bytes": 924,
+      "sha256": "ef933dcb22fdd8761622e262b741d76cc6583e51990e6f03405f3471b8f7c25d"
+    },
+    {
+      "path": "dense.py",
+      "bytes": 1385,
+      "sha256": "79da60fe520a7b5dc327b1757f2ee98f7774fa752076617cc434cf78d538d74f"
+    },
+    {
+      "path": "exhaust.py",
+      "bytes": 709,
+      "sha256": "f08358380077402c279090735926d66b252c79ba0cbe8465e5d36245033941f3"
+    },
+    {
+      "path": "exp.py",
+      "bytes": 1250,
+      "sha256": "6a7d794874d2427c1404f5816f1e88a92dcdbd2dc2d8f942e2cc763d878eeb7b"
+    },
+    {
+      "path": "ls.py",
+      "bytes": 1679,
+      "sha256": "9d2c34b6af32d1cd36b9119f96a61e7e39765a0151f6bd734bd271e9d67dabf7"
+    },
+    {
+      "path": "ls2.py",
+      "bytes": 1605,
+      "sha256": "df370967bb2e06a2e91ad9eb6c3ea6822fdf762872cc9a15479478d98a4b506c"
+    },
+    {
+      "path": "search1.py",
+      "bytes": 914,
+      "sha256": "aaa2f8e85222f0096124f791552308b6195243402a9f268b0c7ef9a160ae3016"
+    },
+    {
+      "path": "search2.py",
+      "bytes": 1220,
+      "sha256": "7ca120b10b21bf13c1d1b48f2a92ed72c0006f5ec900fa923f01e1bd70849e4f"
+    },
+    {
+      "path": "search3.py",
+      "bytes": 1122,
+      "sha256": "80e31a5ac3cea2db2e0c581176cea51fd8c7ee482dd5683e1b29ea97ac9a5a65"
+    },
+    {
+      "path": "solve.py",
+      "bytes": 217,
+      "sha256": "79bf4104536722457932c53d0af5cdce65f32a519a6018a1b0f24ce364504657"
+    }
+  ],
+  "solve_py_changed": false
+}

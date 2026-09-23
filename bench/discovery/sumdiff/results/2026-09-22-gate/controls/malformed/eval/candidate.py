@@ -1,0 +1,1 @@
+print("the answer is 0 2 3 4 7 11 12 14")

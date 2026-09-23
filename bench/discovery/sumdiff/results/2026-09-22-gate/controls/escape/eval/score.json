@@ -1,0 +1,54 @@
+{
+  "scorer": "bench/discovery/sumdiff/score.py",
+  "scorer_version": 1,
+  "scorer_sha256": {
+    "score.py": "25a1f4e09c9768a41ffd11db943c2e2f13d95b02622f2b42d10791084c9a7450",
+    "objective.py": "b4d4e99315eda8e3559b9ea2bb848464c07ced027e87174bb5529b5974e7725e"
+  },
+  "objective": "Gamma(A) = log(|A+A|/|A|) / log(|A-A|/|A|), higher is better",
+  "caps": {
+    "max_elements": 20000,
+    "max_span": 1048576,
+    "wall_clock_s": 60
+  },
+  "confinement": "hermit mcp shell tool (D10 Landlock; server refuses to start unless its probe reports Enforced); objective computed outside the root",
+  "hermit_commit": "8a4fc7b400555785a67606e32467a1d8aa0c98c0",
+  "hermit_sha256": "c5f1250fcce173dea037f3ca5405a2973efa6428459ed61eba054779d6698508",
+  "host": "cachyos-kitchen-pc-x8664",
+  "scored_at": "2026-09-22T20:38:51-0500",
+  "candidate_sha256": "6cb2ea8a06636ec25921f9f71d4713131bb8a2563ce84b8fff4780641c8ddbae",
+  "score": 1.0,
+  "valid": true,
+  "reason": null,
+  "deterministic_across_repeats": true,
+  "runs": [
+    {
+      "repeat": 0,
+      "elapsed_s": 0.22,
+      "stdout_sha256": "3f31bc2191b8b55d447838e14cbce78ca44feba5b46c902ade4cc2eb7b68a041",
+      "stderr_tail": "refused /home/sirjeager/sumdiff-escape: 13 ; refused /tmp/sumdiff-escape: 13\n",
+      "valid": true,
+      "reason": null,
+      "score": 1.0,
+      "n": 4,
+      "n_raw_tokens": 4,
+      "span": 3,
+      "sumset_size": 7,
+      "diffset_size": 7
+    },
+    {
+      "repeat": 1,
+      "elapsed_s": 0.216,
+      "stdout_sha256": "3f31bc2191b8b55d447838e14cbce78ca44feba5b46c902ade4cc2eb7b68a041",
+      "stderr_tail": "refused /home/sirjeager/sumdiff-escape: 13 ; refused /tmp/sumdiff-escape: 13\n",
+      "valid": true,
+      "reason": null,
+      "score": 1.0,
+      "n": 4,
+      "n_raw_tokens": 4,
+      "span": 3,
+      "sumset_size": 7,
+      "diffset_size": 7
+    }
+  ]
+}
