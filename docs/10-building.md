@@ -59,6 +59,8 @@ unmeasured and unlikely to matter on a tool that is blocked on inference.
 ## What you end up with
 
 `build/hermit` — one binary, no runtime dependencies beyond the distro's shared libraries.
+Later chapters write it as a bare `hermit`: put `build/` on your `PATH`, or read each
+`hermit` as `./build/hermit`.
 There is no install target and no per-machine build variant: machine differences are
 configuration, never code ([ROUTING.md](../ROUTING.md) §9). The binary's subcommands are the
 subject of the [CLI reference](./13-cli-reference.md); the fastest way to something running is

@@ -48,8 +48,9 @@ first.
 
 ## Retention
 
-Generations older than `--keep-hours` (default **72**) are pruned when an `agent` job starts
-and on `undo --prune` — nothing else ever deletes from the store. The reasoning, verbatim
+Generations older than `--keep-hours` (default **72**) are pruned when an `agent` job starts,
+when `hermit mcp` starts (at a fixed 72 hours, whatever `--keep-hours` says), and on
+`undo --prune` — nothing else ever deletes from the store. The reasoning, verbatim
 from the decision: supervised trees live under git, so the store covers the gap between a bad
 mutation and the operator noticing. It is not the archive; git is.
 

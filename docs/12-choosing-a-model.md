@@ -85,9 +85,10 @@ The early sweeps read as "thinking is what makes these models work": thinking mo
 4–15× slower and also the only accurate ones. Sweep 3 corrected the dichotomy — `gemma-e4b`
 is accurate *and* fast — and also disclosed that no sweep has yet genuinely controlled the
 reasoning level (the flag never reached the wire in the harness those sweeps drove). Treat
-"thinking vs not" as an open cost question, not a settled law. What is settled: budget for it
-with `--budget`, because a thinking model that exhausts its token budget mid-think returns
-empty content with no error.
+"thinking vs not" as an open cost question, not a settled law. What is settled: a thinking model
+that exhausts its generation budget mid-think returns empty content with no error. That
+budget is a quarter of the context window, so `--max-num-ctx` is the knob that raises it;
+`--budget` bounds wall-clock seconds, not tokens.
 
 ## Models to avoid, by name
 

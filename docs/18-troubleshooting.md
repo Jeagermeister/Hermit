@@ -5,12 +5,12 @@ Hermit being difficult is Hermit refusing to guess.
 
 ## Preflight refuses the model
 
-- **"context undetermined" or below the floor.** The gate asks for the model's
+- **"/api/show did not report a context length…" or "…below the N floor".** The gate asks for the model's
   *architectural* context — what it was built for — from the live daemon. A model whose
   architecture is genuinely under the floor (`llama3-groq-tool-use:8b` at 8192) cannot be
   raised by any setting. The floor itself is `--min-context` if your use genuinely needs
   less; the waiver prints as a marked line.
-- **"no tools capability."** The model cannot emit structured tool calls; it would score zero
+- **"model does not support tools."** The model cannot emit structured tool calls; it would score zero
   for reasons unrelated to filesystem ability. `--no-tools` waives the gate, which is only
   useful for `session`-style probing — `agent` with a toolless model is pointless.
 - **Preflight passes, the model still behaves oddly.** Two known traps pass every live gate
@@ -65,9 +65,10 @@ that failed. Nothing a `shell` command touches appears at all.
 
 ## The reply came back empty, no error
 
-Check the summary for `done_reason == length`. A thinking model that exhausts its generation
-budget mid-think writes nothing: it reasoned, ran out, and stopped. Raise the budget or use a
-non-thinking model for small tasks ([chapter 12](./12-choosing-a-model.md)).
+Look for `[hit the generation budget]` on that turn's trace line. A thinking model that
+exhausts its generation budget mid-think writes nothing: it reasoned, ran out, and stopped.
+The budget is a quarter of the context window, so raise `--max-num-ctx` (not `--budget`,
+which is wall-clock seconds), or use a non-thinking model for small tasks ([chapter 12](./12-choosing-a-model.md)).
 
 ## I raised `--max-num-ctx` and the machine hard-froze
 

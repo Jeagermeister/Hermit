@@ -86,7 +86,8 @@ in a live run — and the limit is printed on screen rather than hidden.
 ## Why native code
 
 Not for inference speed — the process is blocked on the model and always will be. The wins are
-structural: bounded sessions mean many process launches, and a static binary pays ~10 ms where
-a Python interpreter pays 1–3 s, every time; per-turn verification is real tree-walking and
+structural: bounded sessions mean many process launches, and this binary starts in under a
+millisecond (0.8 ms median, measured 2026-09-25) where a Python agent pays 1–3 s of imports,
+every time; per-turn verification is real tree-walking and
 hashing work; and one binary distributes where a Python environment does not. The honest
 version of this argument, concessions included, is in the [FAQ](../FAQ.md).

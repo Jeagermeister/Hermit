@@ -13,8 +13,10 @@ CLI drives, published from the same descriptor list that renders Ollama's tool d
 so there is no second schema to drift.
 
 This is also where the native-binary bet pays hardest: a caller invoking a tool pays process
-startup on every call, and bounded sessions mean many calls — ~10 ms for a static binary
-against 1–3 s for an interpreter.
+startup on every call, and bounded sessions mean many calls — under a millisecond
+for this binary (median 0.8 ms over 50 launches of `hermit config`, Kitchen, 2026-09-25)
+against 1–3 s for an interpreter loading an agent's imports. A bare `python3 -c pass` took
+6.9 ms on the same machine; the seconds are the imports, not the interpreter.
 
 ## The pitch, which is the ecosystem's warning inverted
 

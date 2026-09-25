@@ -67,8 +67,9 @@ caching isn't reliably available (see above). This is the honest number, not the
 | 13 | kimi-k2.7-code | $3,803 | No |
 | 15 | glm-5.1 | $3,980 | No |
 | 16 | deepseek-v4-pro | $5,248 | No |
+| 17 | glm-5.2 | $5,571 | No |
 | 17 | glm-5.3 | $5,571 | No |
-| 18 | kimi-k3 | $12,062 | No |
+| 19 | kimi-k3 | $12,062 | No |
 
 **Only three models clear $300/mo at this volume without cutting the volume itself**, and two of
 those three have no verified coding/agentic benchmark (see below). This is the real argument for
@@ -95,5 +96,5 @@ it's not paying full input price on a resent-every-turn history.
 
 Whether any of these models' chat templates preserve tool definitions after a tool result, or
 preserve the system prompt once tools are offered — the two template gates in chapter 12 that
-disqualified models that looked fine on paper before ([hermes-agent-model-constraints]). Nothing
+disqualified models that looked fine on paper before ([chapter 12](./12-choosing-a-model.md)). Nothing
 in this pass checked that; it has to be probed by hand per model, same as the local field was.
