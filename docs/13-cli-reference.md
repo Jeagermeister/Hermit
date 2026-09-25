@@ -1,8 +1,9 @@
 # 13. CLI reference
 
-One binary, eight subcommands. This chapter matches the binary as built 2026-09-04;
-`hermit --help` is always the tie-breaker, and `hermit config` shows every setting actually in
-force and where it came from.
+One binary, eight subcommands. This chapter matches the binary as built 2026-09-04, and was
+re-checked against it 2026-09-25. `hermit help` prints a summary, not the full surface: it
+omits `--expect` and `--unjudged` and the `--budget` default of 300 s, all documented below.
+`hermit config` shows every setting actually in force and where it came from.
 
 ```
 hermit resolve   --root DIR <path>...
@@ -63,7 +64,7 @@ Exists because the token estimate is the one thing no unit test can settle. Each
 what the session expected against what Ollama actually evaluated. Run it with
 `--max-num-ctx 2048` to watch history being *trimmed* deliberately — the alternative, left
 to the server, is a silent discard of nearly everything
-([troubleshooting](./18-troubleshooting.md) § the context cliff). `session` has no tree to
+([troubleshooting](./18-troubleshooting.md#the-model-forgot-everything-mid-run)). `session` has no tree to
 verify, so it never reaches the reconstruction path `agent` uses; the trim is the whole of
 what this command demonstrates.
 

@@ -685,6 +685,20 @@ that routes users to the book, evaluators to the design record, and contributors
 files, and nothing else. The design documents are not shortened: they are the record, and
 their length is their evidence. The README part touches claims and waits for 1.22's sign-off.
 
+**Progress, 2026-09-25.** The correctness half is done: eight verified errors fixed across
+chapters 1, 10, 12, 13, 17, 18, 20 and 31, one broken link, and one claim replaced by a
+measurement. The binary is dynamically linked, not static, and starts in 0.8 ms median, not
+~10 ms. The same "static, ~10 ms" wording stands in README.md and FAQ.md and waits for the
+sign-off diff. Friction the audit found, all judgment and none of it done:
+
+- no sample verdict (ch. 14) and no sample `undo` listing (ch. 17), so the reader cannot
+  picture the output before running it;
+- no copy-paste `mcp.json` and no smoke test in ch. 20 (1.24 answers this);
+- ch. 12's measured field is all from the 16 GB laptop, with nothing for 24–72 GB cards;
+- ch. 15 has fifteen lines of rationale before the flag, and no pre-check for Landlock;
+- ch. 30 promises "run it yourself" eight lines before saying the commands cannot run today;
+- the glossary does not define Kitchen, fsops, E1–E5 or "sweep 3".
+
 **Done when.** The book matches the binary, and the README's first screen routes each of the
 three readers in one click.
 

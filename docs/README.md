@@ -6,7 +6,7 @@ its own words, and links down to the design documents where the binding reasonin
 chapter here and a design document ever disagree, the design document is right and the chapter
 is stale; say so in an issue rather than trusting either silently.
 
-Status statements in these chapters are dated. The book was last brought current **2026-09-06**.
+Status statements in these chapters are dated. The book was last brought current **2026-09-06**, and corrected against the binary **2026-09-25**.
 
 ## Where to start
 
