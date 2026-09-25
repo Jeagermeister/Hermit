@@ -534,6 +534,181 @@ Losses recorded beside wins, whichever way it lands.
 
 **Size.** small for the protocol; medium including runs. **Needs.** 30B tier.
 
+### 1.22 Lead with the safe hands — the product track's frame
+
+**Cluster of nine (1.22–1.30), opened 2026-09-25 by operator direction: make Hermit a product
+someone other than its author installs and keeps using.** The design documents argue *why*
+at length. This track is about *getting there*: install, first run, the front door for
+agents, speed, and a test of whether anyone wants it.
+
+**Why.** The README pitches Hermit as a supervisor for small local models. Its guarantees are
+reduced authority (one root, kernel-enforced for shell), hash-verified changes, undo, and
+completion decided from the tree. None of them depends on the model being small. A frontier
+agent calling Hermit over MCP gets the same guarantees, and FAQ.md's answer to "why not wait
+for better models" already says why they stay useful: better models make fewer mistakes, not
+more trustworthy reports. *This is argument: nobody outside this repository has used Hermit
+that way yet, which 1.30 exists to find out.*
+
+**Shape.** The README's first screen says what Hermit does for *any* agent: reduced
+authority, a verified changeset, undo, a verdict from the tree. Small local models stay the
+default and the evidence; the MCP front door moves up. Touches README claims, so it lands as a
+proposed diff for operator sign-off, not by edit.
+
+**Done when.** A README revision with this framing is merged, and it cites the existing
+evidence at its real width without extending it.
+
+**Struck if.** 1.30 finds no agent user wants reduced authority over their own IDE's tools.
+Then the small-local-model framing stands, stated as the whole product.
+
+**Size.** small (the diff); the argument is the work. **Needs.** none.
+
+### 1.23 `hermit doctor` — one command that says what is wrong
+
+**Why.** A first run can fail on Ollama being down, a model failing preflight, Landlock
+unenforced, or a missing root, and each failure is reported by a different subcommand today.
+Chapter 18 of the book is 139 lines of symptoms because nothing diagnoses them in one place.
+
+**Shape.** Read-only. Checks, in order: daemon reachable and its version; D10's own
+confinement probe; every installed model through R9 preflight, with the ones that pass
+listed first; the resolved configuration and where each value came from. Prints one
+suggested next command. Everything it checks already exists as a library call. This is
+composition, not new mechanism.
+
+**Done when.** On a machine with one fault planted at a time (daemon stopped, Landlock
+disabled, only failing models installed), `doctor` names the fault and the fix each time.
+
+**Struck if.** 1.4's install path makes first-run failure rare enough to not matter, which
+would need an outside user to show it.
+
+**Size.** small. **Needs.** 9B tier (one model passing preflight).
+
+### 1.24 MCP setup that can be pasted
+
+**Why.** For the frame in 1.22, the MCP registration *is* the install. Chapter 20 explains
+Kiro's config by hand; other clients (Claude Code, OpenCode, Cursor) each want a slightly
+different JSON shape, and a wrong absolute path fails silently inside the client.
+
+**Shape.** A subcommand, name to be settled (`hermit mcp --print-config <client>` is the
+candidate), that prints a ready block for the named client with this binary's absolute path
+and the chosen `--root`. Refuses a relative root for the same reason R1 exists. One book
+section per client, each tested once against the real client.
+
+**Done when.** Each listed client, configured only from the printed block, lists Hermit's
+tools and completes one verified write.
+
+**Struck if.** A client-side standard for MCP registration makes per-client blocks pointless.
+
+**Size.** small. **Needs.** none (the calling client brings the model).
+
+### 1.25 Expectation shortcuts
+
+**Why.** `--expect preserved:notes.txt=notes.txt` is exact and unfamiliar. The common cases
+are "this file must exist" and "do not touch these", and a newcomer should not have to learn
+the grammar to state either.
+
+**Shape.** Flags that compile to existing expectations and nothing else: `--creates PATH`
+→ `exists:PATH`; `--keep PATH` → `preserved:PATH=PATH`. The verdict prints the compiled form,
+so what is judged is never hidden behind the sugar. No new predicate kind; D15's judged
+criteria are out of scope here.
+
+**Done when.** The shortcuts parse to the identical `Expectations` set as their long forms,
+proven in the suite, and the quickstart uses them.
+
+**Struck if.** Review finds the aliases hide more than they save.
+
+**Size.** small. **Needs.** none.
+
+### 1.26 Thinking control — measured first
+
+**Why.** Hermit sends no `think` field today (checked 2026-09-25: no occurrence in the client).
+In the 1.15 gate run, five of 22 turns produced 79% of 55,806 generated tokens, most of it
+thinking (RECORD.md, corrected). REQUIREMENTS R8 measured thinking models at 65–107 s per
+turn against 6–17 s for non-thinking ones, and also found the thinking ones were the accurate
+ones. So less thinking may cost accuracy, and that trade is the whole item.
+
+**Shape.** First a measurement, frozen before it runs: the E1 task set, one thinking model,
+default against reduced thinking (whatever `think` values the daemon version supports),
+paired, with accuracy and wall clock both reported. Only if the trade favours it: a config
+key, off by default until the numbers say otherwise.
+
+**Done when.** The measurement is recorded with a verdict either way.
+
+**Struck if.** Reduced thinking loses accuracy outside the noise floor at every setting tried.
+
+**Size.** medium. **Needs.** 30B tier.
+
+### 1.27 Keep the model warm, and reuse the prefix — measured first
+
+**Why.** Every attempt is a fresh session by design (R7), and the system prompt and tool
+menu are identical each time. Hermit sets no model `keep_alive` (checked 2026-09-25; the only
+keep-alive in the client is the HTTP connection's). Whether reloads and repeated prompt
+evaluation cost anything that matters is unmeasured.
+
+**Shape.** Measure first: time-to-first-token and prompt eval time on attempt 1 against
+attempts 2–3 of a retried task, under Ollama defaults. If the gap is real, set `keep_alive`
+per request and check Ollama's prefix reuse; vLLM's prefix caching (D9) is the stronger
+answer if it ever runs here.
+
+**Done when.** The measurement is recorded, and either a change lands with before/after
+numbers or the item is struck with them.
+
+**Struck if.** Reload and prefix cost is under a few percent of attempt wall clock.
+
+**Size.** small. **Needs.** 9B tier.
+
+### 1.28 The thirty-second demo
+
+**Why.** The whole pitch is one moment: a model says "done" over an untouched folder, and
+Hermit says no and names the missing file. The runs recorded that moment many times. None
+of them is watchable.
+
+**Shape.** A terminal recording (asciinema, text not video, so it carries no generated-media
+provenance) of a real run, not a staged one, with the model tag and date on screen. If the
+first honest recording shows the model succeeding, record that too and keep looking. The demo
+must not become the one run where the failure was coaxed.
+
+**Done when.** The recording is linked from the README's first screen.
+
+**Struck if.** Never; at worst it waits for 1.4.
+
+**Size.** small. **Needs.** 9B tier.
+
+### 1.29 A front door for newcomers
+
+**Why.** The repository root holds 15 Markdown files, 7,520 lines between them (counted
+2026-09-25). The book in `docs/` is the user path and is good, but a first visitor meets the
+design record first and has no way to tell which files are for them.
+
+**Shape.** Two parts. First, fix what is wrong in the book (a correctness audit against the
+binary, 2026-09-25). Second, one "Start here in five minutes" path at the top of the README
+that routes users to the book, evaluators to the design record, and contributors to 1.5's
+files, and nothing else. The design documents are not shortened: they are the record, and
+their length is their evidence. The README part touches claims and waits for 1.22's sign-off.
+
+**Done when.** The book matches the binary, and the README's first screen routes each of the
+three readers in one click.
+
+**Struck if.** Never; it can only be done badly.
+
+**Size.** small-medium. **Needs.** none.
+
+### 1.30 Three outside users — the demand test
+
+**Why.** Everything in 1.22–1.29 assumes someone wants this. Nobody outside this repository
+has installed Hermit, so that assumption is untested, and the "safe hands" frame in 1.22 is
+argument. This repository does not build on untested assumptions.
+
+**Shape.** After 1.4, 1.23 and 1.24 land: three people who already use agentic IDEs install
+Hermit from a release, register it, and use it on real work for a week. Record what each
+tried, where each got stuck, and whether they kept it. No survey; watch what they do.
+
+**Done when.** Three reports are recorded, whatever they say.
+
+**Struck if.** Never struck. If all three drop it, that is the result, and 1.22's frame is
+retracted in public.
+
+**Size.** medium (mostly waiting). **Needs.** none.
+
 ---
 
 ## 2 · Considered and set aside
@@ -570,15 +745,19 @@ to be argued with, not a plan.
 | # | Item | Why here | Size |
 |---|---|---|---|
 | 1 | ~~Commit map (1.13)~~ | **Done 2026-09-06.** | small |
-| 2 | Release tag + checksum (1.4) | Serves the outside-user goal directly; no dependency; an hour's work | small |
-| 3 | Contributor surface (1.5) | Serves the outside-user goal; small | small |
-| 4 | Cloud provenance paragraph (1.11) | Small, dated, no dependency | small |
-| 5 | Structured run trace (1.1) | Judge-usage logging, E2 metering and the hermit-bench parser all land on it | medium |
-| 6 | Template probes in preflight (1.2) | Closes an open ROADMAP question in code; hermit-bench's gate becomes one call | medium |
-| 7 | Verifier scale measurement (1.3) | Cheap, and it decides whether an optimisation item exists at all | small |
-| 8 | CI on the self-hosted runner (1.9) | Everything above it becomes safer to merge | medium |
-| 9 | Substrate matrix, then D11's probe (1.7) | The probe cannot be written before the matrix exists | small |
-| 10 | Fuzzing (1.6) | Strengthens the claims the README leads with; benefits from CI existing | medium |
+| 2 | Book corrections (1.29, first half) | Nothing about a user's first hour should be wrong | small |
+| 3 | Release tag + checksum (1.4) | Serves the outside-user goal directly; no dependency; an hour's work | small |
+| 4 | `hermit doctor` (1.23) | First-run failures diagnosed in one place | small |
+| 5 | Pasteable MCP setup (1.24) | For the 1.22 frame, registration is the install | small |
+| 6 | Positioning + README front door (1.22, 1.29) | Proposed diff; needs operator sign-off | small |
+| 7 | Contributor surface (1.5) | Serves the outside-user goal; small | small |
+| 8 | Cloud provenance paragraph (1.11) | Small, dated, no dependency | small |
+| 9 | Structured run trace (1.1) | Judge-usage logging, E2 metering and the hermit-bench parser all land on it | medium |
+| 10 | Template probes in preflight (1.2) | Closes an open ROADMAP question in code; hermit-bench's gate becomes one call | medium |
+| 11 | Verifier scale measurement (1.3) | Cheap, and it decides whether an optimisation item exists at all | small |
+| 12 | CI on the self-hosted runner (1.9) | Everything above it becomes safer to merge | medium |
+| 13 | Substrate matrix, then D11's probe (1.7) | The probe cannot be written before the matrix exists | small |
+| 14 | Fuzzing (1.6) | Strengthens the claims the README leads with; benefits from CI existing | medium |
 
 Unscheduled by design: Tier 1 tools (1.8) and multi-root (1.10) wait for a caller and a
 workload respectively. Kitchen-gated items (retry quality gating, E6 calibration) live in
@@ -588,3 +767,10 @@ The **discovery cluster (1.15–1.21)** is also deliberately not in this order: 
 dependency chain argued in [bench/discovery/DESIGN.md](./bench/discovery/DESIGN.md), to be
 scheduled or struck as a unit. Its internal order is fixed — 1.15 gates everything, 1.21
 gates the claim — and it consumes 1.1 when that lands.
+
+**The product track (1.22–1.30), added 2026-09-25**, is interleaved above where it is cheap
+and user-facing. The rest follows it: expectation shortcuts (1.25) after 1.4; the two speed
+measurements (1.26, 1.27) once the trace (1.1) can carry their numbers; the demo (1.28) after
+1.4 so it can show an installed binary; the demand test (1.30) last, once there is something
+to hand an outside user. Operator direction the same day puts this track ahead of the
+discovery cluster: the cluster stays designed and gated, and it does not bring a user.

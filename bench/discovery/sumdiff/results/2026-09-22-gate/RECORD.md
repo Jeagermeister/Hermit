@@ -50,8 +50,13 @@ Flags: `--shell --shell-timeout 90 --max-turns 24 --budget 1500 --attempts 1
 
 What happened, from the trace:
 
-- It spent all 1,500 s over 22 turns: 23 calls, none refused, no window rebuilds. Six turns
-  generated more than 6,000 tokens each, with 17k–30k characters of thinking.
+- It spent all 1,500 s over 22 turns: 23 calls, none refused, no window rebuilds. Five turns
+  generated more than 6,000 tokens each (6,791–12,231), with 16.9k–29.9k characters of
+  thinking, and those five account for 79% of the run's 55,806 generated tokens.
+
+  *(Corrected 2026-09-25: this line first said six turns. Recounted from `agent.log`, it is
+  five. The count had also been repeated in conversation as the case for a thinking-budget
+  lever; the recount strengthens that case, but the original number was still wrong.)*
 - It wrote 14 scratch scripts and never edited `solve.py`. The instruction said "edit only
   solve.py". The scorer copies only `solve.py`, so the extra files cost nothing, but the rule
   was not followed.
@@ -82,7 +87,7 @@ the attempt's result would credit the model with work it never committed to.
 
 ## Reproducing
 
-```
+```bash
 cmake --build build
 python3 bench/discovery/sumdiff/score.py bench/discovery/sumdiff/controls/conway.py /tmp/out
 python3 bench/discovery/sumdiff/attempt.py --model qwen3.8:27b-q8_0 \
