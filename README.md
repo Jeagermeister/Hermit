@@ -6,13 +6,30 @@
 
 **Never trust a completion claim; check the tree.**
 
-Hermit is a supervisor for small local models doing filesystem work. It hands a 3–12B model,
-running through Ollama on your own GPU, a menu of eight structural tools; runs every call inside
-one sandbox root; verifies each mutating call by hash and re-hashes the whole tree after every
-turn; and when the model says "done", inspects the tree instead of believing it. A stated
-post-condition the tree does not meet comes back as one concrete failure, handed to a fresh
-session, up to three times. Anything overwritten is backed up first to a store the model cannot
-reach, and nothing leaves the machine unless you pass `--allow-cloud`.
+Hermit is the hands an AI agent uses on your filesystem, with less authority than the agent
+would otherwise have. Every call runs inside one sandbox root; every mutating call is verified
+by hash, and the whole tree is re-hashed after every turn; anything the file tools overwrite,
+or the opt-in `delete` removes, is backed up first to a store the model cannot reach; and when
+the model says "done", Hermit inspects the tree instead of believing it. A stated
+post-condition the tree does not meet goes back to the model as one concrete failure, in a
+fresh session, up to three times.
+
+It is driven two ways ([D7](./DECISIONS.md)):
+
+- **By you, with a small model on your own GPU.** `hermit agent` hands a 3–12B model running
+  through Ollama a menu of eight structural tools, and nothing leaves the machine unless you
+  pass `--allow-cloud`. This is the default, and every measurement below comes from small
+  local models.
+- **By a larger agent, over MCP.** An agentic IDE registers Hermit as a stdio MCP server and
+  calls it for filesystem work. A typical stdio MCP server runs with all of the launching
+  user's authority; this one reduces it. The frontend is built and shipped. How it fares under
+  an outside caller is **not yet measured**: hermit-bench's E2 experiment and
+  [DOCKET 1.30](./DOCKET.md) are where it gets measured.
+
+The two halves of the value age differently. The retry half shrinks as models improve. The
+containment and verification half does not: no model of any size should hold more filesystem
+authority than the task needs, or be believed about what it changed. That is an argument, not
+a measurement, and the [FAQ](./FAQ.md) makes it with what it concedes.
 
 It exists because of a measurement, not a preference. Small local models can do this work, and
 they misreport having done it: across the 259 runs in [`bench/fsops/`](./bench/fsops/) and the
@@ -43,30 +60,16 @@ authority · **I**ndependent verification · **T**iered dispatch.
 
 ## Start here
 
-| document | what it answers |
+| you want to | read |
 |---|---|
-| [docs/](./docs/README.md) | **the book**: how to use Hermit — building, quickstart, choosing a model, the CLI, expectations, troubleshooting |
-| [REQUIREMENTS.md](./REQUIREMENTS.md) | what this must do, each requirement traced to a measured failure |
-| [SCOPE.md](./SCOPE.md) | what gets built, read, or ignored — and why |
-| [ROADMAP.md](./ROADMAP.md) | sequencing, and what must be settled before code |
-| [ROUTING.md](./ROUTING.md) | the tool surface: three tiers, the eight structural tools plus the opt-in `delete` and `shell`, who may call what |
-| [FLOW.md](./FLOW.md) | the same thing drawn: request path, one mutating call, the supervisor turn |
-| [FAQ.md](./FAQ.md) | the questions an evaluator asks first — shell, Python, "why not wait for better models" — each with what it concedes |
-| [DECISIONS.md](./DECISIONS.md) | the hard-to-reverse choices, and what would overturn each |
-| [parity.tsv](./parity.tsv) | machine-readable scope ledger; `tools/parity` reports drift |
-| [bench/fsops/](./bench/fsops/) | the evidence: 259 runs of local models doing filesystem work |
+| run it yourself | [Building](#building) below, then the [Quickstart](./docs/11-quickstart.md) and [Choosing a model](./docs/12-choosing-a-model.md) |
+| let your IDE's agent use it | [MCP and Kiro](./docs/20-mcp-and-kiro.md) |
+| decide whether to trust it | [The evidence](./docs/02-the-evidence.md), [the measurements](./docs/30-benchmarks.md), then the [FAQ](./FAQ.md) |
+| change it | [Building](./docs/10-building.md), [DECISIONS.md](./DECISIONS.md), and [DOCKET.md](./DOCKET.md) for what is open |
 
-**Scope in one line:** upstream is ~870k lines of non-test Python, and ~38k of it is in scope.
-The part that matters most — verification, backup, retry — has no upstream equivalent that these
-runs revealed. That last claim is inferred from behaviour, not from reading upstream's code; see
-[REQUIREMENTS.md](./REQUIREMENTS.md).
-
-
-Built in **C++** around **local inference** — Ollama today, vLLM from [D9](./DECISIONS.md).
-Inspired by [NousResearch Hermes Agent](https://github.com/nousresearch/hermes-agent) (Python),
-but **not a port of it**. Upstream is a reference for behaviour worth having, not a target to
-match. Most of it — the messaging gateway, the plugin surface, the fifty cloud providers — is
-deliberately out of scope.
+Everything a user needs is in [the book](./docs/README.md). The files at the repository root
+are the design record, listed under [The design record](#the-design-record): they say why each
+choice was made and what would overturn it, and a user never has to read them.
 
 ## What it is for
 
@@ -146,7 +149,7 @@ structural:
 
 | | |
 |---|---|
-| **Startup** | Bounded sessions mean *many* process launches. Python pays 1–3 s of interpreter and imports every time; a static binary pays ~10 ms. Under this architecture the advantage compounds per session. |
+| **Startup** | Bounded sessions mean *many* process launches. A Python agent pays 1–3 s of interpreter and imports every time; this binary starts in 0.8 ms median (50 launches of `hermit config`, Kitchen, 2026-09-25). Under this architecture the difference compounds per session. |
 | **Verification** | Checking what the model actually did — walking trees, hashing, diffing — happens every turn. That is real work, and native code is good at it. |
 | **Distribution** | One binary, versus a Python environment plus Node plus system dependencies. |
 
@@ -184,9 +187,9 @@ The evidence sits in three places:
 
 ## Building
 
-Requires a C++23 compiler, CMake 3.25+, and network access on first configure (dependencies are
-fetched at pinned versions rather than taken from the system — see [D3](./DECISIONS.md)). Verified
-on GCC 16.2.1 and clang 22.1.8.
+Requires Linux, a C++23 compiler (verified on GCC 16.2.1 and clang 22.1.8), CMake 3.25+, and
+network access on first configure: dependencies are fetched at pinned versions rather than
+taken from the system ([D3](./DECISIONS.md)).
 
 ```bash
 cmake -S . -B build -G Ninja
@@ -194,120 +197,42 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-With sanitizers:
+That produces `build/hermit`. There is no release or package yet ([DOCKET 1.4](./DOCKET.md)).
+The rest lives in the book: the sanitizer and link-time-optimized builds in
+[Building](./docs/10-building.md), every subcommand and flag in the
+[CLI reference](./docs/13-cli-reference.md), settings and their precedence in
+[Configuration](./docs/16-configuration.md), and the opt-in `shell` and `delete` tools in
+[Shell and Landlock](./docs/15-shell-and-landlock.md) and
+[Undo and backups](./docs/17-undo-and-backups.md).
 
-```bash
-cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DHERMIT_SANITIZE=ON
-cmake --build build-asan && ./build-asan/tests/hermit_tests
-```
+Maintainers track upstream Hermes Agent with `tools/parity`; the workflow is in
+[UPSTREAM-PARITY.md](./UPSTREAM-PARITY.md).
 
-With link-time optimization (smaller binary, see [PERFORMANCE.md](./PERFORMANCE.md); opt-in, not
-the default). Its own directory, like the sanitizer build — `HERMIT_LTO` is cached, so pointing
-this at `build` would quietly turn the plain build above into an LTO one and leave it that way:
+## The design record
 
-```bash
-cmake -S . -B build-lto -G Ninja -DHERMIT_LTO=ON
-cmake --build build-lto
-```
+| document | what it answers |
+|---|---|
+| [docs/](./docs/README.md) | **the book**: how to use Hermit — building, quickstart, choosing a model, the CLI, expectations, troubleshooting |
+| [REQUIREMENTS.md](./REQUIREMENTS.md) | what this must do, each requirement traced to a measured failure |
+| [SCOPE.md](./SCOPE.md) | what gets built, read, or ignored — and why |
+| [ROADMAP.md](./ROADMAP.md) | sequencing, and what must be settled before code |
+| [ROUTING.md](./ROUTING.md) | the tool surface: three tiers, the eight structural tools plus the opt-in `delete` and `shell`, who may call what |
+| [FLOW.md](./FLOW.md) | the same thing drawn: request path, one mutating call, the supervisor turn |
+| [FAQ.md](./FAQ.md) | the questions an evaluator asks first — shell, Python, "why not wait for better models" — each with what it concedes |
+| [DECISIONS.md](./DECISIONS.md) | the hard-to-reverse choices, and what would overturn each |
+| [parity.tsv](./parity.tsv) | machine-readable scope ledger; `tools/parity` reports drift |
+| [bench/fsops/](./bench/fsops/) | the evidence: 259 runs of local models doing filesystem work |
 
-The binary is a manual harness for the pieces that exist, not the product's CLI:
+**Scope in one line:** upstream is ~870k lines of non-test Python, and ~38k of it is in scope.
+The part that matters most — verification, backup, retry — has no upstream equivalent that these
+runs revealed. That last claim is inferred from behaviour, not from reading upstream's code; see
+[REQUIREMENTS.md](./REQUIREMENTS.md).
 
-```bash
-hermit resolve   --root DIR <path>...   # R1 path resolution
-hermit preflight --model NAME           # R9 model gates, against a live daemon
-hermit session   --model NAME           # context accounting, against a live model
-hermit agent     --root DIR --model NAME <instruction>   # the loop, end to end
-                 [--expect kind:path]...                 # R6 post-conditions, judged
-hermit config                           # every setting in force, and where it came from
-```
-
-`agent` is the whole turn: one instruction, the eight structural tools offered to a local model,
-one line of trace per turn and per call, and a summary that says which bound stopped it. Three
-bounds, not two: `--max-turns`, `--budget` wall-clock (R8), and a per-turn cap on how many calls
-one reply may make — the third is a runaway guard rather than a knob, and calls past it are
-refused rather than dropped, because a dropped call reads to the model as still outstanding. It
-prints, in so many words, what it did and did not check. After every turn it takes a hash diff of
-the whole tree and prints what actually moved, owing nothing to the model's reply (R6's
-observation half, `--no-verify` to skip it).
-
-Add `--shell` and a kernel-confined tool joins the menu ([D10](./DECISIONS.md)): the model
-can run an opaque shell command, still writable only inside `--root`, still killed at a wall-clock
-bound (`--shell-timeout`, default 60s, R8) — as a whole process group, so nothing it backgrounds
-outlives the kill. It refuses to start rather than silently run unconfined if this machine's own
-confinement probe cannot confirm the kernel is actually enforcing the ruleset:
-
-```bash
-hermit agent --root ~/scratch --model qwen35-agent --shell --shell-timeout 30 \
-  'Count the lines in every .md file in this folder and write the totals to counts.txt.'
-```
-
-Add `--delete` and the model may remove a file ([D19](./DECISIONS.md)): one it has already read
-or listed this session, one per call, its bytes preserved in the backup store before the name
-goes, so `hermit undo` can put it back. Off by default, and independent of `--shell` — with
-shell on and delete off, the only removal path the model has is `rm` under the confined shell,
-which is neither gated nor backed up, and `agent` prints a note saying so.
-
-State a post-condition with `--expect` and it prints a verdict too: each expectation in the order
-written, met or unmet or undecidable, decided from the tree and never from the reply. Exit 3 means
-something stated is undone. With nothing stated it stays report-only, because a clean stop plus an
-accurate changeset is evidence and not a verdict — and a command that implied otherwise would be
-the more useful lie.
-
-An expectation names a path exactly as the tree spells it from the root: no leading `/`, no `..`,
-and a symlink means the link rather than what it points at. Anything else is refused before the
-model is called, because a mis-spelled path is not a harmless typo here — it becomes a permanent
-`unmet` that R7 would hand back as a concrete failure to go and fix. A set that contradicts itself
-(`exists:x` beside `absent:x`) is refused for the same reason.
-
-```bash
-hermit agent --root ~/scratch --model qwen35-agent --max-turns 8 \
-  'Read notes.txt and tell me how many lines it has.'
-
-hermit agent --root ~/notes --model qwen35-agent \
-  --expect exists:falcon-index.md --expect preserved:notes.txt=notes.txt \
-  'Index every note that mentions Project Falcon.'
-```
-
-`resolve` shows how paths land against a sandbox root from a *different* working directory —
-the R1 failure made visible:
-
-```bash
-cd /tmp && "$OLDPWD/build/hermit" resolve --root ~/some/root note.txt ../../etc/passwd
-```
-
-`session` exists because the token estimate is the one thing no unit test can settle — there is
-no tokenizer in the process, so only the daemon can say whether the guess is conservative
-enough. Each turn prints what the session expected against what Ollama actually evaluated.
-Run it with a small window to watch the session trim history *deliberately*, which is the
-whole point: left to itself the server discards the middle of an over-long prompt, keeps the
-system message, and says nothing. (Trimming, not compaction — `session` verifies no tree, so
-there is nothing to rebuild a window from. That is `agent`'s path.)
-
-```bash
-hermit session --model gemma31-agent --max-num-ctx 2048
-```
-
-Settings come from four places, in increasing precedence: **defaults < `--config` file <
-environment < flags**. There is deliberately no default sandbox root and no implicit search for
-a config file — either one would be an inferred root, which is R1's original bug. `hermit
-config` prints the resolved set with the origin of each value:
-
-```bash
-hermit config --config ./hermit.json --model qwen35-agent
-```
-
-## Working with upstream
-
-The Python reference lives at `~/Source/hermes-upstream` (blobless, `main` only, 261 MB). It is
-not part of this repo and is disposable — it re-clones from GitHub in ~11 s.
-
-```bash
-hermes-upstream-sync      # refresh the reference, print what changed
-tools/parity              # what has drifted in the modules we care about
-tools/parity conversation_loop   # the specific commits behind one module
-```
-
-Set `$HERMIT_REF_REPO` if the reference lives elsewhere.
+Built in **C++** around **local inference** — Ollama today, vLLM from [D9](./DECISIONS.md).
+Inspired by [NousResearch Hermes Agent](https://github.com/nousresearch/hermes-agent) (Python),
+but **not a port of it**. Upstream is a reference for behaviour worth having, not a target to
+match. Most of it — the messaging gateway, the plugin surface, the fifty cloud providers — is
+deliberately out of scope.
 
 ## Where this lives
 

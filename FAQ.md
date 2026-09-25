@@ -53,12 +53,14 @@ surface by default ([ROUTING.md](./ROUTING.md) §8).
 **For most MCP servers, Python is the right answer** — mature SDK, faster to write, more
 people can maintain it. Three things make this case different.
 
-- **Deployment.** One static binary versus a Python environment on every developer machine:
+- **Deployment.** One binary versus a Python environment on every developer machine:
   no virtualenv, no dependency resolution, no conflict with the system interpreter.
 - **Startup compounds here specifically.** The architecture is *many bounded sessions*, not
   one long-running process, because that is what the tournaments concluded works. An
-  interpreter pays one to three seconds per launch; a static binary pays about ten
-  milliseconds. Multiply by every session.
+  interpreter loading an agent's imports pays one to three seconds per launch; this binary
+  starts in 0.8 ms median (50 launches, Kitchen, 2026-09-25). *(Corrected 2026-09-25: this
+  answer said "a static binary pays about ten milliseconds". The binary is dynamically
+  linked, and the measured figure is lower.)* Multiply by every session.
 - **The guarantee is structural rather than conventional.** The sandbox path type has a
   private constructor — only the resolver can create one — so a tool that tried to name a
   file outside the root *fails to compile*. The tier boundary works the same way: the core

@@ -138,8 +138,7 @@ to compete with is one command to install.
 
 **Shape.** A `v0.1.0` tag on a commit the benchmark numbers were collected against, or the
 first commit after with a clean suite. A release build recipe that is reproducible on a
-fresh CachyOS/Arch machine: static where the FAQ already claims static (its ~10 ms launch
-figure), `HERMIT_LTO` on, sanitizers off, a checksum file signed with the operator's key. A
+fresh CachyOS/Arch machine: `HERMIT_LTO` on, sanitizers off, a checksum file signed with the operator's key. A
 PKGBUILD for Arch as the first packaging target, since that is the only platform in scope.
 A one-page `docs/10-building.md` addition: "install a release" above "build from source".
 Versioning rule written once: the tag is the only version, and the binary prints it.
@@ -151,7 +150,11 @@ starts with an install rather than a build.
 
 **Size.** small for the first tag and checksum; medium with the PKGBUILD. **Needs.** none.
 
-**Open.** Whether a release needs a decision entry for the versioning rule. Probably one
+**Open.** Whether the release binary should be static. This entry first said "static where the
+FAQ already claims static"; that claim was wrong (the binary is dynamically linked, and starts
+in 0.8 ms median, measured 2026-09-25), so static linking is a choice to argue on its own
+merits (distribution, not startup), not a promise to keep. Whether a release needs a decision
+entry for the versioning rule. Probably one
 paragraph in D16's neighbourhood, not a new D. The tag must land on a commit the benchmark
 numbers were collected against — see 1.13, which is why the commit map comes first.
 
@@ -688,8 +691,8 @@ their length is their evidence. The README part touches claims and waits for 1.2
 **Progress, 2026-09-25.** The correctness half is done: eight verified errors fixed across
 chapters 1, 10, 12, 13, 17, 18, 20 and 31, one broken link, and one claim replaced by a
 measurement. The binary is dynamically linked, not static, and starts in 0.8 ms median, not
-~10 ms. The same "static, ~10 ms" wording stands in README.md and FAQ.md and waits for the
-sign-off diff. Friction the audit found, all judgment and none of it done:
+~10 ms. README.md and FAQ.md carried the same wording; the sign-off diff that reframes the
+README (1.22) corrects both, and adds the "Start here" routing that is this item's second half. Friction the audit found, all judgment and none of it done:
 
 - no sample verdict (ch. 14) and no sample `undo` listing (ch. 17), so the reader cannot
   picture the output before running it;
