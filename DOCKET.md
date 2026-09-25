@@ -726,6 +726,49 @@ retracted in public.
 
 **Size.** medium (mostly waiting). **Needs.** none.
 
+### 1.31 A terminal front end — nice to have, not scheduled
+
+**Recorded 2026-09-25 at the operator's request as a future idea only.** It is deliberately
+outside Part 3's order and waits behind the product track.
+
+**Why.** Watching a run is hard today. In the 1.15 gate run the agent's log was empty for
+25 minutes, because output to a file is block-buffered, and the only live signal was listing
+files in the sandbox root. The verdict, changeset and retries print as plain lines, and
+the undo store is list-first. All of it is structured data shown as unstructured text.
+
+**Shape.** Terminal only, in order of value:
+
+1. **Formatted run output.** Per-turn panels, tool calls marked as passed or refused, the
+   changeset as a tree (created, modified, removed), the verdict as a table. It switches
+   off when stdout is not a terminal, honours `NO_COLOR`, and keeps `--plain`, because
+   hermit-bench parses today's plain output.
+2. **`hermit watch`.** A separate viewer, run in another pane, that follows a run as it
+   happens: turn N of M, elapsed against budget, tokens, the last call, files changed. A
+   separate process because D1 keeps the supervisor on one blocking call with no streaming
+   (streaming is set aside above), so the supervisor itself cannot redraw during a
+   60-second model call. The viewer reads the structured trace (1.1), so it cannot be
+   built before 1.1.
+3. **A launcher and a config view,** after `doctor` (1.23): pick a model from those that
+   pass preflight, pick a root, state expectations (1.25's shortcuts), run one bounded
+   job. A form that builds a job, not a conversation.
+
+**Not in scope:** a free-form chat REPL, which is set aside below because it puts the human
+back on the critical path. **Also considered: a GUI.** It has the same shape, a viewer and
+not a controller. The best fit is a self-contained HTML report written per run, because a
+local web server would be the listening port D7 rules out. For the MCP direction, the
+calling IDE already renders Hermit's results, so a GUI serves only direct CLI users.
+
+**Done when.** Formatted output and `hermit watch` ship, and hermit-bench's parsing is
+unaffected with the formatting on.
+
+**Struck if.** 1.30 finds users don't run `hermit agent` directly, only through an IDE.
+Then the terminal front end serves nobody.
+
+**Size.** medium for 1 and 2; large with 3. **Needs.** none to build; 9B tier to demo.
+**Build notes.** Plain ANSI codes cover step 1 with no new dependency. An interactive TUI
+in C++ would most likely use FTXUI (MIT), pinned per D3 and kept out of the core `hermit`
+binary.
+
 ---
 
 ## 2 · Considered and set aside
@@ -777,8 +820,9 @@ to be argued with, not a plan.
 | 14 | Fuzzing (1.6) | Strengthens the claims the README leads with; benefits from CI existing | medium |
 
 Unscheduled by design: Tier 1 tools (1.8) and multi-root (1.10) wait for a caller and a
-workload respectively. Kitchen-gated items (retry quality gating, E6 calibration) live in
-ROADMAP and hermit-bench, not here.
+workload respectively. The terminal front end (1.31) is a nice-to-have and waits behind
+the product track, and `hermit watch` cannot start before the trace (1.1). Kitchen-gated
+items (retry quality gating, E6 calibration) live in ROADMAP and hermit-bench, not here.
 
 The **discovery cluster (1.15–1.21)** is also deliberately not in this order: it is a
 dependency chain argued in [bench/discovery/DESIGN.md](./bench/discovery/DESIGN.md), to be
